@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Test OboeCore
+        run: swift test --package-path Packages/OboeCore
+
+      - name: Validate bundled JLPT library
+        run: |
+          python3 Scripts/build_jlpt_library.py \
+            --validate-existing \
+            --output OboeApp/Resources/JLPT/jlpt-library.sqlite \
+            --notice OboeApp/Resources/JLPT/NOTICE.txt
+
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run navigation smoke test
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            test

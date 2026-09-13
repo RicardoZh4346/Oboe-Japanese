@@ -1,0 +1,13 @@
+{
+  "datasetVersion": "2026.09.13-1",
+  "openJLPTRevision": "c42fd9fa3777bfc1775446f7c418d549dfd6e4cf",
+  "tomoshiVersion": "v2026-09-02",
+  "byLevel": {
+    "N5": 662,
+    "N4": 632,
+    "N3": 1784,
+    "N2": 1793,
+    "N1": 3463
+  },
+  "total": 8334
+}

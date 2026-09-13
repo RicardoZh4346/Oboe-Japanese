@@ -1,0 +1,983 @@
+import CoreFoundation
+import CryptoKit
+import Foundation
+import GRDB
+import OboeDomain
+
+public struct PortableBackupPreparationLimits: Equatable, Sendable {
+    public let maximumFileBytes: Int64
+    public let maximumLineBytes: Int
+    public let maximumRecordCount: Int
+    public let maximumStringBytes: Int
+
+    public init(
+        maximumFileBytes: Int64 = 200 * 1_024 * 1_024,
+        maximumLineBytes: Int = 1_024 * 1_024,
+        maximumRecordCount: Int = 1_000_000,
+        maximumStringBytes: Int = 512 * 1_024
+    ) {
+        precondition(maximumFileBytes > 0)
+        precondition(maximumLineBytes > 0)
+        precondition(maximumRecordCount > 0)
+        precondition(maximumStringBytes > 0)
+        self.maximumFileBytes = maximumFileBytes
+        self.maximumLineBytes = maximumLineBytes
+        self.maximumRecordCount = maximumRecordCount
+        self.maximumStringBytes = maximumStringBytes
+    }
+}
+
+public struct PortableBackupDataSummary: Equatable, Sendable {
+    public let recordCounts: [String: Int]
+
+    public init(recordCounts: [String: Int]) {
+        self.recordCounts = recordCounts
+    }
+
+    public var deckCount: Int { recordCounts["deck", default: 0] }
+    public var noteCount: Int { recordCounts["note", default: 0] }
+    public var cardCount: Int { recordCounts["card", default: 0] }
+    public var reviewCount: Int { recordCounts["review", default: 0] }
+    public var draftCount: Int { recordCounts["draft", default: 0] }
+}
+
+public struct PreparedRestoration: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let temporaryDatabaseURL: URL
+    public let sourceFilename: String
+    public let sourceFormatVersion: Int
+    public let preparedFormatVersion: Int
+    public let sourceAppVersion: String
+    public let exportedAt: Date
+    public let backup: PortableBackupDataSummary
+    public let current: PortableBackupDataSummary
+
+    public init(
+        id: UUID,
+        temporaryDatabaseURL: URL,
+        sourceFilename: String,
+        sourceFormatVersion: Int,
+        preparedFormatVersion: Int,
+        sourceAppVersion: String,
+        exportedAt: Date,
+        backup: PortableBackupDataSummary,
+        current: PortableBackupDataSummary
+    ) {
+        self.id = id
+        self.temporaryDatabaseURL = temporaryDatabaseURL
+        self.sourceFilename = sourceFilename
+        self.sourceFormatVersion = sourceFormatVersion
+        self.preparedFormatVersion = preparedFormatVersion
+        self.sourceAppVersion = sourceAppVersion
+        self.exportedAt = exportedAt
+        self.backup = backup
+        self.current = current
+    }
+}
+
+public enum PortableBackupPreparationError: Error, Equatable, Sendable {
+    case fileTooLarge(actual: Int64, limit: Int64)
+    case emptyFile
+    case lineTooLarge(line: Int, limit: Int)
+    case missingFinalLineFeed
+    case invalidLineEnding(line: Int)
+    case invalidUTF8(line: Int)
+    case invalidJSON(line: Int)
+    case invalidManifest(String)
+    case unsupportedFormatVersion(Int)
+    case futureFormatVersion(Int)
+    case tooManyRecords(declared: Int, limit: Int)
+    case unexpectedRecordType(line: Int, type: String)
+    case invalidRecordOrder(line: Int, type: String)
+    case invalidRecord(line: Int, reason: String)
+    case missingFooter
+    case trailingContentAfterFooter
+    case countMismatch(type: String, expected: Int, actual: Int)
+    case invalidChecksum
+    case unsupportedAlgorithmVersion(String)
+    case databaseValidation(String)
+}
+
+extension PortableBackupPreparationError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .fileTooLarge(actual, limit):
+            "备份文件过大（\(actual) 字节，上限 \(limit) 字节）。"
+        case .emptyFile:
+            "备份文件为空。"
+        case let .lineTooLarge(line, limit):
+            "备份第 \(line) 行超过 \(limit) 字节上限。"
+        case .missingFinalLineFeed:
+            "备份没有使用规定的 LF 文件结尾。"
+        case let .invalidLineEnding(line):
+            "备份第 \(line) 行不是规定的 LF 行尾。"
+        case let .invalidUTF8(line):
+            "备份第 \(line) 行不是有效 UTF-8。"
+        case let .invalidJSON(line):
+            "备份第 \(line) 行不是有效 JSON 对象。"
+        case let .invalidManifest(reason):
+            "备份 manifest 无效：\(reason)"
+        case let .unsupportedFormatVersion(version):
+            "不支持备份格式版本 \(version)。"
+        case let .futureFormatVersion(version):
+            "备份格式版本 \(version) 比当前应用新，请升级 Oboe。"
+        case let .tooManyRecords(declared, limit):
+            "备份声明 \(declared) 条记录，超过 \(limit) 条上限。"
+        case let .unexpectedRecordType(line, type):
+            "备份第 \(line) 行包含未知记录类型 \(type)。"
+        case let .invalidRecordOrder(line, type):
+            "备份第 \(line) 行的 \(type) 记录顺序无效。"
+        case let .invalidRecord(line, reason):
+            "备份第 \(line) 行无效：\(reason)"
+        case .missingFooter:
+            "备份缺少校验尾行。"
+        case .trailingContentAfterFooter:
+            "备份校验尾行之后仍有内容。"
+        case let .countMismatch(type, expected, actual):
+            "备份 \(type) 数量不符（声明 \(expected)，实际 \(actual)）。"
+        case .invalidChecksum:
+            "备份 SHA-256 校验失败，文件可能已损坏。"
+        case let .unsupportedAlgorithmVersion(version):
+            "不支持调度算法版本 \(version)。"
+        case let .databaseValidation(reason):
+            "临时恢复库校验失败：\(reason)"
+        }
+    }
+}
+
+public actor PortableBackupRestorationPreparer {
+    private let currentDatabase: OboeDatabase
+    private let workingDirectoryURL: URL
+    private let limits: PortableBackupPreparationLimits
+
+    public init(
+        currentDatabase: OboeDatabase,
+        workingDirectoryURL: URL,
+        limits: PortableBackupPreparationLimits = PortableBackupPreparationLimits()
+    ) {
+        self.currentDatabase = currentDatabase
+        self.workingDirectoryURL = workingDirectoryURL
+        self.limits = limits
+    }
+
+    public func prepare(fileURL: URL) async throws -> PreparedRestoration {
+        try Task.checkCancellation()
+        let size = try Self.fileSize(at: fileURL)
+        guard size <= limits.maximumFileBytes else {
+            throw PortableBackupPreparationError.fileTooLarge(
+                actual: size,
+                limit: limits.maximumFileBytes
+            )
+        }
+        guard size > 0 else {
+            throw PortableBackupPreparationError.emptyFile
+        }
+
+        try FileManager.default.createDirectory(
+            at: workingDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try removeAbandonedPreparationFiles()
+
+        let preparationID = UUID()
+        let pendingURL = workingDirectoryURL.appendingPathComponent(
+            ".preparing-\(preparationID.uuidString.lowercased()).sqlite"
+        )
+        let preparedURL = workingDirectoryURL.appendingPathComponent(
+            "prepared-\(preparationID.uuidString.lowercased()).sqlite"
+        )
+        let temporaryDatabase = try OboeDatabase(path: pendingURL.path)
+
+        do {
+            let manifest = try await temporaryDatabase.pool.write { db in
+                try Self.parseAndImport(
+                    fileURL: fileURL,
+                    into: db,
+                    limits: limits
+                )
+            }
+            try Task.checkCancellation()
+            let backupSummary = try await temporaryDatabase.pool.read { db in
+                try Self.validateAndSummarizeImportedDatabase(db)
+            }
+            let currentSummary = try await currentDatabase.pool.read { db in
+                try Self.summarizeDatabase(db)
+            }
+            let preparedDatabase = try DatabaseQueue(path: preparedURL.path)
+            do {
+                try temporaryDatabase.pool.backup(to: preparedDatabase)
+                try await preparedDatabase.writeWithoutTransaction { db in
+                    try db.execute(sql: "PRAGMA journal_mode = DELETE")
+                }
+                _ = try await preparedDatabase.read { db in
+                    try Self.validateAndSummarizeImportedDatabase(db)
+                }
+                try preparedDatabase.close()
+                try Task.checkCancellation()
+            } catch {
+                try? preparedDatabase.close()
+                throw error
+            }
+            try temporaryDatabase.close()
+            Self.removeDatabaseFiles(at: pendingURL)
+
+            return PreparedRestoration(
+                id: preparationID,
+                temporaryDatabaseURL: preparedURL,
+                sourceFilename: fileURL.lastPathComponent,
+                sourceFormatVersion: manifest.sourceFormatVersion,
+                preparedFormatVersion: PortableBackupFormat.currentVersion,
+                sourceAppVersion: manifest.appVersion,
+                exportedAt: manifest.exportedAt,
+                backup: backupSummary,
+                current: currentSummary
+            )
+        } catch {
+            try? temporaryDatabase.close()
+            Self.removeDatabaseFiles(at: pendingURL)
+            Self.removeDatabaseFiles(at: preparedURL)
+            throw error
+        }
+    }
+
+    public func discard(_ preparation: PreparedRestoration) throws {
+        guard preparation.temporaryDatabaseURL.deletingLastPathComponent().standardizedFileURL
+                == workingDirectoryURL.standardizedFileURL,
+              preparation.temporaryDatabaseURL.lastPathComponent.hasPrefix("prepared-") else {
+            return
+        }
+        Self.removeDatabaseFiles(at: preparation.temporaryDatabaseURL)
+    }
+
+    private func removeAbandonedPreparationFiles() throws {
+        let fileManager = FileManager.default
+        let urls = try fileManager.contentsOfDirectory(
+            at: workingDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        for url in urls where url.lastPathComponent.hasPrefix("prepared-") {
+            Self.removeDatabaseFiles(at: url)
+        }
+        // `.skipsHiddenFiles` intentionally omits in-progress files, so scan the
+        // names explicitly as well to clean up a preparation interrupted by exit.
+        let allURLs = try fileManager.contentsOfDirectory(
+            at: workingDirectoryURL,
+            includingPropertiesForKeys: nil
+        )
+        for url in allURLs where url.lastPathComponent.hasPrefix(".preparing-") {
+            Self.removeDatabaseFiles(at: url)
+        }
+    }
+}
+
+private extension PortableBackupRestorationPreparer {
+    struct ParsedManifest: Sendable {
+        let sourceFormatVersion: Int
+        let appVersion: String
+        let exportedAt: Date
+        let counts: [String: Int]
+    }
+
+    struct ColumnMetadata: Sendable {
+        enum Storage: Sendable {
+            case integer
+            case real
+            case text
+        }
+
+        let storage: Storage
+        let isRequired: Bool
+    }
+
+    struct BoundedLineReader {
+        private let handle: FileHandle
+        private let maximumLineBytes: Int
+        private var buffer = Data()
+        private var reachedEnd = false
+
+        init(url: URL, maximumLineBytes: Int) throws {
+            handle = try FileHandle(forReadingFrom: url)
+            self.maximumLineBytes = maximumLineBytes
+        }
+
+        func close() {
+            try? handle.close()
+        }
+
+        mutating func nextLine(lineNumber: Int) throws -> Data? {
+            while true {
+                if let newline = buffer.firstIndex(of: 0x0A) {
+                    let end = buffer.index(after: newline)
+                    let line = Data(buffer[..<end])
+                    buffer.removeSubrange(..<end)
+                    guard line.count <= maximumLineBytes else {
+                        throw PortableBackupPreparationError.lineTooLarge(
+                            line: lineNumber,
+                            limit: maximumLineBytes
+                        )
+                    }
+                    return line
+                }
+                if reachedEnd {
+                    guard buffer.isEmpty else {
+                        throw PortableBackupPreparationError.missingFinalLineFeed
+                    }
+                    return nil
+                }
+                let chunk = try handle.read(upToCount: 64 * 1_024) ?? Data()
+                if chunk.isEmpty {
+                    reachedEnd = true
+                } else {
+                    buffer.append(chunk)
+                    guard buffer.firstIndex(of: 0x0A) != nil
+                            || buffer.count <= maximumLineBytes else {
+                        throw PortableBackupPreparationError.lineTooLarge(
+                            line: lineNumber,
+                            limit: maximumLineBytes
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    static let manifestKeys: Set<String> = [
+        "recordType", "format", "formatVersion", "appVersion", "exportedAt",
+        "encoding", "lineEnding", "checksumAlgorithm", "recordOrder", "counts"
+    ]
+    static let footerKeys: Set<String> = ["recordType", "checksumAlgorithm", "checksum"]
+    static let uuidColumns: Set<String> = [
+        "decks.id", "notes.id", "notes.deck_id", "examples.id", "examples.note_id",
+        "tags.id", "note_tags.note_id", "note_tags.tag_id", "scheduler_profiles.id",
+        "cards.id", "cards.note_id", "cards.profile_id", "study_days.id",
+        "daily_tasks.study_day_id", "daily_tasks.card_id", "review_logs.id",
+        "review_logs.event_id", "review_logs.card_id", "review_logs.card_key",
+        "review_logs.note_id", "review_logs.deck_id_at_review", "review_logs.study_day_id",
+        "review_logs.profile_id", "drafts.id"
+    ]
+
+    static func fileSize(at url: URL) throws -> Int64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    static func parseAndImport(
+        fileURL: URL,
+        into db: Database,
+        limits: PortableBackupPreparationLimits
+    ) throws -> ParsedManifest {
+        var reader = try BoundedLineReader(
+            url: fileURL,
+            maximumLineBytes: limits.maximumLineBytes
+        )
+        defer { reader.close() }
+        var lineNumber = 1
+        guard let manifestLine = try reader.nextLine(lineNumber: lineNumber) else {
+            throw PortableBackupPreparationError.emptyFile
+        }
+        let manifestObject = try jsonObject(from: manifestLine, lineNumber: lineNumber)
+        let manifest = try parseManifest(manifestObject, limits: limits)
+        let sourceSpecifications = manifest.sourceFormatVersion == 1
+            ? PortableBackupFormatV1.tableSpecifications
+            : PortableBackupFormatV2.tableSpecifications
+        let sourceRecordTypes = sourceSpecifications.map(\.recordType)
+        let sourceSpecificationByType = Dictionary(
+            uniqueKeysWithValues: sourceSpecifications.map { ($0.recordType, $0) }
+        )
+        var hasher = SHA256()
+        hasher.update(data: manifestLine)
+
+        let metadata = try loadColumnMetadata(in: db)
+        var actualCounts = Dictionary(
+            uniqueKeysWithValues: sourceRecordTypes.map { ($0, 0) }
+        )
+        var lastRecordIndex = -1
+        var actualTotal = 0
+
+        while true {
+            try Task.checkCancellation()
+            lineNumber += 1
+            guard let line = try reader.nextLine(lineNumber: lineNumber) else {
+                throw PortableBackupPreparationError.missingFooter
+            }
+            let object = try jsonObject(from: line, lineNumber: lineNumber)
+            let recordType = try requiredString(
+                object["recordType"],
+                field: "recordType",
+                context: "第 \(lineNumber) 行"
+            )
+            if recordType == "footer" {
+                guard try reader.nextLine(lineNumber: lineNumber + 1) == nil else {
+                    throw PortableBackupPreparationError.trailingContentAfterFooter
+                }
+                try validateFooter(object, checksum: hasher.finalize())
+                for type in sourceRecordTypes {
+                    let expected = manifest.counts[type, default: 0]
+                    let actual = actualCounts[type, default: 0]
+                    guard expected == actual else {
+                        throw PortableBackupPreparationError.countMismatch(
+                            type: type,
+                            expected: expected,
+                            actual: actual
+                        )
+                    }
+                }
+                return manifest
+            }
+
+            guard let sourceSpecification = sourceSpecificationByType[recordType],
+                  let currentSpecification = PortableBackupFormatV2.specificationByRecordType[recordType],
+                  let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
+                throw PortableBackupPreparationError.unexpectedRecordType(
+                    line: lineNumber,
+                    type: recordType
+                )
+            }
+            guard recordIndex >= lastRecordIndex else {
+                throw PortableBackupPreparationError.invalidRecordOrder(
+                    line: lineNumber,
+                    type: recordType
+                )
+            }
+            lastRecordIndex = recordIndex
+            actualTotal += 1
+            guard actualTotal <= limits.maximumRecordCount else {
+                throw PortableBackupPreparationError.tooManyRecords(
+                    declared: actualTotal,
+                    limit: limits.maximumRecordCount
+                )
+            }
+
+            hasher.update(data: line)
+            guard Set(object.keys) == Set(sourceSpecification.columns).union(["recordType"]) else {
+                throw PortableBackupPreparationError.invalidRecord(
+                    line: lineNumber,
+                    reason: "\(recordType) 字段集合不符合 v\(manifest.sourceFormatVersion)。"
+                )
+            }
+            let migratedObject = try migrateRecordToCurrentFormat(
+                object,
+                sourceVersion: manifest.sourceFormatVersion
+            )
+            do {
+                try insert(
+                    migratedObject,
+                    specification: currentSpecification,
+                    metadata: metadata[currentSpecification.tableName, default: [:]],
+                    lineNumber: lineNumber,
+                    limits: limits,
+                    in: db
+                )
+            } catch let error as PortableBackupPreparationError {
+                throw error
+            } catch {
+                throw PortableBackupPreparationError.invalidRecord(
+                    line: lineNumber,
+                    reason: String(describing: error)
+                )
+            }
+            actualCounts[recordType, default: 0] += 1
+        }
+    }
+
+    static func parseManifest(
+        _ object: [String: Any],
+        limits: PortableBackupPreparationLimits
+    ) throws -> ParsedManifest {
+        guard Set(object.keys) == manifestKeys else {
+            throw PortableBackupPreparationError.invalidManifest("字段集合不符合 v1。")
+        }
+        guard try requiredString(object["recordType"], field: "recordType", context: "manifest")
+                == "manifest",
+              try requiredString(object["format"], field: "format", context: "manifest")
+                == PortableBackupFormat.identifier,
+              try requiredString(object["encoding"], field: "encoding", context: "manifest")
+                == "utf-8",
+              try requiredString(object["lineEnding"], field: "lineEnding", context: "manifest")
+                == "lf",
+              try requiredString(
+                object["checksumAlgorithm"],
+                field: "checksumAlgorithm",
+                context: "manifest"
+              ) == PortableBackupFormat.checksumAlgorithm else {
+            throw PortableBackupPreparationError.invalidManifest("格式标识或编码约定不受支持。")
+        }
+
+        let version = try requiredInteger(
+            object["formatVersion"],
+            field: "formatVersion",
+            context: "manifest"
+        )
+        try validateMigrationPath(from: version)
+        let appVersion = try requiredString(
+            object["appVersion"],
+            field: "appVersion",
+            context: "manifest"
+        )
+        try validateStringLength(appVersion, field: "appVersion", limits: limits)
+        let exportedAtString = try requiredString(
+            object["exportedAt"],
+            field: "exportedAt",
+            context: "manifest"
+        )
+        try validateStringLength(exportedAtString, field: "exportedAt", limits: limits)
+        guard let exportedAt = iso8601Date(from: exportedAtString) else {
+            throw PortableBackupPreparationError.invalidManifest("exportedAt 不是有效 UTC ISO 8601。")
+        }
+        let expectedRecordTypes = version == 1
+            ? PortableBackupFormatV1.recordTypes
+            : PortableBackupFormatV2.recordTypes
+        guard let recordOrder = object["recordOrder"] as? [String],
+              recordOrder == expectedRecordTypes else {
+            throw PortableBackupPreparationError.invalidManifest("recordOrder 不符合 v\(version)。")
+        }
+        guard let rawCounts = object["counts"] as? [String: Any],
+              Set(rawCounts.keys) == Set(expectedRecordTypes) else {
+            throw PortableBackupPreparationError.invalidManifest("counts 未完整列出 v\(version) 记录类型。")
+        }
+        var counts: [String: Int] = [:]
+        var total = 0
+        for type in expectedRecordTypes {
+            let count = try requiredInteger(rawCounts[type], field: type, context: "counts")
+            guard count >= 0 else {
+                throw PortableBackupPreparationError.invalidManifest("\(type) 数量不能为负。")
+            }
+            let (newTotal, overflow) = total.addingReportingOverflow(count)
+            guard !overflow else {
+                throw PortableBackupPreparationError.invalidManifest("记录总数溢出。")
+            }
+            total = newTotal
+            counts[type] = count
+        }
+        guard total <= limits.maximumRecordCount else {
+            throw PortableBackupPreparationError.tooManyRecords(
+                declared: total,
+                limit: limits.maximumRecordCount
+            )
+        }
+        return ParsedManifest(
+            sourceFormatVersion: version,
+            appVersion: appVersion,
+            exportedAt: exportedAt,
+            counts: counts
+        )
+    }
+
+    static func validateMigrationPath(from version: Int) throws {
+        if version > PortableBackupFormat.currentVersion {
+            throw PortableBackupPreparationError.futureFormatVersion(version)
+        }
+        guard version == 1 || version == 2 else {
+            throw PortableBackupPreparationError.unsupportedFormatVersion(version)
+        }
+    }
+
+    static func migrateRecordToCurrentFormat(
+        _ object: [String: Any],
+        sourceVersion: Int
+    ) throws -> [String: Any] {
+        try validateMigrationPath(from: sourceVersion)
+        guard sourceVersion == 1, object["recordType"] as? String == "note" else {
+            return object
+        }
+        var migrated = object
+        migrated["source_ref"] = NSNull()
+        return migrated
+    }
+
+    static func validateFooter(_ object: [String: Any], checksum: SHA256.Digest) throws {
+        guard Set(object.keys) == footerKeys,
+              try requiredString(object["recordType"], field: "recordType", context: "footer")
+                == "footer",
+              try requiredString(
+                object["checksumAlgorithm"],
+                field: "checksumAlgorithm",
+                context: "footer"
+              ) == PortableBackupFormat.checksumAlgorithm else {
+            throw PortableBackupPreparationError.invalidChecksum
+        }
+        let expected = checksum.map { String(format: "%02x", $0) }.joined()
+        let actual = try requiredString(object["checksum"], field: "checksum", context: "footer")
+        guard actual.count == 64, actual == expected else {
+            throw PortableBackupPreparationError.invalidChecksum
+        }
+    }
+
+    static func jsonObject(from line: Data, lineNumber: Int) throws -> [String: Any] {
+        guard line.last == 0x0A else {
+            throw PortableBackupPreparationError.missingFinalLineFeed
+        }
+        let payload = line.dropLast()
+        guard payload.last != 0x0D else {
+            throw PortableBackupPreparationError.invalidLineEnding(line: lineNumber)
+        }
+        guard String(data: payload, encoding: .utf8) != nil else {
+            throw PortableBackupPreparationError.invalidUTF8(line: lineNumber)
+        }
+        do {
+            guard let object = try JSONSerialization.jsonObject(with: Data(payload))
+                    as? [String: Any] else {
+                throw PortableBackupPreparationError.invalidJSON(line: lineNumber)
+            }
+            return object
+        } catch let error as PortableBackupPreparationError {
+            throw error
+        } catch {
+            throw PortableBackupPreparationError.invalidJSON(line: lineNumber)
+        }
+    }
+
+    static func loadColumnMetadata(
+        in db: Database
+    ) throws -> [String: [String: ColumnMetadata]] {
+        var result: [String: [String: ColumnMetadata]] = [:]
+        for specification in PortableBackupFormatV2.tableSpecifications {
+            let rows = try Row.fetchAll(
+                db,
+                sql: "PRAGMA table_info(\(specification.tableName))"
+            )
+            var columns: [String: ColumnMetadata] = [:]
+            for row in rows {
+                let name: String = row["name"]
+                let declaredType: String = row["type"]
+                let storage: ColumnMetadata.Storage
+                switch declaredType.uppercased() {
+                case "INTEGER": storage = .integer
+                case "REAL": storage = .real
+                case "TEXT": storage = .text
+                default:
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "无法识别 \(specification.tableName).\(name) 的字段类型。"
+                    )
+                }
+                columns[name] = ColumnMetadata(
+                    storage: storage,
+                    isRequired: (row["notnull"] as Int) == 1
+                )
+            }
+            result[specification.tableName] = columns
+        }
+        return result
+    }
+
+    static func insert(
+        _ object: [String: Any],
+        specification: PortableBackupTableSpecification,
+        metadata: [String: ColumnMetadata],
+        lineNumber: Int,
+        limits: PortableBackupPreparationLimits,
+        in db: Database
+    ) throws {
+        let expectedKeys = Set(specification.columns).union(["recordType"])
+        guard Set(object.keys) == expectedKeys else {
+            throw PortableBackupPreparationError.invalidRecord(
+                line: lineNumber,
+                reason: "\(specification.recordType) 字段集合不符合 v1。"
+            )
+        }
+        var values: [DatabaseValue] = []
+        values.reserveCapacity(specification.columns.count)
+        for column in specification.columns {
+            guard let columnMetadata = metadata[column] else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "临时库缺少 \(specification.tableName).\(column)。"
+                )
+            }
+            let value = try databaseValue(
+                object[column] ?? NSNull(),
+                table: specification.tableName,
+                column: column,
+                metadata: columnMetadata,
+                lineNumber: lineNumber,
+                limits: limits
+            )
+            values.append(value)
+        }
+
+        let placeholders = Array(repeating: "?", count: values.count).joined(separator: ", ")
+        try db.execute(
+            sql: "INSERT INTO \(specification.tableName) "
+                + "(\(specification.columns.joined(separator: ", "))) VALUES (\(placeholders))",
+            arguments: StatementArguments(values)
+        )
+    }
+
+    static func databaseValue(
+        _ rawValue: Any,
+        table: String,
+        column: String,
+        metadata: ColumnMetadata,
+        lineNumber: Int,
+        limits: PortableBackupPreparationLimits
+    ) throws -> DatabaseValue {
+        if rawValue is NSNull {
+            guard !metadata.isRequired else {
+                throw PortableBackupPreparationError.invalidRecord(
+                    line: lineNumber,
+                    reason: "\(column) 不能为空。"
+                )
+            }
+            return .null
+        }
+
+        switch metadata.storage {
+        case .text:
+            guard let value = rawValue as? String else {
+                throw typeError(lineNumber: lineNumber, column: column, expected: "字符串")
+            }
+            try validateStringLength(value, field: column, limits: limits, line: lineNumber)
+            if uuidColumns.contains("\(table).\(column)") {
+                guard let uuid = UUID(uuidString: value),
+                      uuid.uuidString.lowercased() == value else {
+                    throw PortableBackupPreparationError.invalidRecord(
+                        line: lineNumber,
+                        reason: "\(column) 不是规范小写 UUID。"
+                    )
+                }
+            }
+            return value.databaseValue
+        case .integer:
+            let value = try jsonInteger(rawValue, lineNumber: lineNumber, field: column)
+            return value.databaseValue
+        case .real:
+            guard let number = rawValue as? NSNumber,
+                  CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  number.doubleValue.isFinite else {
+                throw typeError(lineNumber: lineNumber, column: column, expected: "有限数字")
+            }
+            return number.doubleValue.databaseValue
+        }
+    }
+
+    static func validateAndSummarizeImportedDatabase(
+        _ db: Database
+    ) throws -> PortableBackupDataSummary {
+        let quickCheck = try String.fetchAll(db, sql: "PRAGMA quick_check")
+        guard quickCheck == ["ok"] else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "SQLite quick_check: \(quickCheck.joined(separator: ", "))"
+            )
+        }
+        let foreignKeyViolations = try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM pragma_foreign_key_check"
+        ) ?? 0
+        guard foreignKeyViolations == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(foreignKeyViolations) 个外键错误。"
+            )
+        }
+        try validateTimeZones(in: db)
+        try validateScheduling(in: db)
+        return try summarizeDatabase(db)
+    }
+
+    static func validateTimeZones(in db: Database) throws {
+        let settingsZones = try String.fetchAll(db, sql: "SELECT learning_time_zone_id FROM app_settings")
+        let studyDayRows = try Row.fetchAll(
+            db,
+            sql: "SELECT local_date, time_zone_id FROM study_days"
+        )
+        guard settingsZones.allSatisfy({ TimeZone(identifier: $0) != nil }) else {
+            throw PortableBackupPreparationError.databaseValidation("学习时区无效。")
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.isLenient = false
+        for row in studyDayRows {
+            let localDate: String = row["local_date"]
+            let timeZoneID: String = row["time_zone_id"]
+            guard localDate.count == 10,
+                  formatter.date(from: localDate) != nil,
+                  TimeZone(identifier: timeZoneID) != nil else {
+                throw PortableBackupPreparationError.databaseValidation("学习日日期或时区无效。")
+            }
+        }
+    }
+
+    static func validateScheduling(in db: Database) throws {
+        let profileRows = try Row.fetchAll(
+            db,
+            sql: "SELECT id, algorithm_version, parameters_json FROM scheduler_profiles"
+        )
+        for row in profileRows {
+            let algorithmVersion: String = row["algorithm_version"]
+            guard algorithmVersion == SwiftFSRSReviewScheduler.algorithmVersion else {
+                throw PortableBackupPreparationError.unsupportedAlgorithmVersion(algorithmVersion)
+            }
+            let parametersJSON: String = row["parameters_json"]
+            guard let parameters = try? JSONDecoder().decode(
+                [Double].self,
+                from: Data(parametersJSON.utf8)
+            ), parameters.count == 21, parameters.allSatisfy(\.isFinite) else {
+                throw PortableBackupPreparationError.databaseValidation("FSRS 参数必须是 21 个有限数字。")
+            }
+        }
+
+        let invalidCard = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT cards.algorithm_version AS card_algorithm,
+                       scheduler_profiles.algorithm_version AS profile_algorithm
+                FROM cards
+                JOIN scheduler_profiles ON scheduler_profiles.id = cards.profile_id
+                WHERE cards.algorithm_version != ?
+                   OR cards.algorithm_version != scheduler_profiles.algorithm_version
+                LIMIT 1
+                """,
+            arguments: [SwiftFSRSReviewScheduler.algorithmVersion]
+        )
+        if let invalidCard {
+            let version: String = invalidCard["card_algorithm"]
+            throw PortableBackupPreparationError.unsupportedAlgorithmVersion(version)
+        }
+
+        let reviewRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT review_logs.profile_id, review_logs.algorithm_version,
+                       review_logs.previous_state_json, review_logs.next_state_json,
+                       scheduler_profiles.algorithm_version AS profile_algorithm
+                FROM review_logs
+                JOIN scheduler_profiles ON scheduler_profiles.id = review_logs.profile_id
+                """
+        )
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        for row in reviewRows {
+            let algorithmVersion: String = row["algorithm_version"]
+            let profileAlgorithm: String = row["profile_algorithm"]
+            guard algorithmVersion == SwiftFSRSReviewScheduler.algorithmVersion,
+                  algorithmVersion == profileAlgorithm else {
+                throw PortableBackupPreparationError.unsupportedAlgorithmVersion(algorithmVersion)
+            }
+            let profileID = try DatabaseValueCodec.decodeUUID(row["profile_id"])
+            let previousJSON: String = row["previous_state_json"]
+            let nextJSON: String = row["next_state_json"]
+            guard let previous = try? decoder.decode(
+                ReviewSchedulingSnapshot.self,
+                from: Data(previousJSON.utf8)
+            ), let next = try? decoder.decode(
+                ReviewSchedulingSnapshot.self,
+                from: Data(nextJSON.utf8)
+            ) else {
+                throw PortableBackupPreparationError.databaseValidation("评分调度快照无法解码。")
+            }
+            guard isValid(snapshot: previous, profileID: profileID),
+                  isValid(snapshot: next, profileID: profileID),
+                  previous.stateVersion < Int.max,
+                  next.stateVersion == previous.stateVersion + 1 else {
+                throw PortableBackupPreparationError.databaseValidation("评分调度快照状态无效。")
+            }
+        }
+    }
+
+    static func isValid(snapshot: ReviewSchedulingSnapshot, profileID: UUID) -> Bool {
+        let card = snapshot.scheduling
+        return snapshot.schemaVersion == ReviewSchedulingSnapshot.currentSchemaVersion
+            && snapshot.algorithmVersion == SwiftFSRSReviewScheduler.algorithmVersion
+            && snapshot.profileID == profileID
+            && snapshot.stateVersion >= 0
+            && card.dueAt.timeIntervalSince1970.isFinite
+            && (card.lastReviewAt?.timeIntervalSince1970.isFinite ?? true)
+            && (snapshot.firstStudiedAt?.timeIntervalSince1970.isFinite ?? true)
+            && card.stability.isFinite && card.stability >= 0
+            && card.difficulty.isFinite && card.difficulty >= 0 && card.difficulty <= 10
+            && card.elapsedDays.isFinite && card.elapsedDays >= 0
+            && card.scheduledDays.isFinite && card.scheduledDays >= 0
+            && card.learningStep >= 0
+            && card.repetitions >= 0
+            && card.lapses >= 0
+    }
+
+    static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
+        var counts: [String: Int] = [:]
+        for specification in PortableBackupFormatV2.tableSpecifications {
+            counts[specification.recordType] = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM \(specification.tableName)"
+            ) ?? 0
+        }
+        return PortableBackupDataSummary(recordCounts: counts)
+    }
+
+    static func requiredString(
+        _ rawValue: Any?,
+        field: String,
+        context: String
+    ) throws -> String {
+        guard let value = rawValue as? String else {
+            throw PortableBackupPreparationError.invalidManifest(
+                "\(context) 的 \(field) 必须是字符串。"
+            )
+        }
+        return value
+    }
+
+    static func requiredInteger(
+        _ rawValue: Any?,
+        field: String,
+        context: String
+    ) throws -> Int {
+        let value = try jsonInteger(rawValue, lineNumber: 1, field: field)
+        guard value >= Int64(Int.min), value <= Int64(Int.max) else {
+            throw PortableBackupPreparationError.invalidManifest("\(context) 的 \(field) 超出范围。")
+        }
+        return Int(value)
+    }
+
+    static func jsonInteger(
+        _ rawValue: Any?,
+        lineNumber: Int,
+        field: String
+    ) throws -> Int64 {
+        guard let number = rawValue as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              let value = Int64(number.stringValue) else {
+            throw typeError(lineNumber: lineNumber, column: field, expected: "整数")
+        }
+        return value
+    }
+
+    static func typeError(
+        lineNumber: Int,
+        column: String,
+        expected: String
+    ) -> PortableBackupPreparationError {
+        .invalidRecord(
+            line: lineNumber,
+            reason: "\(column) 必须是\(expected)。"
+        )
+    }
+
+    static func validateStringLength(
+        _ value: String,
+        field: String,
+        limits: PortableBackupPreparationLimits,
+        line: Int = 1
+    ) throws {
+        guard value.utf8.count <= limits.maximumStringBytes else {
+            throw PortableBackupPreparationError.invalidRecord(
+                line: line,
+                reason: "\(field) 超过 \(limits.maximumStringBytes) 字节上限。"
+            )
+        }
+    }
+
+    static func iso8601Date(from value: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.date(from: value)
+    }
+
+    static func removeDatabaseFiles(at url: URL) {
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            try? FileManager.default.removeItem(atPath: url.path + suffix)
+        }
+    }
+}

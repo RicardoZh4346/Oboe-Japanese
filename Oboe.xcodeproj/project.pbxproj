@@ -1,0 +1,278 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00100000000000000000001 /* OboeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000001 /* OboeApp.swift */; };
+		A00100000000000000000002 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* RootTabView.swift */; };
+		A00100000000000000000003 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000003 /* TodayView.swift */; };
+		A00100000000000000000004 /* DecksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000004 /* DecksView.swift */; };
+		A00100000000000000000005 /* AddView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000005 /* AddView.swift */; };
+		A00100000000000000000006 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000006 /* SettingsView.swift */; };
+		A00100000000000000000008 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000008 /* Assets.xcassets */; };
+		A00100000000000000000009 /* OboeNavigationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000009 /* OboeNavigationUITests.swift */; };
+		A0010000000000000000000A /* OboeDomain in Frameworks */ = {isa = PBXBuildFile; productRef = A00F00000000000000000002 /* OboeDomain */; };
+		A0010000000000000000000B /* OboeInfrastructure in Frameworks */ = {isa = PBXBuildFile; productRef = A00F00000000000000000003 /* OboeInfrastructure */; };
+		A0010000000000000000000C /* THIRD_PARTY_NOTICES.txt in Resources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */; };
+		A0010000000000000000000D /* JLPTLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000E /* JLPTLibraryView.swift */; };
+		A0010000000000000000000E /* JLPT in Resources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000F /* JLPT */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A00300000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00A00000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A00900000000000000000001;
+			remoteInfo = Oboe;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A00200000000000000000001 /* OboeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeApp.swift; sourceTree = "<group>"; };
+		A00200000000000000000002 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		A00200000000000000000003 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		A00200000000000000000004 /* DecksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecksView.swift; sourceTree = "<group>"; };
+		A00200000000000000000005 /* AddView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddView.swift; sourceTree = "<group>"; };
+		A00200000000000000000006 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A00200000000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00200000000000000000009 /* OboeNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeNavigationUITests.swift; sourceTree = "<group>"; };
+		A0020000000000000000000A /* Oboe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Oboe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0020000000000000000000B /* OboeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OboeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0020000000000000000000C /* Oboe.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Oboe.entitlements; sourceTree = "<group>"; };
+		A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = THIRD_PARTY_NOTICES.txt; sourceTree = "<group>"; };
+		A0020000000000000000000E /* JLPTLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JLPTLibraryView.swift; sourceTree = "<group>"; };
+		A0020000000000000000000F /* JLPT */ = {isa = PBXFileReference; lastKnownFileType = folder; path = JLPT; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00400000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A0010000000000000000000A /* OboeDomain in Frameworks */,
+				A0010000000000000000000B /* OboeInfrastructure in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00400000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00500000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A00500000000000000000002 /* OboeApp */,
+				A0050000000000000000000C /* OboeUITests */,
+				A0050000000000000000000D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00500000000000000000002 /* OboeApp */ = {
+			isa = PBXGroup;
+			children = (
+				A0020000000000000000000C /* Oboe.entitlements */,
+				A00500000000000000000003 /* App */,
+				A00500000000000000000004 /* Features */,
+				A0050000000000000000000A /* SharedUI */,
+				A0050000000000000000000B /* Resources */,
+			);
+			path = OboeApp;
+			sourceTree = "<group>";
+		};
+		A00500000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A00200000000000000000001 /* OboeApp.swift */,
+				A00200000000000000000002 /* RootTabView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A00500000000000000000004 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				A00500000000000000000005 /* Today */,
+				A00500000000000000000006 /* Decks */,
+				A00500000000000000000007 /* NoteEditor */,
+				A00500000000000000000008 /* SentenceAnalysis */,
+				A00500000000000000000009 /* Review */,
+				A0050000000000000000000E /* Search */,
+				A0050000000000000000000F /* Settings */,
+				A00500000000000000000010 /* JLPTLibrary */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		A00500000000000000000005 /* Today */ = {isa = PBXGroup; children = (A00200000000000000000003 /* TodayView.swift */,); path = Today; sourceTree = "<group>"; };
+		A00500000000000000000006 /* Decks */ = {isa = PBXGroup; children = (A00200000000000000000004 /* DecksView.swift */,); path = Decks; sourceTree = "<group>"; };
+		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
+		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (); path = SentenceAnalysis; sourceTree = "<group>"; };
+		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (); path = Review; sourceTree = "<group>"; };
+		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (); path = SharedUI; sourceTree = "<group>"; };
+		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */,); path = Resources; sourceTree = "<group>"; };
+		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */,); path = OboeUITests; sourceTree = "<group>"; };
+		A0050000000000000000000D /* Products */ = {isa = PBXGroup; children = (A0020000000000000000000A /* Oboe.app */, A0020000000000000000000B /* OboeUITests.xctest */,); name = Products; sourceTree = "<group>"; };
+		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (); path = Search; sourceTree = "<group>"; };
+		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */,); path = Settings; sourceTree = "<group>"; };
+		A00500000000000000000010 /* JLPTLibrary */ = {isa = PBXGroup; children = (A0020000000000000000000E /* JLPTLibraryView.swift */,); path = JLPTLibrary; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00900000000000000000001 /* Oboe */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00D00000000000000000002 /* Build configuration list for PBXNativeTarget "Oboe" */;
+			buildPhases = (
+				A00600000000000000000001 /* Sources */,
+				A00400000000000000000001 /* Frameworks */,
+				A00700000000000000000001 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = Oboe;
+			packageProductDependencies = (
+				A00F00000000000000000002 /* OboeDomain */,
+				A00F00000000000000000003 /* OboeInfrastructure */,
+			);
+			productName = Oboe;
+			productReference = A0020000000000000000000A /* Oboe.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A00900000000000000000002 /* OboeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00D00000000000000000003 /* Build configuration list for PBXNativeTarget "OboeUITests" */;
+			buildPhases = (
+				A00600000000000000000002 /* Sources */,
+				A00400000000000000000002 /* Frameworks */,
+			);
+			buildRules = ();
+			dependencies = (
+				A00800000000000000000001 /* PBXTargetDependency */,
+			);
+			name = OboeUITests;
+			productName = OboeUITests;
+			productReference = A0020000000000000000000B /* OboeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00A00000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					A00900000000000000000001 = {
+						CreatedOnToolsVersion = 16.4;
+						SystemCapabilities = {
+							com.apple.Keychain = {
+								enabled = 1;
+							};
+						};
+					};
+					A00900000000000000000002 = {CreatedOnToolsVersion = 16.4; TestTargetID = A00900000000000000000001; };
+				};
+			};
+			buildConfigurationList = A00D00000000000000000001 /* Build configuration list for PBXProject "Oboe" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = zh-Hans;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = A00500000000000000000001;
+			packageReferences = (
+				A00F00000000000000000001 /* XCLocalSwiftPackageReference "Packages/OboeCore" */,
+			);
+			productRefGroup = A0050000000000000000000D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00900000000000000000001 /* Oboe */,
+				A00900000000000000000002 /* OboeUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00700000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00100000000000000000008 /* Assets.xcassets in Resources */,
+				A0010000000000000000000C /* THIRD_PARTY_NOTICES.txt in Resources */,
+				A0010000000000000000000E /* JLPT in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00600000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00100000000000000000001 /* OboeApp.swift in Sources */,
+				A00100000000000000000002 /* RootTabView.swift in Sources */,
+				A00100000000000000000003 /* TodayView.swift in Sources */,
+				A00100000000000000000004 /* DecksView.swift in Sources */,
+				A00100000000000000000005 /* AddView.swift in Sources */,
+				A00100000000000000000006 /* SettingsView.swift in Sources */,
+				A0010000000000000000000D /* JLPTLibraryView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00600000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00100000000000000000009 /* OboeNavigationUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00800000000000000000001 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A00900000000000000000001 /* Oboe */; targetProxy = A00300000000000000000001 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A00C00000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_OPTIMIZATION_LEVEL = 0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)",); IPHONEOS_DEPLOYMENT_TARGET = 17.0; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+		A00C00000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; VALIDATE_PRODUCT = YES; }; name = Release; };
+		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; }; name = Debug; };
+		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; }; name = Release; };
+		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = Oboe; }; name = Debug; };
+		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = Oboe; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00D00000000000000000001 /* Build configuration list for PBXProject "Oboe" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000001 /* Debug */, A00C00000000000000000002 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00D00000000000000000002 /* Build configuration list for PBXNativeTarget "Oboe" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000003 /* Debug */, A00C00000000000000000004 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00D00000000000000000003 /* Build configuration list for PBXNativeTarget "OboeUITests" */ = {isa = XCConfigurationList; buildConfigurations = (A00C00000000000000000005 /* Debug */, A00C00000000000000000006 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A00F00000000000000000001 /* XCLocalSwiftPackageReference "Packages/OboeCore" */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/OboeCore; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00F00000000000000000002 /* OboeDomain */ = {isa = XCSwiftPackageProductDependency; package = A00F00000000000000000001 /* XCLocalSwiftPackageReference "Packages/OboeCore" */; productName = OboeDomain; };
+		A00F00000000000000000003 /* OboeInfrastructure */ = {isa = XCSwiftPackageProductDependency; package = A00F00000000000000000001 /* XCLocalSwiftPackageReference "Packages/OboeCore" */; productName = OboeInfrastructure; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A00A00000000000000000001 /* Project object */;
+}

@@ -1,0 +1,29 @@
+# Oboe 内置 JLPT 词汇数据来源与许可
+
+数据集版本：2026.09.13-1  
+OpenJLPT revision：`c42fd9fa3777bfc1775446f7c418d549dfd6e4cf`  
+Tomoshi Open Data：`v2026-09-02`
+
+本 SQLite 是 Oboe 为离线浏览与导入而制作的衍生数据集，按 **CC BY-SA 4.0** 提供。Oboe 应用代码的 MIT 许可不覆盖该数据集。
+
+## 来源与署名
+
+- OpenJLPT（evanclan/OpenJLPT）：JLPT N5–N1 社区等级、日文词形、假名、英文释义和 Tatoeba 日英例句，CC BY-SA 4.0。
+- Jonathan Waller's JLPT Resources（tanos.co.uk）：社区 JLPT 等级来源，CC BY。
+- JMdict / EDICT，Electronic Dictionary Research and Development Group（EDRDG）：词形、读音、英文释义和词性，CC BY-SA 4.0。
+- Tomoshi Dictionary Open Data（Y1Z）：JMdict 衍生的简体中文释义与频率层，CC BY-SA 4.0。名称与 logo 不包含在许可中，本项目与 Tomoshi 不存在背书关系。
+- Tatoeba：日文例句及英文翻译，CC BY 2.0 FR。
+
+## Oboe 的修改
+
+Oboe 筛选 OpenJLPT vocabulary 数据；以 NFKC 和平假名规则规范化搜索字段；上游 reading 为空时，从 headword 变体标注中取第一个读音；按词形与读音匹配 Tomoshi/JMdict entry；合并可唯一确定的简体中文释义、词性与频率；保留英文 meanings 数组；转换为只读 SQLite schema，并生成稳定 sourceRef。歧义或缺失匹配不会由 AI 自动补全。
+
+JLPT 官方目前不发布固定词汇清单；所有 N1～N5 标记均为社区整理的非官方分类，仅供学习参考。
+
+许可证与原始 NOTICE：
+
+- https://github.com/evanclan/OpenJLPT
+- https://github.com/tomoshi-app/tomoshi-dict-data
+- https://creativecommons.org/licenses/by-sa/4.0/legalcode
+- https://creativecommons.org/licenses/by/2.0/fr/
+- https://www.edrdg.org/edrdg/licence.html

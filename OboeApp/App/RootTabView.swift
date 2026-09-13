@@ -1,0 +1,185 @@
+import OboeDomain
+import OboeInfrastructure
+import SwiftUI
+
+private enum PrimaryTab: Hashable {
+    case today
+    case decks
+    case add
+    case settings
+}
+
+struct RootTabView: View {
+    let dependencies: AppDependencies
+    @State private var selectedTab = PrimaryTab.today
+
+    var body: some View {
+        Group {
+            if let deckManagementService = dependencies.deckManagementService,
+               let vocabularyService = dependencies.vocabularyService,
+               let grammarService = dependencies.grammarService,
+               let knowledgePointService = dependencies.knowledgePointService,
+               let knowledgeSearchService = dependencies.knowledgeSearchService,
+               let contentCardService = dependencies.contentCardService,
+               let studySessionService = dependencies.studySessionService,
+               let studyHistoryService = dependencies.studyHistoryService,
+               let speechPreferencesService = dependencies.speechPreferencesService,
+               let aiConfigurationService = dependencies.aiConfigurationService,
+               let aiConnectionTestService = dependencies.aiConnectionTestService,
+               let aiCardGenerationService = dependencies.aiCardGenerationService,
+               let sentenceAnalysisService = dependencies.sentenceAnalysisService,
+               let sentenceAnalysisCardCreationService = dependencies.sentenceAnalysisCardCreationService,
+               let jlptLibraryService = dependencies.jlptLibraryService,
+               let jlptImporter = dependencies.jlptImporter,
+               let portableBackupExporter = dependencies.portableBackupExporter,
+               let portableBackupRestorationPreparer = dependencies.portableBackupRestorationPreparer {
+                tabs(
+                    deckManagementService: deckManagementService,
+                    vocabularyService: vocabularyService,
+                    grammarService: grammarService,
+                    knowledgePointService: knowledgePointService,
+                    knowledgeSearchService: knowledgeSearchService,
+                    contentCardService: contentCardService,
+                    studySessionService: studySessionService,
+                    studyHistoryService: studyHistoryService,
+                    speechPreferencesService: speechPreferencesService,
+                    aiConfigurationService: aiConfigurationService,
+                    aiConnectionTestService: aiConnectionTestService,
+                    aiCardGenerationService: aiCardGenerationService,
+                    sentenceAnalysisService: sentenceAnalysisService,
+                    sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                    jlptLibraryService: jlptLibraryService,
+                    jlptImporter: jlptImporter,
+                    speechService: dependencies.speechService,
+                    portableBackupExporter: portableBackupExporter,
+                    portableBackupRestorationPreparer: portableBackupRestorationPreparer,
+                    databaseGeneration: dependencies.databaseGeneration
+                )
+            } else if let launchErrorMessage = dependencies.launchErrorMessage {
+                ContentUnavailableView(
+                    "无法启动 Oboe",
+                    systemImage: "externaldrive.badge.exclamationmark",
+                    description: Text(launchErrorMessage)
+                )
+                .accessibilityIdentifier("app-launch-error")
+            } else {
+                ProgressView("正在打开本地资料库…")
+                    .accessibilityIdentifier("app-loading")
+            }
+        }
+        .disabled(dependencies.isDatabaseOperationInProgress)
+        .overlay {
+            if dependencies.isDatabaseOperationInProgress {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+                    ProgressView("正在安全替换资料库…")
+                        .padding()
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .accessibilityIdentifier("database-restoration-progress")
+                }
+            }
+        }
+        .preferredColorScheme(dependencies.appearancePreference.colorScheme)
+    }
+
+    private func tabs(
+        deckManagementService: DeckManagementService,
+        vocabularyService: VocabularyService,
+        grammarService: GrammarService,
+        knowledgePointService: KnowledgePointService,
+        knowledgeSearchService: KnowledgeSearchService,
+        contentCardService: ContentCardService,
+        studySessionService: StudySessionService,
+        studyHistoryService: StudyHistoryService,
+        speechPreferencesService: SpeechPreferencesService,
+        aiConfigurationService: AIConfigurationService,
+        aiConnectionTestService: AIConnectionTestService,
+        aiCardGenerationService: AICardGenerationService,
+        sentenceAnalysisService: SentenceAnalysisService,
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        jlptLibraryService: JLPTLibraryService,
+        jlptImporter: any JLPTImporting,
+        speechService: any SpeechService,
+        portableBackupExporter: PortableBackupExporter,
+        portableBackupRestorationPreparer: PortableBackupRestorationPreparer,
+        databaseGeneration: Int
+    ) -> some View {
+        TabView(selection: $selectedTab) {
+            TodayView(
+                studyService: studySessionService,
+                historyService: studyHistoryService,
+                deckService: deckManagementService,
+                speechPreferencesService: speechPreferencesService,
+                speechService: speechService
+            )
+                .id(databaseGeneration)
+                .tabItem {
+                    Label("今日", systemImage: "sun.max")
+                }
+                .tag(PrimaryTab.today)
+
+            DecksView(
+                service: deckManagementService,
+                vocabularyService: vocabularyService,
+                grammarService: grammarService,
+                knowledgePointService: knowledgePointService,
+                searchService: knowledgeSearchService,
+                contentCardService: contentCardService,
+                studyService: studySessionService,
+                historyService: studyHistoryService,
+                speechService: speechService,
+                jlptLibraryService: jlptLibraryService,
+                jlptImporter: jlptImporter
+            )
+                .id(databaseGeneration)
+                .tabItem {
+                    Label("牌组", systemImage: "rectangle.stack")
+                }
+                .tag(PrimaryTab.decks)
+
+            AddView(
+                deckService: deckManagementService,
+                vocabularyService: vocabularyService,
+                grammarService: grammarService,
+                knowledgePointService: knowledgePointService,
+                contentCardService: contentCardService,
+                aiCardGenerationService: aiCardGenerationService,
+                sentenceAnalysisService: sentenceAnalysisService,
+                sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                historyService: studyHistoryService,
+                speechService: speechService
+            )
+                .id(databaseGeneration)
+                .tabItem {
+                    Label("添加", systemImage: "plus.circle")
+                }
+                .tag(PrimaryTab.add)
+
+            SettingsView(
+                dependencies: dependencies,
+                exporter: portableBackupExporter,
+                restorationPreparer: portableBackupRestorationPreparer,
+                studyService: studySessionService,
+                speechPreferencesService: speechPreferencesService,
+                aiConfigurationService: aiConfigurationService,
+                aiConnectionTestService: aiConnectionTestService,
+                speechService: speechService
+            )
+                .id(databaseGeneration)
+                .tabItem {
+                    Label("设置", systemImage: "gearshape")
+                }
+                .tag(PrimaryTab.settings)
+        }
+    }
+}
+
+private extension AppAppearance {
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
