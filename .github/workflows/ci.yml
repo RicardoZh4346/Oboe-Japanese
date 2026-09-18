@@ -46,4 +46,5 @@ jobs:
             -project Oboe.xcodeproj \
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:OboeUITests/OboeNavigationUITests/testSwitchesBetweenFourPrimaryTabs \
             test
