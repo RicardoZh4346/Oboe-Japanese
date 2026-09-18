@@ -150,6 +150,9 @@ private actor MemorySentenceDraftRepository: SentenceAnalysisDraftRepository {
 
     func saveSentenceAnalysisDraft(_ draft: SentenceAnalysisDraft) { self.draft = draft }
     func fetchLatestSentenceAnalysisDraft() -> SentenceAnalysisDraft? { draft }
+    func fetchSentenceAnalysisDraft(id: UUID) -> SentenceAnalysisDraft? {
+        draft?.id == id ? draft : nil
+    }
     func deleteSentenceAnalysisDraft(id: UUID) {
         if draft?.id == id { draft = nil }
     }

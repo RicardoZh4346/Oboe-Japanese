@@ -31,6 +31,7 @@ struct RootTabView: View {
                let sentenceAnalysisCardCreationService = dependencies.sentenceAnalysisCardCreationService,
                let jlptLibraryService = dependencies.jlptLibraryService,
                let jlptImporter = dependencies.jlptImporter,
+               let inboxService = dependencies.inboxService,
                let portableBackupExporter = dependencies.portableBackupExporter,
                let portableBackupRestorationPreparer = dependencies.portableBackupRestorationPreparer {
                 tabs(
@@ -50,6 +51,7 @@ struct RootTabView: View {
                     sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                     jlptLibraryService: jlptLibraryService,
                     jlptImporter: jlptImporter,
+                    inboxService: inboxService,
                     speechService: dependencies.speechService,
                     portableBackupExporter: portableBackupExporter,
                     portableBackupRestorationPreparer: portableBackupRestorationPreparer,
@@ -99,6 +101,7 @@ struct RootTabView: View {
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         jlptLibraryService: JLPTLibraryService,
         jlptImporter: any JLPTImporting,
+        inboxService: InboxService,
         speechService: any SpeechService,
         portableBackupExporter: PortableBackupExporter,
         portableBackupRestorationPreparer: PortableBackupRestorationPreparer,
@@ -110,7 +113,28 @@ struct RootTabView: View {
                 historyService: studyHistoryService,
                 deckService: deckManagementService,
                 speechPreferencesService: speechPreferencesService,
-                speechService: speechService
+                speechService: speechService,
+                inboxService: inboxService,
+                processingServices: InboxProcessingServices(
+                    deckService: deckManagementService,
+                    vocabularyService: vocabularyService,
+                    grammarService: grammarService,
+                    knowledgePointService: knowledgePointService,
+                    contentCardService: contentCardService,
+                    aiCardGenerationService: aiCardGenerationService,
+                    sentenceAnalysisService: sentenceAnalysisService,
+                    sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                    historyService: studyHistoryService,
+                    speechService: speechService
+                ),
+                inboxImageStore: dependencies.inboxImageStore,
+                drainSharedCaptures: { await dependencies.drainSharedCaptures() },
+                pendingContinueItemID: dependencies.pendingContinueItemID,
+                clearPendingContinueItem: {
+                    Task { await dependencies.clearPendingContinueItem() }
+                },
+                sharedCapturesAwaitingImport: dependencies.sharedCapturesAwaitingImport,
+                importAwaitingSharedCaptures: { await dependencies.importAwaitingSharedCaptures() }
             )
                 .id(databaseGeneration)
                 .tabItem {
@@ -147,7 +171,13 @@ struct RootTabView: View {
                 sentenceAnalysisService: sentenceAnalysisService,
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                 historyService: studyHistoryService,
-                speechService: speechService
+                speechService: speechService,
+                inboxService: inboxService,
+                inboxImageStore: dependencies.inboxImageStore,
+                ocrService: dependencies.ocrService,
+                drainSharedCaptures: { await dependencies.drainSharedCaptures() },
+                sharedCapturesAwaitingImport: dependencies.sharedCapturesAwaitingImport,
+                importAwaitingSharedCaptures: { await dependencies.importAwaitingSharedCaptures() }
             )
                 .id(databaseGeneration)
                 .tabItem {

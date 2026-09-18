@@ -31,12 +31,19 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(parsed.records.last?["recordType"] as? String, "footer")
         let manifest = try XCTUnwrap(parsed.records.first)
         XCTAssertEqual(manifest["format"] as? String, "oboe-portable-backup")
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 2)
+        XCTAssertEqual(manifest["formatVersion"] as? Int, 3)
         XCTAssertEqual(manifest["appVersion"] as? String, "0.1.0-test")
         XCTAssertEqual(manifest["encoding"] as? String, "utf-8")
         XCTAssertEqual(manifest["lineEnding"] as? String, "lf")
         XCTAssertEqual(manifest["checksumAlgorithm"] as? String, "sha256")
         XCTAssertEqual(manifest["recordOrder"] as? [String], Self.recordTypes)
+        XCTAssertEqual(
+            manifest["excludedScopes"] as? [String],
+            [
+                "credentials", "aiConnectionConfiguration", "sharedTransferFiles",
+                "imageAttachments", "derivedSearchIndex"
+            ]
+        )
 
         let bodyRecords = parsed.records.dropFirst().dropLast()
         XCTAssertEqual(bodyRecords.count, Self.recordTypes.count)
@@ -61,6 +68,52 @@ final class PortableBackupExporterTests: XCTestCase {
             #"{"headword":"秘密草稿"}"#
         )
 
+        let inboxItem = try XCTUnwrap(
+            bodyRecords.first(where: { $0["recordType"] as? String == "inboxItem" })
+        )
+        XCTAssertEqual(inboxItem["text"] as? String, "パンを食べる")
+        XCTAssertEqual(inboxItem["source_type"] as? String, "share")
+        XCTAssertEqual(inboxItem["status"] as? String, "processing")
+        XCTAssertEqual(inboxItem["content_revision"] as? Int, 2)
+        XCTAssertEqual(inboxItem["source_app"] as? String, "com.apple.mobilesafari")
+        XCTAssertEqual(inboxItem["source_url"] as? String, "https://example.com/article")
+        XCTAssertEqual(
+            inboxItem["image_reference"] as? String,
+            "inbox-image-resource-01",
+            "image_reference must stay an opaque resource ID, never a file path"
+        )
+        XCTAssertEqual(inboxItem["processed_at_ms"] as? NSNull, NSNull())
+        XCTAssertEqual(inboxItem["archived_at_ms"] as? NSNull, NSNull())
+
+        let context = try XCTUnwrap(
+            bodyRecords.first(where: { $0["recordType"] as? String == "inboxProcessingContext" })
+        )
+        XCTAssertEqual(context["inbox_item_id"] as? String, inboxItem["id"] as? String)
+        XCTAssertEqual(context["input_text"] as? String, "パンを食べる")
+        XCTAssertEqual(context["mode"] as? String, "sentence_analysis")
+        XCTAssertEqual(context["content_revision"] as? Int, 2)
+        XCTAssertEqual(context["payload_version"] as? Int, 1)
+        XCTAssertEqual(
+            context["resume_payload_json"] as? String,
+            #"{"version":1,"mode":"sentence_analysis"}"#
+        )
+
+        let importReceipt = try XCTUnwrap(
+            bodyRecords.first(where: { $0["recordType"] as? String == "captureImportReceipt" })
+        )
+        XCTAssertEqual(importReceipt["inbox_item_id"] as? String, inboxItem["id"] as? String)
+        XCTAssertEqual((importReceipt["payload_hash"] as? String)?.count, 64)
+
+        let commitReceipt = try XCTUnwrap(
+            bodyRecords.first(where: { $0["recordType"] as? String == "inboxCommitReceipt" })
+        )
+        XCTAssertEqual(commitReceipt["processing_context_id"] as? String, context["id"] as? String)
+        XCTAssertEqual((commitReceipt["payload_hash"] as? String)?.count, 64)
+        XCTAssertEqual(
+            commitReceipt["result_json"] as? String,
+            #"{"noteID":"9B361C4E-7A77-4E46-9B25-4BD90B96CCE1"}"#
+        )
+
         let settings = try XCTUnwrap(
             bodyRecords.first(where: { $0["recordType"] as? String == "settings" })
         )
@@ -75,6 +128,8 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertFalse(rawText.contains("secret.example"))
         XCTAssertFalse(rawText.contains("secret-model"))
         XCTAssertFalse(rawText.contains("search-index-only-secret"))
+        XCTAssertFalse(rawText.contains("file://"))
+        XCTAssertFalse(rawText.contains("/var/"))
 
         let footer = try XCTUnwrap(parsed.records.last)
         XCTAssertEqual(footer["checksumAlgorithm"] as? String, "sha256")
@@ -121,13 +176,20 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(exportedDeck["name"] as? String, "快照前")
         XCTAssertEqual(liveName, "快照后")
         XCTAssertEqual(result.recordCounts["deck"], 1)
+        XCTAssertEqual(Set(result.recordCounts.keys), Set(Self.recordTypes))
+        XCTAssertEqual(result.recordCounts["inboxItem"], 0)
+        XCTAssertEqual(result.recordCounts["inboxProcessingContext"], 0)
+        XCTAssertEqual(result.recordCounts["captureImportReceipt"], 0)
+        XCTAssertEqual(result.recordCounts["inboxCommitReceipt"], 0)
     }
 }
 
 private extension PortableBackupExporterTests {
     static let recordTypes = [
         "deck", "note", "example", "tag", "noteTag", "profile", "card",
-        "studyDay", "dailyTask", "review", "draft", "settings"
+        "studyDay", "dailyTask", "review", "draft",
+        "inboxItem", "inboxProcessingContext", "captureImportReceipt",
+        "inboxCommitReceipt", "settings"
     ]
 
     struct ParsedBackup {
@@ -184,6 +246,10 @@ private extension PortableBackupExporterTests {
         let reviewID = UUID()
         let eventID = UUID()
         let draftID = UUID()
+        let inboxItemID = UUID()
+        let inboxContextID = UUID()
+        let captureID = UUID()
+        let operationID = UUID()
         let encode: @Sendable (UUID) -> String = DatabaseValueCodec.encode
 
         try await database.pool.write { db in
@@ -264,6 +330,59 @@ private extension PortableBackupExporterTests {
                     )
                     """,
                 arguments: [encode(draftID)]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO inbox_items(
+                        id, text, source_type, status, content_revision,
+                        source_app, source_url, image_reference,
+                        created_at_ms, updated_at_ms, processed_at_ms,
+                        archived_at_ms, status_before_archive
+                    ) VALUES (
+                        ?, 'パンを食べる', 'share', 'processing', 2,
+                        'com.apple.mobilesafari', 'https://example.com/article',
+                        'inbox-image-resource-01',
+                        1789056000001, 1789056000002, NULL, NULL, NULL
+                    )
+                    """,
+                arguments: [encode(inboxItemID)]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO inbox_processing_contexts(
+                        id, inbox_item_id, content_revision, input_text, mode,
+                        draft_id, payload_version, resume_payload_json, updated_at_ms
+                    ) VALUES (
+                        ?, ?, 2, 'パンを食べる', 'sentence_analysis',
+                        ?, 1, '{"version":1,"mode":"sentence_analysis"}',
+                        1789056000003
+                    )
+                    """,
+                arguments: [encode(inboxContextID), encode(inboxItemID), encode(draftID)]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO capture_import_receipts(
+                        capture_id, payload_hash, inbox_item_id, imported_at_ms
+                    ) VALUES (?, ?, ?, 1789056000000)
+                    """,
+                arguments: [
+                    encode(captureID), String(repeating: "ab", count: 32),
+                    encode(inboxItemID)
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO inbox_commit_receipts(
+                        operation_id, processing_context_id, payload_hash,
+                        result_json, committed_at_ms
+                    ) VALUES (?, ?, ?, ?, 1789056000004)
+                    """,
+                arguments: [
+                    encode(operationID), encode(inboxContextID),
+                    String(repeating: "cd", count: 32),
+                    #"{"noteID":"9B361C4E-7A77-4E46-9B25-4BD90B96CCE1"}"#
+                ]
             )
             try db.execute(
                 sql: """

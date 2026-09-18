@@ -42,7 +42,7 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 100)
         )
 
-        let result = try await repository.commitVocabulary(commit)
+        let result = try await repository.commitVocabulary(commit, capture: nil)
         XCTAssertEqual(result, ContentCommitResult(noteID: noteID, cardCount: 2))
         let directions = try await repository.fetchCardDirections(noteID: noteID)
         XCTAssertEqual(
@@ -111,7 +111,8 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
                 ],
                 schedulerProfileID: UUID(),
                 createdAt: Date(timeIntervalSince1970: 100)
-            )
+            ),
+            capture: nil
         )
         try await database.pool.write { db in
             try db.execute(
@@ -160,20 +161,30 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
                 updatedAt: Date(timeIntervalSince1970: 400)
             )
         )
-        let progress = try database.pool.read { db in
+        let progress = try await database.pool.read { db in
             try Row.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) AS card_count, state, due_at_ms, stability, difficulty, reps, state_version FROM cards WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(secondCardID)]
-            )
+            ).map { row in
+                (
+                    cardCount: row["card_count"] as Int?,
+                    state: row["state"] as Int?,
+                    dueAt: row["due_at_ms"] as Int64?,
+                    stability: row["stability"] as Double?,
+                    difficulty: row["difficulty"] as Double?,
+                    reps: row["reps"] as Int?,
+                    stateVersion: row["state_version"] as Int?
+                )
+            }
         }
-        XCTAssertEqual(progress?["card_count"] as Int?, 1)
-        XCTAssertEqual(progress?["state"] as Int?, 2)
-        XCTAssertEqual(progress?["due_at_ms"] as Int64?, 999_000)
-        XCTAssertEqual(progress?["stability"] as Double?, 8.5)
-        XCTAssertEqual(progress?["difficulty"] as Double?, 4.2)
-        XCTAssertEqual(progress?["reps"] as Int?, 7)
-        XCTAssertEqual(progress?["state_version"] as Int?, 7)
+        XCTAssertEqual(progress?.cardCount, 1)
+        XCTAssertEqual(progress?.state, 2)
+        XCTAssertEqual(progress?.dueAt, 999_000)
+        XCTAssertEqual(progress?.stability, 8.5)
+        XCTAssertEqual(progress?.difficulty, 4.2)
+        XCTAssertEqual(progress?.reps, 7)
+        XCTAssertEqual(progress?.stateVersion, 7)
 
         _ = try await GRDBVocabularyRepository(database: database).updateVocabulary(
             id: noteID,
@@ -212,7 +223,8 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
                 card: NewCardSeed(id: cardID, templateKind: .grammarFormToExplanation),
                 schedulerProfileID: UUID(),
                 createdAt: Date(timeIntervalSince1970: 100)
-            )
+            ),
+            capture: nil
         )
 
         XCTAssertEqual(result.cardCount, 1)
@@ -254,7 +266,8 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
                 ],
                 schedulerProfileID: UUID(),
                 createdAt: Date(timeIntervalSince1970: 100)
-            )
+            ),
+            capture: nil
         )
 
         let version = try await database.pool.read { db in
@@ -294,7 +307,7 @@ final class GRDBContentCardRepositoryTests: XCTestCase {
         )
 
         do {
-            _ = try await repository.commitVocabulary(commit)
+            _ = try await repository.commitVocabulary(commit, capture: nil)
             XCTFail("Expected the missing deck commit to fail")
         } catch {
             XCTAssertEqual(error as? ContentCardError, .deckNotFound)

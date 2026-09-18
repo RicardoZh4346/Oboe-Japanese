@@ -109,11 +109,16 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
             database: reopened,
             workingDirectoryURL: fixture.exportsURL
         ).export(appVersion: "P19-test", at: Date(timeIntervalSince1970: 200))
+        // v3 restore lands in T17; exercise the v2 restore contract meanwhile.
+        let restorableURL = fixture.exportsURL.appendingPathComponent("v2.oboe-backup")
+        try rewriteBackup(backup.url, to: restorableURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 2)
+        }
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         let prepared = try await PortableBackupRestorationPreparer(
             currentDatabase: current,
             workingDirectoryURL: fixture.preparationsURL
-        ).prepare(fileURL: backup.url)
+        ).prepare(fileURL: restorableURL)
         let restored = try OboeDatabase(path: prepared.temporaryDatabaseURL.path)
         let restoredDraft = try await GRDBSentenceAnalysisDraftRepository(
             database: restored

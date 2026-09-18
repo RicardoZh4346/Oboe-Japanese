@@ -10,10 +10,23 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
     }
 
     public func commitVocabulary(
-        _ commit: VocabularyContentCommit
+        _ commit: VocabularyContentCommit,
+        capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult {
         let timestamp = try DatabaseValueCodec.encode(commit.createdAt)
         return try await pool.write { db in
+            if let capture {
+                let digest = CaptureCommitDigest.vocabulary(commit)
+                if let receipt = try GRDBInboxRepository.fetchCommitReceiptRow(
+                    operationID: capture.operationID,
+                    in: db
+                ) {
+                    return try Self.replayCommitReceipt(
+                        receipt,
+                        expectedPayloadHash: digest
+                    )
+                }
+            }
             if let sourceRef = commit.sourceRef,
                let existing = try Row.fetchOne(
                    db,
@@ -42,9 +55,9 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                 sql: """
                     INSERT INTO notes(
                         id, deck_id, kind, headword, reading, meaning_zh,
-                        part_of_speech, jlpt, notes, origin, source_ref, content_version,
-                        created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        part_of_speech, jlpt, notes, origin, source_ref, source_text,
+                        content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(commit.noteID),
@@ -57,6 +70,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     commit.content.notes,
                     commit.origin.rawValue,
                     commit.sourceRef,
+                    commit.sourceText,
                     timestamp,
                     timestamp
                 ]
@@ -86,15 +100,42 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             if let draftID = commit.draftID {
                 try Self.deleteDraft(id: draftID, kind: "vocabulary", in: db)
             }
-            return ContentCommitResult(noteID: commit.noteID, cardCount: commit.cards.count)
+            let result = ContentCommitResult(
+                noteID: commit.noteID,
+                cardCount: commit.cards.count
+            )
+            if let capture {
+                try Self.recordCaptureCommit(
+                    capture,
+                    payloadHash: CaptureCommitDigest.vocabulary(commit),
+                    resultJSON: Self.encodeCommitResult(result),
+                    inboxItemID: capture.inboxItemID,
+                    at: commit.createdAt,
+                    in: db
+                )
+            }
+            return result
         }
     }
 
     public func commitGrammar(
-        _ commit: GrammarContentCommit
+        _ commit: GrammarContentCommit,
+        capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult {
         let timestamp = try DatabaseValueCodec.encode(commit.createdAt)
         return try await pool.write { db in
+            if let capture {
+                let digest = CaptureCommitDigest.grammar(commit)
+                if let receipt = try GRDBInboxRepository.fetchCommitReceiptRow(
+                    operationID: capture.operationID,
+                    in: db
+                ) {
+                    return try Self.replayCommitReceipt(
+                        receipt,
+                        expectedPayloadHash: digest
+                    )
+                }
+            }
             try Self.requireDeck(commit.deckID, in: db)
             guard commit.card.templateKind == .grammarFormToExplanation else {
                 throw ContentCardError.invalidTemplateForKnowledgePoint
@@ -108,9 +149,9 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                 sql: """
                     INSERT INTO notes(
                         id, deck_id, kind, headword, meaning_zh, usage,
-                        connection, jlpt, notes, origin, content_version,
-                        created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, 'grammar', ?, ?, ?, ?, ?, ?, 'manual', 1, ?, ?)
+                        connection, jlpt, notes, origin, source_text,
+                        content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'grammar', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(commit.noteID),
@@ -121,6 +162,8 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     commit.content.connection,
                     commit.content.jlpt?.rawValue,
                     commit.content.notes,
+                    commit.origin.rawValue,
+                    commit.sourceText,
                     timestamp,
                     timestamp
                 ]
@@ -145,7 +188,18 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             if let draftID = commit.draftID {
                 try Self.deleteDraft(id: draftID, kind: "grammar", in: db)
             }
-            return ContentCommitResult(noteID: commit.noteID, cardCount: 1)
+            let result = ContentCommitResult(noteID: commit.noteID, cardCount: 1)
+            if let capture {
+                try Self.recordCaptureCommit(
+                    capture,
+                    payloadHash: CaptureCommitDigest.grammar(commit),
+                    resultJSON: Self.encodeCommitResult(result),
+                    inboxItemID: capture.inboxItemID,
+                    at: commit.createdAt,
+                    in: db
+                )
+            }
+            return result
         }
     }
 
@@ -225,6 +279,93 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             )
             return try Self.fetchCardDirections(noteID: replacement.noteID, in: db)
         }
+    }
+
+    /// Receipt replay: identical operationID + identical content digest returns
+    /// the stored result without rewriting anything — including when the note
+    /// has since been deleted. A mismatched digest is a real conflict.
+    static func replayCommitReceipt(
+        _ receiptRow: Row,
+        expectedPayloadHash: String
+    ) throws -> ContentCommitResult {
+        let receipt = try GRDBInboxRepository.decodeCommitReceipt(receiptRow)
+        guard receipt.payloadHash == expectedPayloadHash else {
+            throw InboxError.commitPayloadConflict(operationID: receipt.operationID)
+        }
+        return try decodeCommitResult(receipt.resultJSON)
+    }
+
+    /// Inside the same transaction: persist the commit receipt and mark the
+    /// Inbox item processed, so "create content" and "mark processed" cannot
+    /// be separated by a crash.
+    static func recordCaptureCommit(
+        _ capture: CaptureCommitContext,
+        payloadHash: String,
+        resultJSON: String,
+        inboxItemID: UUID,
+        at committedAt: Date,
+        in db: Database
+    ) throws {
+        try GRDBInboxRepository.insertCommitReceipt(
+            InboxCommitReceipt(
+                operationID: capture.operationID,
+                processingContextID: capture.processingContextID,
+                payloadHash: payloadHash,
+                resultJSON: resultJSON,
+                committedAt: committedAt
+            ),
+            in: db
+        )
+        try requireCurrentRevision(
+            inboxItemID: inboxItemID,
+            expected: capture.expectedContentRevision,
+            in: db
+        )
+        _ = try GRDBInboxRepository.transition(
+            id: inboxItemID,
+            expected: .processing,
+            to: .processed,
+            at: committedAt,
+            in: db
+        )
+    }
+
+    /// The capture must commit against the same text the user confirmed — if the
+    /// item was edited after processing began, abort so everything rolls back.
+    static func requireCurrentRevision(
+        inboxItemID: UUID,
+        expected: Int,
+        in db: Database
+    ) throws {
+        guard let row = try GRDBInboxRepository.fetchItemRow(id: inboxItemID, in: db) else {
+            throw InboxError.itemNotFound
+        }
+        let actual: Int = row["content_revision"]
+        guard actual == expected else {
+            throw InboxError.revisionConflict(expected: expected, actual: actual)
+        }
+    }
+
+    static func encodeCommitResult(_ result: ContentCommitResult) -> String {
+        #"{"note_id":""# + result.noteID.uuidString
+            + #"","card_count":"# + String(result.cardCount) + "}"
+    }
+
+    static func decodeCommitResult(_ json: String) throws -> ContentCommitResult {
+        struct Stored: Decodable {
+            let noteID: UUID
+            let cardCount: Int
+            enum CodingKeys: String, CodingKey {
+                case noteID = "note_id"
+                case cardCount = "card_count"
+            }
+        }
+        let stored = try JSONDecoder().decode(Stored.self, from: Data(json.utf8))
+        return ContentCommitResult(
+            noteID: stored.noteID,
+            cardCount: stored.cardCount,
+            wasCreated: false
+        )
     }
 
     private static func requireDeck(_ deckID: UUID, in db: Database) throws {

@@ -169,7 +169,10 @@ final class GRDBTodayQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(afterFirstRatings.availableLater.map(\.cardID), [repeatedCard])
 
         let directSummary = try await GRDBTodayQueueRepository(database: fixture.database)
-            .fetchSummary(for: afterFirstRatings.studyDay, at: now.addingTimeInterval(1))
+            .fetchSummary(
+                for: afterFirstRatings.studyDay, deckID: nil,
+                at: now.addingTimeInterval(1)
+            )
         XCTAssertEqual(directSummary, afterFirstRatings.summary)
 
         let dueAt = first.nextState.scheduling.dueAt
@@ -248,6 +251,100 @@ final class GRDBTodayQueueRepositoryTests: XCTestCase {
                 .clockMovedBackward(lastReviewAt: dueAt, attemptedAt: dueAt.addingTimeInterval(-1))
             )
         }
+    }
+
+    func testScopedSummarySeparatesDecksAndFollowsCurrentDeck() async throws {
+        let fixture = try await TodayQueueFixture.make()
+        defer { fixture.remove() }
+        let deckA = try await fixture.addDeck()
+        let deckB = try await fixture.addDeck()
+        let now = queueLocalDate(2026, 9, 10, 12, 0)
+        let newA = try await fixture.addCard(deckID: deckA, state: .new, dueAt: now)
+        let completedNewA = try await fixture.addCard(
+            deckID: deckA, state: .new, dueAt: now.addingTimeInterval(1)
+        )
+        let learningA = try await fixture.addCard(
+            deckID: deckA, state: .learning, dueAt: now.addingTimeInterval(-100)
+        )
+        let laterA = try await fixture.addCard(
+            deckID: deckA, state: .review, dueAt: now.addingTimeInterval(600)
+        )
+        _ = try await fixture.addCard(
+            deckID: deckB, state: .review, dueAt: now.addingTimeInterval(-50)
+        )
+        let plan = try await fixture.build(at: now)
+        let queue = GRDBTodayQueueRepository(database: fixture.database)
+
+        let initialA = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckA, at: now
+        )
+        XCTAssertEqual(initialA.newCount, 2)
+        XCTAssertEqual(initialA.learningCount, 1)
+        XCTAssertEqual(initialA.reviewCount, 1)
+        XCTAssertEqual(initialA.remainingCount, 4)
+        XCTAssertEqual(initialA.completedCount, 0)
+
+        _ = try await SubmitReview(
+            repository: GRDBReviewSubmissionRepository(database: fixture.database),
+            scheduler: SwiftFSRSReviewScheduler(),
+            clock: QueueFixedClock(value: now)
+        )(
+            SubmitReviewRequest(
+                eventID: UUID(), cardID: completedNewA, expectedStateVersion: 0,
+                rating: .easy, durationMilliseconds: 500,
+                studyDay: plan.studyDay.context
+            )
+        )
+
+        let global = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: nil, at: now.addingTimeInterval(1)
+        )
+        let scopeA = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckA, at: now.addingTimeInterval(1)
+        )
+        let scopeB = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckB, at: now.addingTimeInterval(1)
+        )
+        XCTAssertEqual(global.remainingCount, 4)
+        XCTAssertEqual(global.completedCount, 1)
+        XCTAssertEqual(scopeA.remainingCount, 3)
+        XCTAssertEqual(scopeA.completedCount, 1)
+        XCTAssertEqual(scopeB.remainingCount, 1)
+        XCTAssertEqual(scopeB.completedCount, 0)
+        XCTAssertEqual(
+            scopeA.remainingCount + scopeB.remainingCount,
+            global.remainingCount
+        )
+
+        try await fixture.moveCardToDeck(cardID: newA, deckID: deckB)
+        try await fixture.moveCardToDeck(cardID: completedNewA, deckID: deckB)
+        let movedA = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckA, at: now.addingTimeInterval(2)
+        )
+        let movedB = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckB, at: now.addingTimeInterval(2)
+        )
+        XCTAssertEqual(movedA.remainingCount, 2)
+        XCTAssertEqual(movedA.completedCount, 0)
+        XCTAssertEqual(movedB.remainingCount, 2)
+        XCTAssertEqual(movedB.completedCount, 1)
+
+        try await fixture.setEnabled(false, cardID: laterA)
+        let disabledA = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckA, at: now.addingTimeInterval(3)
+        )
+        XCTAssertEqual(disabledA.remainingCount, 1)
+        XCTAssertEqual(disabledA.denominator, 1)
+        XCTAssertEqual(disabledA.completionFraction, 0)
+
+        try await fixture.setEnabled(false, cardID: learningA)
+        let emptyA = try await queue.fetchSummary(
+            for: plan.studyDay, deckID: deckA, at: now.addingTimeInterval(4)
+        )
+        XCTAssertEqual(emptyA.remainingCount, 0)
+        XCTAssertEqual(emptyA.completedCount, 0)
+        XCTAssertEqual(emptyA.denominator, 0)
+        XCTAssertNil(emptyA.completionFraction)
     }
 
     func testDisabledAndDeletedCardsAreRemovedWhileReenabledDueCardReturns() async throws {
@@ -445,6 +542,15 @@ private final class TodayQueueFixture: @unchecked Sendable {
             studyDayRepository: GRDBStudyDayPlanningRepository(database: database),
             queueRepository: GRDBTodayQueueRepository(database: database)
         )(at: instant, defaultTimeZoneID: "Asia/Shanghai")
+    }
+
+    func moveCardToDeck(cardID: UUID, deckID: UUID) async throws {
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "UPDATE notes SET deck_id = ? WHERE id = (SELECT note_id FROM cards WHERE id = ?)",
+                arguments: [DatabaseValueCodec.encode(deckID), DatabaseValueCodec.encode(cardID)]
+            )
+        }
     }
 
     func setEnabled(_ enabled: Bool, cardID: UUID) async throws {

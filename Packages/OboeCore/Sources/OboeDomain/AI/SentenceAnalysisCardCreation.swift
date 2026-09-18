@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SentenceAnalysisCardDraft: Equatable, Identifiable, Sendable {
+public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public var kind: KnowledgePointKind
     public var headword: String
@@ -115,6 +115,13 @@ public enum SentenceAnalysisCardCommitItem: Equatable, Sendable {
         case .grammar: 1
         }
     }
+
+    public var createdAt: Date {
+        switch self {
+        case let .vocabulary(commit): commit.createdAt
+        case let .grammar(commit): commit.createdAt
+        }
+    }
 }
 
 public struct SentenceAnalysisCardBatchCommit: Equatable, Sendable {
@@ -139,7 +146,8 @@ public struct SentenceAnalysisCardBatchResult: Equatable, Sendable {
 
 public protocol SentenceAnalysisCardRepository: Sendable {
     func commitSentenceAnalysisCards(
-        _ batch: SentenceAnalysisCardBatchCommit
+        _ batch: SentenceAnalysisCardBatchCommit,
+        capture: CaptureCommitContext?
     ) async throws -> SentenceAnalysisCardBatchResult
 }
 
@@ -208,7 +216,9 @@ public struct SentenceAnalysisCardCreationService: Sendable {
 
     public func commit(
         deckID: UUID?,
-        drafts: [SentenceAnalysisCardDraft]
+        drafts: [SentenceAnalysisCardDraft],
+        sourceText: String? = nil,
+        capture: CaptureCommitContext? = nil
     ) async throws -> SentenceAnalysisCardBatchResult {
         guard let deckID else {
             throw SentenceAnalysisCardCreationError.deckRequired
@@ -232,7 +242,9 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         tags: [],
                         cards: cards,
                         schedulerProfileID: makeID(),
-                        createdAt: createdAt
+                        createdAt: createdAt,
+                        origin: .ai,
+                        sourceText: capture?.sourceText ?? sourceText
                     )
                 )
             case .grammar:
@@ -249,13 +261,16 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                             templateKind: .grammarFormToExplanation
                         ),
                         schedulerProfileID: makeID(),
-                        createdAt: createdAt
+                        createdAt: createdAt,
+                        origin: .ai,
+                        sourceText: capture?.sourceText ?? sourceText
                     )
                 )
             }
         }
         return try await repository.commitSentenceAnalysisCards(
-            SentenceAnalysisCardBatchCommit(deckID: deckID, items: items)
+            SentenceAnalysisCardBatchCommit(deckID: deckID, items: items),
+            capture: capture
         )
     }
 

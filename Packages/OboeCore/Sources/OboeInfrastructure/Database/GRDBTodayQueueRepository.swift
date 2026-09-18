@@ -79,6 +79,7 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
 
             let items = try Self.fetchRemainingItems(
                 studyDay: studyDay,
+                deckID: nil,
                 nowMilliseconds: now,
                 in: db
             )
@@ -92,51 +93,68 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
                 studyDay: studyDay,
                 availableNow: availableNow,
                 availableLater: availableLater,
-                summary: try Self.fetchSummary(studyDay: studyDay, items: items, in: db)
+                summary: try Self.fetchSummary(
+                    studyDay: studyDay,
+                    deckID: nil,
+                    items: items,
+                    in: db
+                )
             )
         }
     }
 
     public func fetchSummary(
         for studyDay: StudyDay,
+        deckID: UUID?,
         at instant: Date
     ) async throws -> TodayStudySummary {
         let now = try DatabaseValueCodec.encode(instant)
         return try await pool.read { db in
             let items = try Self.fetchRemainingItems(
                 studyDay: studyDay,
+                deckID: deckID,
                 nowMilliseconds: now,
                 in: db
             )
-            return try Self.fetchSummary(studyDay: studyDay, items: items, in: db)
+            return try Self.fetchSummary(
+                studyDay: studyDay,
+                deckID: deckID,
+                items: items,
+                in: db
+            )
         }
     }
 
     private static func fetchRemainingItems(
         studyDay: StudyDay,
+        deckID: UUID?,
         nowMilliseconds: Int64,
         in db: Database
     ) throws -> [TodayQueueItem] {
         let end = try DatabaseValueCodec.encode(studyDay.endsAt)
-        let rows = try Row.fetchAll(
-            db,
-            sql: """
-                SELECT cards.id AS card_id, cards.note_id, notes.deck_id,
-                       cards.template_kind, cards.state, cards.due_at_ms,
-                       cards.first_studied_at_ms, daily_tasks.admitted_at_ms
-                FROM daily_tasks
-                JOIN cards ON cards.id = daily_tasks.card_id
-                JOIN notes ON notes.id = cards.note_id
-                WHERE daily_tasks.study_day_id = ?
-                  AND daily_tasks.cancelled_at_ms IS NULL
-                  AND cards.is_enabled = 1
-                  AND (
-                      (cards.state = 0 AND cards.first_studied_at_ms IS NULL)
-                      OR (cards.state != 0 AND cards.due_at_ms < ?)
-                  )
-                """,
-            arguments: [DatabaseValueCodec.encode(studyDay.id), end]
-        )
+        var sql = """
+            SELECT cards.id AS card_id, cards.note_id, notes.deck_id,
+                   cards.template_kind, cards.state, cards.due_at_ms,
+                   cards.first_studied_at_ms, daily_tasks.admitted_at_ms
+            FROM daily_tasks
+            JOIN cards ON cards.id = daily_tasks.card_id
+            JOIN notes ON notes.id = cards.note_id
+            WHERE daily_tasks.study_day_id = ?
+              AND daily_tasks.cancelled_at_ms IS NULL
+              AND cards.is_enabled = 1
+              AND (
+                  (cards.state = 0 AND cards.first_studied_at_ms IS NULL)
+                  OR (cards.state != 0 AND cards.due_at_ms < ?)
+              )
+            """
+        var values: [any DatabaseValueConvertible] = [
+            DatabaseValueCodec.encode(studyDay.id), end
+        ]
+        if let deckID {
+            sql += "\nAND notes.deck_id = ?"
+            values.append(DatabaseValueCodec.encode(deckID))
+        }
+        let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(values))
         return try rows.map { row in
             let stateValue: Int = row["state"]
             let firstStudiedAt: Int64? = row["first_studied_at_ms"]
@@ -168,30 +186,38 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
 
     private static func fetchSummary(
         studyDay: StudyDay,
+        deckID: UUID?,
         items: [TodayQueueItem],
         in db: Database
     ) throws -> TodayStudySummary {
+        var sql = """
+            SELECT COUNT(DISTINCT daily_tasks.card_id)
+            FROM daily_tasks
+            JOIN cards ON cards.id = daily_tasks.card_id
+            JOIN notes ON notes.id = cards.note_id
+            WHERE daily_tasks.study_day_id = ?
+              AND daily_tasks.cancelled_at_ms IS NULL
+              AND cards.is_enabled = 1
+              AND cards.due_at_ms >= ?
+              AND EXISTS (
+                  SELECT 1 FROM review_logs
+                  WHERE review_logs.study_day_id = daily_tasks.study_day_id
+                    AND review_logs.card_key = daily_tasks.card_id
+                    AND review_logs.undone_at_ms IS NULL
+              )
+            """
+        var values: [any DatabaseValueConvertible] = [
+            DatabaseValueCodec.encode(studyDay.id),
+            try DatabaseValueCodec.encode(studyDay.endsAt)
+        ]
+        if let deckID {
+            sql += "\nAND notes.deck_id = ?"
+            values.append(DatabaseValueCodec.encode(deckID))
+        }
         let completedCount = try Int.fetchOne(
             db,
-            sql: """
-                SELECT COUNT(DISTINCT daily_tasks.card_id)
-                FROM daily_tasks
-                JOIN cards ON cards.id = daily_tasks.card_id
-                WHERE daily_tasks.study_day_id = ?
-                  AND daily_tasks.cancelled_at_ms IS NULL
-                  AND cards.is_enabled = 1
-                  AND cards.due_at_ms >= ?
-                  AND EXISTS (
-                      SELECT 1 FROM review_logs
-                      WHERE review_logs.study_day_id = daily_tasks.study_day_id
-                        AND review_logs.card_key = daily_tasks.card_id
-                        AND review_logs.undone_at_ms IS NULL
-                  )
-                """,
-            arguments: [
-                DatabaseValueCodec.encode(studyDay.id),
-                try DatabaseValueCodec.encode(studyDay.endsAt)
-            ]
+            sql: sql,
+            arguments: StatementArguments(values)
         ) ?? 0
         return TodayStudySummary(
             newCount: items.count { $0.category == .new },

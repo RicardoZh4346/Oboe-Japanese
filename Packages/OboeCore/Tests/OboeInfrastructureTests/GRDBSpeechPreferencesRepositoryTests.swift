@@ -42,11 +42,13 @@ final class GRDBSpeechPreferencesRepositoryTests: XCTestCase {
             reopened,
             SpeechPreferences(autoPlayWordAudio: true, autoPlayExampleAudio: true)
         )
-        let stored = try database.pool.read { db in
-            try Row.fetchOne(db, sql: "SELECT * FROM app_settings WHERE id = 1")
+        let stored = try await database.pool.read { db in
+            try Row.fetchOne(db, sql: "SELECT * FROM app_settings WHERE id = 1").map {
+                ($0["auto_play_word_audio"] as Bool?, $0["auto_play_example_audio"] as Bool?)
+            }
         }
-        XCTAssertEqual(stored?["auto_play_word_audio"] as Bool?, true)
-        XCTAssertEqual(stored?["auto_play_example_audio"] as Bool?, true)
+        XCTAssertEqual(stored?.0, true)
+        XCTAssertEqual(stored?.1, true)
         try database.close()
     }
 }

@@ -93,6 +93,57 @@ final class GRDBStudySessionServiceTests: XCTestCase {
         XCTAssertTrue(reopenedPlan.isDayComplete)
         try reopened.close()
     }
+
+    func testFetchScopeSummarySeparatesDeckProgressFromGlobal() async throws {
+        let fixture = try await StudySessionFixture.make()
+        defer { fixture.remove() }
+        let deckB = try await fixture.addDeck()
+        let noteA = try await fixture.addVocabularyNote()
+        let cardA = try await fixture.addCard(
+            noteID: noteA,
+            template: .vocabularyJapaneseToChinese
+        )
+        let noteB = try await fixture.addVocabularyNote(deckID: deckB)
+        let cardB = try await fixture.addCard(
+            noteID: noteB,
+            template: .vocabularyJapaneseToChinese
+        )
+        let service = fixture.makeService()
+
+        let plan = try await service.buildTodayPlan(defaultTimeZoneID: "Asia/Shanghai")
+        XCTAssertEqual(Set(plan.availableNow.map(\.cardID)), [cardA, cardB])
+
+        let beforeA = try await service.fetchScopeSummary(
+            studyDay: plan.studyDay, deckID: fixture.deckID
+        )
+        XCTAssertEqual(beforeA.remainingCount, 1)
+        XCTAssertEqual(beforeA.completedCount, 0)
+
+        let card = try await service.loadReviewCard(cardID: cardA)
+        _ = try await service.submit(
+            card: card,
+            rating: .easy,
+            studyDay: plan.studyDay,
+            eventID: UUID(),
+            durationMilliseconds: 600
+        )
+
+        let afterA = try await service.fetchScopeSummary(
+            studyDay: plan.studyDay, deckID: fixture.deckID
+        )
+        XCTAssertEqual(afterA.remainingCount, 0)
+        XCTAssertEqual(afterA.completedCount, 1)
+        let afterB = try await service.fetchScopeSummary(
+            studyDay: plan.studyDay, deckID: deckB
+        )
+        XCTAssertEqual(afterB.remainingCount, 1)
+        XCTAssertEqual(afterB.completedCount, 0)
+        let global = try await service.fetchScopeSummary(
+            studyDay: plan.studyDay, deckID: nil
+        )
+        XCTAssertEqual(global.remainingCount, 1)
+        XCTAssertEqual(global.completedCount, 1)
+    }
 }
 
 private final class StudySessionClock: SchedulingClock, @unchecked Sendable {
@@ -193,9 +244,21 @@ private final class StudySessionFixture: @unchecked Sendable {
         )
     }
 
-    func addVocabularyNote() async throws -> UUID {
+    func addDeck() async throws -> UUID {
+        let id = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms) VALUES (?, 'P11-B', 1, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(id)]
+            )
+        }
+        return id
+    }
+
+    func addVocabularyNote(deckID: UUID? = nil) async throws -> UUID {
         let noteID = UUID()
         let exampleID = UUID()
+        let deckID = deckID ?? self.deckID
         try await database.pool.write { db in
             try db.execute(
                 sql: """

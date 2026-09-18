@@ -62,6 +62,9 @@ public struct VocabularyContentCommit: Equatable, Sendable {
     public let createdAt: Date
     public let origin: ContentOrigin
     public let sourceRef: String?
+    /// The exact text the user processed (capture commits only). Persisted to
+    /// notes.source_text; never occupies source_ref.
+    public let sourceText: String?
 
     public init(
         noteID: UUID,
@@ -74,7 +77,8 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         schedulerProfileID: UUID,
         createdAt: Date,
         origin: ContentOrigin = .manual,
-        sourceRef: String? = nil
+        sourceRef: String? = nil,
+        sourceText: String? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
@@ -87,6 +91,7 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         self.createdAt = createdAt
         self.origin = origin
         self.sourceRef = sourceRef
+        self.sourceText = sourceText
     }
 }
 
@@ -100,6 +105,8 @@ public struct GrammarContentCommit: Equatable, Sendable {
     public let card: NewCardSeed
     public let schedulerProfileID: UUID
     public let createdAt: Date
+    public let origin: ContentOrigin
+    public let sourceText: String?
 
     public init(
         noteID: UUID,
@@ -110,7 +117,9 @@ public struct GrammarContentCommit: Equatable, Sendable {
         tags: [KnowledgeTag],
         card: NewCardSeed,
         schedulerProfileID: UUID,
-        createdAt: Date
+        createdAt: Date,
+        origin: ContentOrigin = .manual,
+        sourceText: String? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
@@ -121,6 +130,8 @@ public struct GrammarContentCommit: Equatable, Sendable {
         self.card = card
         self.schedulerProfileID = schedulerProfileID
         self.createdAt = createdAt
+        self.origin = origin
+        self.sourceText = sourceText
     }
 }
 
@@ -147,8 +158,14 @@ public struct CardDirectionReplacement: Equatable, Sendable {
 }
 
 public protocol ContentCardRepository: Sendable {
-    func commitVocabulary(_ commit: VocabularyContentCommit) async throws -> ContentCommitResult
-    func commitGrammar(_ commit: GrammarContentCommit) async throws -> ContentCommitResult
+    func commitVocabulary(
+        _ commit: VocabularyContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult
+    func commitGrammar(
+        _ commit: GrammarContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult
     func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState]
     func replaceEnabledCardDirections(
         _ replacement: CardDirectionReplacement
@@ -177,7 +194,8 @@ public struct ContentCardService: Sendable {
         directions: Set<VocabularyCardDirection>,
         rawTagNames: [String] = [],
         origin: ContentOrigin = .manual,
-        sourceRef: String? = nil
+        sourceRef: String? = nil,
+        capture: CaptureCommitContext? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -203,9 +221,10 @@ public struct ContentCardService: Sendable {
             schedulerProfileID: makeID(),
             createdAt: now(),
             origin: origin,
-            sourceRef: sourceRef
+            sourceRef: sourceRef,
+            sourceText: capture?.sourceText
         )
-        return try await repository.commitVocabulary(commit)
+        return try await repository.commitVocabulary(commit, capture: capture)
     }
 
     public func commitGrammar(
@@ -213,7 +232,9 @@ public struct ContentCardService: Sendable {
         deckID: UUID?,
         formData: GrammarFormData,
         includesDirection: Bool,
-        rawTagNames: [String] = []
+        rawTagNames: [String] = [],
+        origin: ContentOrigin = .manual,
+        capture: CaptureCommitContext? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -230,9 +251,11 @@ public struct ContentCardService: Sendable {
             tags: try makeTags(rawTagNames),
             card: NewCardSeed(id: makeID(), templateKind: .grammarFormToExplanation),
             schedulerProfileID: makeID(),
-            createdAt: now()
+            createdAt: now(),
+            origin: origin,
+            sourceText: capture?.sourceText
         )
-        return try await repository.commitGrammar(commit)
+        return try await repository.commitGrammar(commit, capture: capture)
     }
 
     public func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState] {

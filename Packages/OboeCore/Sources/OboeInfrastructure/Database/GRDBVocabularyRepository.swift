@@ -80,36 +80,34 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
                     SELECT id, payload_version, payload_json, updated_at_ms
                     FROM drafts
                     WHERE draft_kind = 'vocabulary'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM inbox_processing_contexts ipc
+                          WHERE ipc.draft_id = drafts.id
+                      )
                     ORDER BY updated_at_ms DESC, id DESC
                     LIMIT 1
                     """
             ) else {
                 return nil
             }
+            return try Self.decodeDraft(row)
+        }
+    }
 
-            let payloadVersion: Int = row["payload_version"]
-            guard payloadVersion == Self.draftPayloadVersion else {
-                throw GRDBVocabularyRepositoryError.unsupportedDraftPayloadVersion(payloadVersion)
+    public func fetchVocabularyDraft(id: UUID) async throws -> VocabularyDraft? {
+        try await pool.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT id, payload_version, payload_json, updated_at_ms
+                    FROM drafts
+                    WHERE id = ? AND draft_kind = 'vocabulary'
+                    """,
+                arguments: [DatabaseValueCodec.encode(id)]
+            ) else {
+                return nil
             }
-            let payloadJSON: String = row["payload_json"]
-            guard let data = payloadJSON.data(using: .utf8) else {
-                throw GRDBVocabularyRepositoryError.invalidDraftPayload
-            }
-            let payload: DraftPayload
-            do {
-                payload = try JSONDecoder().decode(DraftPayload.self, from: data)
-            } catch {
-                throw GRDBVocabularyRepositoryError.invalidDraftPayload
-            }
-
-            let idValue: String = row["id"]
-            let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
-            return VocabularyDraft(
-                id: try DatabaseValueCodec.decodeUUID(idValue),
-                deckID: payload.deckID,
-                formData: payload.formData,
-                updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
-            )
+            return try Self.decodeDraft(row)
         }
     }
 
@@ -294,6 +292,32 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
             createdAt: DatabaseValueCodec.decodeDate(milliseconds: createdAtMilliseconds),
             updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds),
             examples: examples
+        )
+    }
+
+    private static func decodeDraft(_ row: Row) throws -> VocabularyDraft {
+        let payloadVersion: Int = row["payload_version"]
+        guard payloadVersion == Self.draftPayloadVersion else {
+            throw GRDBVocabularyRepositoryError.unsupportedDraftPayloadVersion(payloadVersion)
+        }
+        let payloadJSON: String = row["payload_json"]
+        guard let data = payloadJSON.data(using: .utf8) else {
+            throw GRDBVocabularyRepositoryError.invalidDraftPayload
+        }
+        let payload: DraftPayload
+        do {
+            payload = try JSONDecoder().decode(DraftPayload.self, from: data)
+        } catch {
+            throw GRDBVocabularyRepositoryError.invalidDraftPayload
+        }
+
+        let idValue: String = row["id"]
+        let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
+        return VocabularyDraft(
+            id: try DatabaseValueCodec.decodeUUID(idValue),
+            deckID: payload.deckID,
+            formData: payload.formData,
+            updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
         )
     }
 

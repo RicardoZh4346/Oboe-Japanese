@@ -22,15 +22,15 @@ final class DatabaseLifecycleTests: XCTestCase {
         let snapshotDatabase = try await service.openValidatedSnapshot(at: snapshot.url)
         defer { try? snapshotDatabase.close() }
 
-        let savedDeck = try snapshotDatabase.read { db in
+        let savedDeck = try await snapshotDatabase.read { db in
             try Row.fetchOne(
                 db,
                 sql: "SELECT id, name FROM decks WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(deckID)]
-            )
+            ).map { ($0["id"] as String?, $0["name"] as String?) }
         }
-        XCTAssertEqual(savedDeck?["name"], "一致快照")
-        XCTAssertEqual(savedDeck?["id"], DatabaseValueCodec.encode(deckID))
+        XCTAssertEqual(savedDeck?.1, "一致快照")
+        XCTAssertEqual(savedDeck?.0, DatabaseValueCodec.encode(deckID))
     }
 
     func testDailySnapshotsAreCreatedOncePerDayAndKeepLatestThree() async throws {

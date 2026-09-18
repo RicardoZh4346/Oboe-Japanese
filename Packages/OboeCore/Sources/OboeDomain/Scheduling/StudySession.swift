@@ -110,6 +110,17 @@ public struct StudySessionService: Sendable {
         try await planBuilder(at: clock.now(), defaultTimeZoneID: defaultTimeZoneID)
     }
 
+    public func fetchScopeSummary(
+        studyDay: StudyDay,
+        deckID: UUID?
+    ) async throws -> TodayStudySummary {
+        try await queueRepository.fetchSummary(
+            for: studyDay,
+            deckID: deckID,
+            at: clock.now()
+        )
+    }
+
     public func loadLearningSettings(
         defaultTimeZoneID: String
     ) async throws -> StudyPlanningSettings {

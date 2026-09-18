@@ -10,7 +10,8 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
     }
 
     public func commitSentenceAnalysisCards(
-        _ batch: SentenceAnalysisCardBatchCommit
+        _ batch: SentenceAnalysisCardBatchCommit,
+        capture: CaptureCommitContext?
     ) async throws -> SentenceAnalysisCardBatchResult {
         guard !batch.items.isEmpty else {
             throw SentenceAnalysisCardCreationError.selectionRequired
@@ -21,6 +22,18 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
             )
         }
         return try await pool.write { db in
+            if let capture {
+                let digest = CaptureCommitDigest.batch(batch)
+                if let receipt = try GRDBInboxRepository.fetchCommitReceiptRow(
+                    operationID: capture.operationID,
+                    in: db
+                ) {
+                    return try Self.replayCommitReceipt(
+                        receipt,
+                        expectedPayloadHash: digest
+                    )
+                }
+            }
             try Self.requireDeck(batch.deckID, in: db)
             guard batch.items.allSatisfy({ item in
                 switch item {
@@ -45,8 +58,58 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                     cardCount += 1
                 }
             }
-            return SentenceAnalysisCardBatchResult(noteIDs: noteIDs, cardCount: cardCount)
+            let result = SentenceAnalysisCardBatchResult(
+                noteIDs: noteIDs,
+                cardCount: cardCount
+            )
+            if let capture {
+                let committedAt = batch.items.first?.createdAt ?? Date()
+                try GRDBContentCardRepository.recordCaptureCommit(
+                    capture,
+                    payloadHash: CaptureCommitDigest.batch(batch),
+                    resultJSON: Self.encodeBatchResult(result),
+                    inboxItemID: capture.inboxItemID,
+                    at: committedAt,
+                    in: db
+                )
+            }
+            return result
         }
+    }
+
+    /// Identical semantics to the single-commit receipt replay.
+    static func replayCommitReceipt(
+        _ receiptRow: Row,
+        expectedPayloadHash: String
+    ) throws -> SentenceAnalysisCardBatchResult {
+        let receipt = try GRDBInboxRepository.decodeCommitReceipt(receiptRow)
+        guard receipt.payloadHash == expectedPayloadHash else {
+            throw InboxError.commitPayloadConflict(operationID: receipt.operationID)
+        }
+        return try decodeBatchResult(receipt.resultJSON)
+    }
+
+    static func encodeBatchResult(_ result: SentenceAnalysisCardBatchResult) -> String {
+        let ids = result.noteIDs
+            .map { "\"" + $0.uuidString + "\"" }
+            .joined(separator: ",")
+        return #"{"note_ids":["# + ids + #"],"card_count":"# + String(result.cardCount) + "}"
+    }
+
+    static func decodeBatchResult(_ json: String) throws -> SentenceAnalysisCardBatchResult {
+        struct Stored: Decodable {
+            let noteIDs: [UUID]
+            let cardCount: Int
+            enum CodingKeys: String, CodingKey {
+                case noteIDs = "note_ids"
+                case cardCount = "card_count"
+            }
+        }
+        let stored = try JSONDecoder().decode(Stored.self, from: Data(json.utf8))
+        return SentenceAnalysisCardBatchResult(
+            noteIDs: stored.noteIDs,
+            cardCount: stored.cardCount
+        )
     }
 
     private static func insertVocabulary(
@@ -63,9 +126,9 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
             sql: """
                 INSERT INTO notes(
                     id, deck_id, kind, headword, reading, meaning_zh,
-                    part_of_speech, jlpt, notes, origin, content_version,
-                    created_at_ms, updated_at_ms
-                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, 'ai', 1, ?, ?)
+                    part_of_speech, jlpt, notes, origin, source_text,
+                    content_version, created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
             arguments: [
                 DatabaseValueCodec.encode(commit.noteID),
@@ -76,6 +139,8 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 commit.content.partOfSpeech,
                 commit.content.jlpt?.rawValue,
                 commit.content.notes,
+                commit.origin.rawValue,
+                commit.sourceText,
                 timestamp,
                 timestamp
             ]
@@ -121,9 +186,9 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
             sql: """
                 INSERT INTO notes(
                     id, deck_id, kind, headword, meaning_zh, usage,
-                    connection, jlpt, notes, origin, content_version,
-                    created_at_ms, updated_at_ms
-                ) VALUES (?, ?, 'grammar', ?, ?, ?, ?, ?, ?, 'ai', 1, ?, ?)
+                    connection, jlpt, notes, origin, source_text,
+                    content_version, created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'grammar', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
             arguments: [
                 DatabaseValueCodec.encode(commit.noteID),
@@ -134,6 +199,8 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 commit.content.connection,
                 commit.content.jlpt?.rawValue,
                 commit.content.notes,
+                commit.origin.rawValue,
+                commit.sourceText,
                 timestamp,
                 timestamp
             ]

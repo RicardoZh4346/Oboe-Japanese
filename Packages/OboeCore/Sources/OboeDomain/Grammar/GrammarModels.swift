@@ -202,6 +202,7 @@ public protocol GrammarRepository: Sendable {
     func fetchGrammar(id: UUID) async throws -> GrammarNote?
     func saveGrammarDraft(_ draft: GrammarDraft) async throws
     func fetchLatestGrammarDraft() async throws -> GrammarDraft?
+    func fetchGrammarDraft(id: UUID) async throws -> GrammarDraft?
     func deleteGrammarDraft(id: UUID) async throws
     func updateGrammar(
         id: UUID,
@@ -244,6 +245,10 @@ public struct GrammarService: Sendable {
 
     public func fetchLatestDraft() async throws -> GrammarDraft? {
         try await repository.fetchLatestGrammarDraft()
+    }
+
+    public func fetchDraft(id: UUID) async throws -> GrammarDraft? {
+        try await repository.fetchGrammarDraft(id: id)
     }
 
     public func deleteDraft(id: UUID) async throws {

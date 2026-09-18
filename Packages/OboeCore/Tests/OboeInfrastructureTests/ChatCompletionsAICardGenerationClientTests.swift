@@ -163,10 +163,15 @@ final class ChatCompletionsAICardGenerationClientTests: XCTestCase {
             database: source,
             workingDirectoryURL: fixture.exportsURL
         ).export(appVersion: "P18-test", at: Date(timeIntervalSince1970: 100))
+        // v3 restore lands in T17; exercise the v2 restore contract meanwhile.
+        let restorableURL = fixture.exportsURL.appendingPathComponent("v2.oboe-backup")
+        try rewriteBackup(backup.url, to: restorableURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 2)
+        }
         let prepared = try await PortableBackupRestorationPreparer(
             currentDatabase: current,
             workingDirectoryURL: fixture.preparationsURL
-        ).prepare(fileURL: backup.url)
+        ).prepare(fileURL: restorableURL)
         let imported = try OboeDatabase(path: prepared.temporaryDatabaseURL.path)
         let restoredDraft = try await GRDBVocabularyRepository(database: imported).fetchLatestVocabularyDraft()
 

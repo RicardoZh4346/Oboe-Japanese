@@ -51,11 +51,12 @@ final class GRDBGrammarAndKnowledgePointRepositoryTests: XCTestCase {
         XCTAssertEqual(vocabularyDraft?.id, vocabularyDraftID)
         XCTAssertEqual(vocabularyDraft?.formData.reading, "けいけん")
 
-        let payloads = try reopened.pool.read { db in
+        let payloads = try await reopened.pool.read { db in
             try Row.fetchAll(db, sql: "SELECT draft_kind, payload_json FROM drafts")
+                .map { ($0["draft_kind"] as String?, $0["payload_json"] as String?) }
         }
-        let grammarJSON: String? = payloads.first { ($0["draft_kind"] as String) == "grammar" }?["payload_json"]
-        let vocabularyJSON: String? = payloads.first { ($0["draft_kind"] as String) == "vocabulary" }?["payload_json"]
+        let grammarJSON = payloads.first { $0.0 == "grammar" }?.1
+        let vocabularyJSON = payloads.first { $0.0 == "vocabulary" }?.1
         XCTAssertFalse(grammarJSON?.contains("reading") == true)
         XCTAssertFalse(vocabularyJSON?.contains("usage") == true)
     }

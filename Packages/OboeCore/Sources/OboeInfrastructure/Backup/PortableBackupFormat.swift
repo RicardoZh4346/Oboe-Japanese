@@ -2,9 +2,20 @@ import Foundation
 
 public enum PortableBackupFormat {
     public static let identifier = "oboe-portable-backup"
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     public static let fileExtension = "oboe-backup"
     public static let checksumAlgorithm = "sha256"
+
+    /// Data categories the portable backup deliberately excludes. Surfaced in
+    /// the v3 manifest (`excludedScopes`) so restore previews can explain scope
+    /// without parsing the body.
+    public static let excludedScopes: [String] = [
+        "credentials",
+        "aiConnectionConfiguration",
+        "sharedTransferFiles",
+        "imageAttachments",
+        "derivedSearchIndex"
+    ]
 }
 
 struct PortableBackupTableSpecification: Sendable {
@@ -140,6 +151,63 @@ enum PortableBackupFormatV2 {
                 ],
                 orderBy: "id"
             )
+        }
+
+    static let recordTypes = tableSpecifications.map(\.recordType)
+    static let specificationByRecordType = Dictionary(
+        uniqueKeysWithValues: tableSpecifications.map { ($0.recordType, $0) }
+    )
+}
+
+enum PortableBackupFormatV3 {
+    static let inboxItem = PortableBackupTableSpecification(
+        tableName: "inbox_items",
+        recordType: "inboxItem",
+        columns: [
+            "id", "text", "source_type", "status", "content_revision",
+            "source_app", "source_url", "image_reference",
+            "created_at_ms", "updated_at_ms", "processed_at_ms",
+            "archived_at_ms", "status_before_archive"
+        ],
+        orderBy: "created_at_ms, id"
+    )
+
+    static let processingContext = PortableBackupTableSpecification(
+        tableName: "inbox_processing_contexts",
+        recordType: "inboxProcessingContext",
+        columns: [
+            "id", "inbox_item_id", "content_revision", "input_text", "mode",
+            "draft_id", "payload_version", "resume_payload_json", "updated_at_ms"
+        ],
+        orderBy: "inbox_item_id, id"
+    )
+
+    static let importReceipt = PortableBackupTableSpecification(
+        tableName: "capture_import_receipts",
+        recordType: "captureImportReceipt",
+        columns: ["capture_id", "payload_hash", "inbox_item_id", "imported_at_ms"],
+        orderBy: "capture_id"
+    )
+
+    static let commitReceipt = PortableBackupTableSpecification(
+        tableName: "inbox_commit_receipts",
+        recordType: "inboxCommitReceipt",
+        columns: [
+            "operation_id", "processing_context_id", "payload_hash",
+            "result_json", "committed_at_ms"
+        ],
+        orderBy: "operation_id"
+    )
+
+    /// v2 records plus the Inbox pipeline. New records sit after `draft` (which
+    /// processing contexts may reference via draft_id) and before `settings`,
+    /// keeping every pre-existing record type in its original slot.
+    static let tableSpecifications: [PortableBackupTableSpecification] =
+        PortableBackupFormatV2.tableSpecifications.flatMap { specification in
+            guard specification.recordType == "settings" else {
+                return [specification]
+            }
+            return [inboxItem, processingContext, importReceipt, commitReceipt, specification]
         }
 
     static let recordTypes = tableSpecifications.map(\.recordType)

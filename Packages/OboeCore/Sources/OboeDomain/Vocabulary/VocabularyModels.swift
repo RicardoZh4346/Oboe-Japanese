@@ -259,6 +259,7 @@ public protocol VocabularyRepository: Sendable {
     func fetchVocabulary(id: UUID) async throws -> VocabularyNote?
     func saveVocabularyDraft(_ draft: VocabularyDraft) async throws
     func fetchLatestVocabularyDraft() async throws -> VocabularyDraft?
+    func fetchVocabularyDraft(id: UUID) async throws -> VocabularyDraft?
     func deleteVocabularyDraft(id: UUID) async throws
     func updateVocabulary(
         id: UUID,
@@ -309,6 +310,10 @@ public struct VocabularyService: Sendable {
 
     public func fetchLatestDraft() async throws -> VocabularyDraft? {
         try await repository.fetchLatestVocabularyDraft()
+    }
+
+    public func fetchDraft(id: UUID) async throws -> VocabularyDraft? {
+        try await repository.fetchVocabularyDraft(id: id)
     }
 
     public func deleteDraft(id: UUID) async throws {

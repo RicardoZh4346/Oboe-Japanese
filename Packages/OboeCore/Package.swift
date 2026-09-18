@@ -10,7 +10,8 @@ let package = Package(
     ],
     products: [
         .library(name: "OboeDomain", targets: ["OboeDomain"]),
-        .library(name: "OboeInfrastructure", targets: ["OboeInfrastructure"])
+        .library(name: "OboeInfrastructure", targets: ["OboeInfrastructure"]),
+        .library(name: "OboeSharedCapture", targets: ["OboeSharedCapture"])
     ],
     dependencies: [
         .package(
@@ -24,10 +25,12 @@ let package = Package(
     ],
     targets: [
         .target(name: "OboeDomain"),
+        .target(name: "OboeSharedCapture"),
         .target(
             name: "OboeInfrastructure",
             dependencies: [
                 "OboeDomain",
+                "OboeSharedCapture",
                 .product(name: "FSRS", package: "swift-fsrs"),
                 .product(name: "GRDB", package: "GRDB.swift")
             ]
@@ -40,6 +43,7 @@ let package = Package(
             name: "OboeInfrastructureTests",
             dependencies: [
                 "OboeInfrastructure",
+                "OboeSharedCapture",
                 .product(name: "GRDB", package: "GRDB.swift")
             ],
             resources: [.copy("Fixtures")]

@@ -69,6 +69,59 @@ public struct GRDBStudyHistoryRepository: StudyHistoryRepository, Sendable {
         }
     }
 
+    public func fetchCompletionStatistics(
+        studyDayID: UUID,
+        deckID: UUID?
+    ) async throws -> StudyCompletionStatistics {
+        try await pool.read { db in
+            var sql = """
+                SELECT card_key,
+                       MAX(was_first_study) AS had_first_study,
+                       COUNT(*) AS card_answer_count,
+                       SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) AS again_count,
+                       SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) AS hard_count,
+                       SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END) AS good_count,
+                       SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END) AS easy_count
+                FROM review_logs
+                WHERE study_day_id = ? AND undone_at_ms IS NULL
+                """
+            var values: [any DatabaseValueConvertible] = [
+                DatabaseValueCodec.encode(studyDayID)
+            ]
+            if let deckID {
+                sql += "\nAND deck_id_at_review = ?"
+                values.append(DatabaseValueCodec.encode(deckID))
+            }
+            sql += "\nGROUP BY card_key"
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(values))
+            var newLearnedCardCount = 0
+            var reviewedCardCount = 0
+            var answerCount = 0
+            var ratings = RatingDistribution(again: 0, hard: 0, good: 0, easy: 0)
+            for row in rows {
+                let hadFirstStudy: Int = row["had_first_study"]
+                if hadFirstStudy == 1 {
+                    newLearnedCardCount += 1
+                } else {
+                    reviewedCardCount += 1
+                }
+                answerCount += row["card_answer_count"]
+                ratings = RatingDistribution(
+                    again: ratings.again + (row["again_count"] as Int),
+                    hard: ratings.hard + (row["hard_count"] as Int),
+                    good: ratings.good + (row["good_count"] as Int),
+                    easy: ratings.easy + (row["easy_count"] as Int)
+                )
+            }
+            return StudyCompletionStatistics(
+                newLearnedCardCount: newLearnedCardCount,
+                reviewedCardCount: reviewedCardCount,
+                answerCount: answerCount,
+                ratings: ratings
+            )
+        }
+    }
+
     public func fetchCardHistories(noteID: UUID) async throws -> [CardReviewHistory] {
         try await pool.read { db in
             let noteIDValue = DatabaseValueCodec.encode(noteID)

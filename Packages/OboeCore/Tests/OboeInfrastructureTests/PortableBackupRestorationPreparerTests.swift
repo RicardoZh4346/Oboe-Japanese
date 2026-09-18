@@ -19,10 +19,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         ).export(appVersion: "0.1.0-test", at: fixture.exportedAt)
         let legacyBackupURL = fixture.rootURL.appendingPathComponent("legacy-v1.oboe-backup")
         try rewriteBackup(backup.url, to: legacyBackupURL) { objects in
-            objects[0]["formatVersion"] = 1
-            for index in objects.indices where objects[index]["recordType"] as? String == "note" {
-                objects[index].removeValue(forKey: "source_ref")
-            }
+            downgradeBackupToLegacyFormat(&objects, version: 1)
         }
         let preparer = PortableBackupRestorationPreparer(
             currentDatabase: current,
@@ -32,7 +29,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let prepared = try await preparer.prepare(fileURL: legacyBackupURL)
 
         XCTAssertEqual(prepared.sourceFormatVersion, 1)
-        XCTAssertEqual(prepared.preparedFormatVersion, 2)
+        XCTAssertEqual(prepared.preparedFormatVersion, 3)
         XCTAssertEqual(prepared.sourceAppVersion, "0.1.0-test")
         XCTAssertEqual(prepared.exportedAt, fixture.exportedAt)
         XCTAssertEqual(prepared.backup.deckCount, 1)
@@ -75,7 +72,11 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
     func testDamagedChecksumIsRejectedAndNeverChangesCurrentDatabase() async throws {
         let fixture = try RestorationTestFixture()
         defer { fixture.remove() }
-        let (current, backupURL) = try await makeValidBackup(in: fixture)
+        let (current, exportedURL) = try await makeValidBackup(in: fixture)
+        let backupURL = fixture.rootURL.appendingPathComponent("legacy-v2.oboe-backup")
+        try rewriteBackup(exportedURL, to: backupURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 2)
+        }
         var text = try String(contentsOf: backupURL, encoding: .utf8)
         text = text.replacingOccurrences(of: "完整备份", with: "损坏备份")
         let damagedURL = fixture.rootURL.appendingPathComponent("damaged.oboe-backup")
@@ -103,8 +104,8 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let (current, backupURL) = try await makeValidBackup(in: fixture)
         var futureText = try String(contentsOf: backupURL, encoding: .utf8)
         futureText = futureText.replacingOccurrences(
-            of: #""formatVersion":2"#,
-            with: #""formatVersion":3"#
+            of: #""formatVersion":3"#,
+            with: #""formatVersion":99"#
         )
         let futureURL = fixture.rootURL.appendingPathComponent("future.oboe-backup")
         try Data(futureText.utf8).write(to: futureURL)
@@ -117,11 +118,23 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             _ = try await normalPreparer.prepare(fileURL: futureURL)
             XCTFail("Future formats must be rejected")
         } catch let error as PortableBackupPreparationError {
-            XCTAssertEqual(error, .futureFormatVersion(3))
+            XCTAssertEqual(error, .futureFormatVersion(99))
         }
 
+        // A genuine v3 export is the current format — fully restorable.
+        let v3Preparation = try await normalPreparer.prepare(fileURL: backupURL)
+        XCTAssertEqual(v3Preparation.sourceFormatVersion, 3)
+        XCTAssertEqual(v3Preparation.preparedFormatVersion, 3)
+        try await normalPreparer.discard(v3Preparation)
+
+        // Field/record validation happens after the version gate, so exercise
+        // the limits against a restorable v2 file.
+        let restorableURL = fixture.rootURL.appendingPathComponent("restorable-v2.oboe-backup")
+        try rewriteBackup(backupURL, to: restorableURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 2)
+        }
         let fileSize = try XCTUnwrap(
-            (try FileManager.default.attributesOfItem(atPath: backupURL.path)[.size] as? NSNumber)?
+            (try FileManager.default.attributesOfItem(atPath: restorableURL.path)[.size] as? NSNumber)?
                 .int64Value
         )
         let sizeLimitedPreparer = PortableBackupRestorationPreparer(
@@ -130,7 +143,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             limits: PortableBackupPreparationLimits(maximumFileBytes: fileSize - 1)
         )
         do {
-            _ = try await sizeLimitedPreparer.prepare(fileURL: backupURL)
+            _ = try await sizeLimitedPreparer.prepare(fileURL: restorableURL)
             XCTFail("Oversized files must be rejected")
         } catch let error as PortableBackupPreparationError {
             XCTAssertEqual(error, .fileTooLarge(actual: fileSize, limit: fileSize - 1))
@@ -142,7 +155,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             limits: PortableBackupPreparationLimits(maximumLineBytes: 32)
         )
         do {
-            _ = try await lineLimitedPreparer.prepare(fileURL: backupURL)
+            _ = try await lineLimitedPreparer.prepare(fileURL: restorableURL)
             XCTFail("Oversized lines must be rejected")
         } catch let error as PortableBackupPreparationError {
             XCTAssertEqual(error, .lineTooLarge(line: 1, limit: 32))
@@ -154,7 +167,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             limits: PortableBackupPreparationLimits(maximumRecordCount: 1)
         )
         do {
-            _ = try await recordLimitedPreparer.prepare(fileURL: backupURL)
+            _ = try await recordLimitedPreparer.prepare(fileURL: restorableURL)
             XCTFail("Excessive declared record counts must be rejected")
         } catch let error as PortableBackupPreparationError {
             XCTAssertEqual(error, .tooManyRecords(declared: 12, limit: 1))
@@ -166,7 +179,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             limits: PortableBackupPreparationLimits(maximumStringBytes: 8)
         )
         do {
-            _ = try await stringLimitedPreparer.prepare(fileURL: backupURL)
+            _ = try await stringLimitedPreparer.prepare(fileURL: restorableURL)
             XCTFail("Oversized string fields must be rejected")
         } catch let error as PortableBackupPreparationError {
             guard case .invalidRecord = error else {
@@ -182,7 +195,13 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
     func testMissingProfileReferenceAndUnknownSchedulingAlgorithmAreRejected() async throws {
         let fixture = try RestorationTestFixture()
         defer { fixture.remove() }
-        let (current, backupURL) = try await makeValidBackup(in: fixture)
+        let (current, exportedURL) = try await makeValidBackup(in: fixture)
+        // Field-level validation runs only for restorable versions (v1/v2
+        // until T17), so downgrade the export before mutating records.
+        let backupURL = fixture.rootURL.appendingPathComponent("legacy-v2.oboe-backup")
+        try rewriteBackup(exportedURL, to: backupURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 2)
+        }
         let missingProfileURL = fixture.rootURL.appendingPathComponent("missing-profile.oboe-backup")
         try rewriteBackup(backupURL, to: missingProfileURL) { objects in
             objects.removeAll { $0["recordType"] as? String == "profile" }
@@ -230,6 +249,8 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             workingDirectoryURL: fixture.preparationsURL
         )
         let prepared = try await preparer.prepare(fileURL: backupURL)
+        XCTAssertEqual(prepared.sourceFormatVersion, 3)
+        XCTAssertTrue(prepared.restoresInboxData)
         try current.close()
         let lifecycle = OboeDatabaseLifecycle(
             databaseURL: fixture.currentDatabaseURL,
@@ -477,42 +498,6 @@ private extension PortableBackupRestorationPreparerTests {
                 arguments: [encode(noteID)]
             )
         }
-    }
-
-    func rewriteBackup(
-        _ sourceURL: URL,
-        to destinationURL: URL,
-        transform: (inout [[String: Any]]) -> Void
-    ) throws {
-        let source = try Data(contentsOf: sourceURL)
-        var objects = try source.split(separator: 0x0A).map { line -> [String: Any] in
-            try XCTUnwrap(
-                JSONSerialization.jsonObject(with: Data(line)) as? [String: Any]
-            )
-        }
-        XCTAssertEqual(objects.removeLast()["recordType"] as? String, "footer")
-        transform(&objects)
-
-        var output = Data()
-        var hasher = SHA256()
-        for object in objects {
-            var line = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-            line.append(0x0A)
-            output.append(line)
-            hasher.update(data: line)
-        }
-        let checksum = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        var footer = try JSONSerialization.data(
-            withJSONObject: [
-                "recordType": "footer",
-                "checksumAlgorithm": "sha256",
-                "checksum": checksum
-            ],
-            options: [.sortedKeys]
-        )
-        footer.append(0x0A)
-        output.append(footer)
-        try output.write(to: destinationURL)
     }
 
     func assertCurrentDatabaseAndPreparationDirectoryAreUntouched(

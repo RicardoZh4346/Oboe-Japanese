@@ -80,20 +80,24 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         XCTAssertEqual(repeated.imported, 0)
         XCTAssertEqual(repeated.skipped, 1)
 
-        let values = try database.pool.read { db in
+        let values = try await database.pool.read { db in
+            let card = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT state, due_at_ms, stability, difficulty, reps, state_version
+                    FROM cards WHERE template_kind = 'vocabulary_zh_ja'
+                    """
+            ).map { (
+                $0["state"] as Int?, $0["due_at_ms"] as Int64?, $0["stability"] as Double?,
+                $0["difficulty"] as Double?, $0["reps"] as Int?, $0["state_version"] as Int?
+            ) }
             return (
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? -1,
                 try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cards") ?? -1,
                 try String.fetchOne(db, sql: "SELECT origin FROM notes"),
                 try String.fetchOne(db, sql: "SELECT source_ref FROM notes"),
                 try String.fetchOne(db, sql: "SELECT meaning_zh FROM notes"),
-                try Row.fetchOne(
-                    db,
-                    sql: """
-                        SELECT state, due_at_ms, stability, difficulty, reps, state_version
-                        FROM cards WHERE template_kind = 'vocabulary_zh_ja'
-                        """
-                )
+                card
             )
         }
         XCTAssertEqual(values.0, 1)
@@ -101,12 +105,12 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         XCTAssertEqual(values.2, "builtin_jlpt")
         XCTAssertEqual(values.3, vocabulary.id)
         XCTAssertEqual(values.4, "吃")
-        XCTAssertEqual(values.5?["state"] as Int?, 2)
-        XCTAssertEqual(values.5?["due_at_ms"] as Int64?, 999_000)
-        XCTAssertEqual(values.5?["stability"] as Double?, 8.5)
-        XCTAssertEqual(values.5?["difficulty"] as Double?, 4.2)
-        XCTAssertEqual(values.5?["reps"] as Int?, 7)
-        XCTAssertEqual(values.5?["state_version"] as Int?, 7)
+        XCTAssertEqual(values.5?.0, 2)
+        XCTAssertEqual(values.5?.1, 999_000)
+        XCTAssertEqual(values.5?.2, 8.5)
+        XCTAssertEqual(values.5?.3, 4.2)
+        XCTAssertEqual(values.5?.4, 7)
+        XCTAssertEqual(values.5?.5, 7)
         let importedCounts = try await importer.importedCounts()
         XCTAssertEqual(importedCounts[.n5], 1)
         let importedRefs = try await importer.importedSourceRefs([vocabulary.id, "missing"])

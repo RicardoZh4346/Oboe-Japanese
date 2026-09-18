@@ -63,12 +63,18 @@ final class ContentCardServiceTests: XCTestCase {
 private actor ContentCardRepositorySpy: ContentCardRepository {
     private var capturedVocabulary: VocabularyContentCommit?
 
-    func commitVocabulary(_ commit: VocabularyContentCommit) async throws -> ContentCommitResult {
+    func commitVocabulary(
+        _ commit: VocabularyContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult {
         capturedVocabulary = commit
         return ContentCommitResult(noteID: commit.noteID, cardCount: commit.cards.count)
     }
 
-    func commitGrammar(_ commit: GrammarContentCommit) async throws -> ContentCommitResult {
+    func commitGrammar(
+        _ commit: GrammarContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult {
         ContentCommitResult(noteID: commit.noteID, cardCount: 1)
     }
 

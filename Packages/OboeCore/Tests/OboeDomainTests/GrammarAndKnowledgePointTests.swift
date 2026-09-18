@@ -118,6 +118,10 @@ private actor GrammarRepositorySpy: GrammarRepository {
 
     func fetchLatestGrammarDraft() async throws -> GrammarDraft? { draft }
 
+    func fetchGrammarDraft(id: UUID) async throws -> GrammarDraft? {
+        draft?.id == id ? draft : nil
+    }
+
     func deleteGrammarDraft(id: UUID) async throws {
         if draft?.id == id {
             draft = nil

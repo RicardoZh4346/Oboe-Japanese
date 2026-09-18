@@ -92,7 +92,8 @@ private actor RecordingSentenceAnalysisCardRepository: SentenceAnalysisCardRepos
     private var commits: [SentenceAnalysisCardBatchCommit] = []
 
     func commitSentenceAnalysisCards(
-        _ batch: SentenceAnalysisCardBatchCommit
+        _ batch: SentenceAnalysisCardBatchCommit,
+        capture: CaptureCommitContext?
     ) async throws -> SentenceAnalysisCardBatchResult {
         commits.append(batch)
         return SentenceAnalysisCardBatchResult(

@@ -52,7 +52,8 @@ public enum OboeDatabaseSchema {
         "v3_search_index_maintenance",
         "v4_ai_configuration_privacy",
         "v5_ai_response_capability",
-        "v6_builtin_jlpt_source"
+        "v6_builtin_jlpt_source",
+        "v7_inbox_capture"
     ]
 
     public static let tableNames: Set<String> = [
@@ -68,7 +69,11 @@ public enum OboeDatabaseSchema {
         "review_logs",
         "drafts",
         "app_settings",
-        "search_documents"
+        "search_documents",
+        "inbox_items",
+        "inbox_processing_contexts",
+        "capture_import_receipts",
+        "inbox_commit_receipts"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -107,6 +112,9 @@ public enum OboeDatabaseSchema {
         }
         migrator.registerMigration(migrationIdentifiers[5]) { db in
             try rebuildNotesForBuiltinJLPT(db)
+        }
+        migrator.registerMigration(migrationIdentifiers[6]) { db in
+            try createInboxCaptureSchema(db)
         }
         return migrator
     }
@@ -382,6 +390,93 @@ public enum OboeDatabaseSchema {
                     normalized_reading = excluded.normalized_reading,
                     normalized_meaning = excluded.normalized_meaning;
             END;
+            """)
+    }
+
+    private static func createInboxCaptureSchema(_ db: Database) throws {
+        let textByteLimit = InboxText.maximumUTF8ByteCount
+        let resumePayloadByteLimit = CaptureResumePayloadFormat.maximumUTF8ByteCount
+        try db.execute(sql: """
+            CREATE TABLE inbox_items (
+                id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                text TEXT NOT NULL CHECK (
+                    length(trim(text)) > 0
+                    AND length(CAST(text AS BLOB)) <= \(textByteLimit)
+                ),
+                source_type TEXT NOT NULL
+                    CHECK (source_type IN ('manual', 'paste', 'share', 'ocr')),
+                status TEXT NOT NULL CHECK (status IN (
+                    'unprocessed', 'processing', 'processed', 'archived'
+                )),
+                content_revision INTEGER NOT NULL DEFAULT 1 CHECK (content_revision >= 1),
+                source_app TEXT,
+                source_url TEXT,
+                image_reference TEXT,
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL,
+                processed_at_ms INTEGER,
+                archived_at_ms INTEGER,
+                status_before_archive TEXT CHECK (status_before_archive IS NULL OR status_before_archive IN (
+                    'unprocessed', 'processing', 'processed'
+                )),
+                CHECK (status = 'archived' OR (archived_at_ms IS NULL AND status_before_archive IS NULL)),
+                CHECK (status != 'archived' OR (archived_at_ms IS NOT NULL AND status_before_archive IS NOT NULL)),
+                CHECK (status != 'processed' OR processed_at_ms IS NOT NULL)
+            );
+
+            CREATE INDEX inbox_items_on_status_created_at
+                ON inbox_items(status, created_at_ms DESC, id DESC);
+            CREATE INDEX inbox_items_on_created_at
+                ON inbox_items(created_at_ms DESC, id DESC);
+
+            CREATE TABLE inbox_processing_contexts (
+                id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                inbox_item_id TEXT NOT NULL
+                    REFERENCES inbox_items(id) ON DELETE CASCADE,
+                content_revision INTEGER NOT NULL CHECK (content_revision >= 1),
+                input_text TEXT NOT NULL CHECK (
+                    length(trim(input_text)) > 0
+                    AND length(CAST(input_text AS BLOB)) <= \(textByteLimit)
+                ),
+                mode TEXT NOT NULL CHECK (mode IN (
+                    'vocabulary_generation', 'grammar_generation',
+                    'sentence_analysis', 'manual_edit'
+                )),
+                draft_id TEXT REFERENCES drafts(id) ON DELETE SET NULL,
+                payload_version INTEGER NOT NULL DEFAULT 1 CHECK (payload_version >= 1),
+                resume_payload_json TEXT CHECK (resume_payload_json IS NULL OR (
+                    json_valid(resume_payload_json)
+                    AND length(CAST(resume_payload_json AS BLOB)) <= \(resumePayloadByteLimit)
+                )),
+                updated_at_ms INTEGER NOT NULL
+            );
+
+            CREATE INDEX inbox_processing_contexts_on_inbox_item_id
+                ON inbox_processing_contexts(inbox_item_id);
+            CREATE INDEX inbox_processing_contexts_on_draft_id
+                ON inbox_processing_contexts(draft_id);
+
+            CREATE TABLE capture_import_receipts (
+                capture_id TEXT PRIMARY KEY NOT NULL CHECK (length(capture_id) = 36),
+                payload_hash TEXT NOT NULL CHECK (length(payload_hash) > 0),
+                inbox_item_id TEXT REFERENCES inbox_items(id) ON DELETE SET NULL,
+                imported_at_ms INTEGER NOT NULL
+            );
+
+            CREATE INDEX capture_import_receipts_on_inbox_item_id
+                ON capture_import_receipts(inbox_item_id);
+
+            CREATE TABLE inbox_commit_receipts (
+                operation_id TEXT PRIMARY KEY NOT NULL CHECK (length(operation_id) = 36),
+                processing_context_id TEXT
+                    REFERENCES inbox_processing_contexts(id) ON DELETE SET NULL,
+                payload_hash TEXT NOT NULL CHECK (length(payload_hash) > 0),
+                result_json TEXT NOT NULL CHECK (json_valid(result_json)),
+                committed_at_ms INTEGER NOT NULL
+            );
+
+            CREATE INDEX inbox_commit_receipts_on_processing_context_id
+                ON inbox_commit_receipts(processing_context_id);
             """)
     }
 }

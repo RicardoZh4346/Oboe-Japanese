@@ -337,9 +337,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5)
         )
-        let showAnswer = app.buttons["review-show-answer-button"]
-        XCTAssertTrue(showAnswer.isHittable)
-        showAnswer.tap()
+        showReviewAnswer(in: app)
 
         for ratingID in ["again", "hard", "good", "easy"] {
             let button = app.buttons["review-rating-\(ratingID)"]
@@ -773,7 +771,8 @@ final class OboeNavigationUITests: XCTestCase {
 
         let headwordField = app.textFields["vocabulary-headword-field"]
         let meaningField = app.textFields["vocabulary-meaning-field"]
-        XCTAssertTrue(headwordField.waitForExistence(timeout: 5))
+        revealExistence(headwordField, in: app)
+        XCTAssertTrue(headwordField.exists)
         let additionalFields = app.buttons["更多字段（可选）"]
         reveal(additionalFields, in: app)
         XCTAssertTrue(additionalFields.exists)
@@ -788,7 +787,9 @@ final class OboeNavigationUITests: XCTestCase {
         dismissKeyboard(in: app)
 
         app.buttons["vocabulary-save-draft-button"].tap()
-        XCTAssertTrue(app.staticTexts["草稿已保存"].waitForExistence(timeout: 5))
+        let savedStatus = app.staticTexts["草稿已保存"]
+        revealExistenceBySwipingDown(savedStatus, in: app)
+        XCTAssertTrue(savedStatus.waitForExistence(timeout: 5))
 
         let formalSave = app.buttons["vocabulary-formal-save-button"]
         reveal(formalSave, in: app)
@@ -982,7 +983,8 @@ final class OboeNavigationUITests: XCTestCase {
         app.tabBars.buttons["添加"].tap()
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
-        XCTAssertTrue(headword.waitForExistence(timeout: 5))
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("taberu")
         meaning.tap()
@@ -1008,7 +1010,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["review-rating-easy"].exists)
-        app.buttons["review-show-answer-button"].tap()
+        showReviewAnswer(in: app)
         XCTAssertTrue(app.descendants(matching: .any)["review-answer"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["review-rating-again"].exists)
         XCTAssertTrue(app.buttons["review-rating-hard"].exists)
@@ -1026,8 +1028,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(deckStart.waitForExistence(timeout: 5))
         deckStart.tap()
         XCTAssertTrue(app.navigationBars["P11 Flow"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["review-show-answer-button"].waitForExistence(timeout: 5))
-        app.buttons["review-show-answer-button"].tap()
+        showReviewAnswer(in: app)
         let easy = app.buttons["review-rating-easy"]
         XCTAssertTrue(easy.waitForExistence(timeout: 3))
         easy.tap()
@@ -1040,8 +1041,7 @@ final class OboeNavigationUITests: XCTestCase {
         undo.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
         XCTAssertFalse(undo.exists)
-        XCTAssertTrue(app.buttons["review-show-answer-button"].waitForExistence(timeout: 3))
-        app.buttons["review-show-answer-button"].tap()
+        showReviewAnswer(in: app)
         XCTAssertTrue(easy.waitForExistence(timeout: 3))
         easy.tap()
         XCTAssertTrue(
@@ -1084,6 +1084,535 @@ final class OboeNavigationUITests: XCTestCase {
             NSPredicate(format: "identifier BEGINSWITH 'card-history-entry-'")
         )
         XCTAssertEqual(historyEntries.count, 2)
+    }
+
+    @MainActor
+    func testReviewAgainWaitsAutoRefreshesWhenDueThenFinishDismisses() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("Again Wait")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Again Wait"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        let headword = app.textFields["vocabulary-headword-field"]
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
+        headword.tap()
+        headword.typeText("nomu")
+        meaning.tap()
+        meaning.typeText("drink")
+        dismissKeyboard(in: app)
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
+        showReviewAnswer(in: app)
+
+        let progressSummary = app.descendants(matching: .any)["review-progress-summary"]
+        XCTAssertTrue(progressSummary.waitForExistence(timeout: 3))
+        XCTAssertTrue(progressSummary.label.contains("剩余 1"))
+        XCTAssertTrue(app.descendants(matching: .any)["review-progress-bar"].exists)
+
+        app.buttons["review-rating-again"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-waiting-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-wait-refresh-button"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(progressSummary.label.contains("剩余 1"))
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 90)
+        )
+        showReviewAnswer(in: app)
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 3))
+        easy.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-statistics-card"].waitForExistence(timeout: 5)
+        )
+        XCTAssertEqual(
+            app.descendants(matching: .any)["review-statistics-new"].label, "新学 1 张"
+        )
+        XCTAssertEqual(
+            app.descendants(matching: .any)["review-statistics-total"].label, "合计 1 张"
+        )
+        XCTAssertEqual(app.staticTexts["review-statistics-rating-again"].label, "重来 1")
+        XCTAssertEqual(app.staticTexts["review-statistics-rating-easy"].label, "简单 1")
+
+        let finish = app.buttons["review-finish-button"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 3))
+        finish.tap()
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testReviewSubmissionFailureRetriesInlineThenCompletes() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_SUBMIT_FAILURES"] = "1"
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("Retry Flow")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Retry Flow"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        let headword = app.textFields["vocabulary-headword-field"]
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
+        headword.tap()
+        headword.typeText("yomu")
+        meaning.tap()
+        meaning.typeText("read")
+        dismissKeyboard(in: app)
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
+        showReviewAnswer(in: app)
+
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 3))
+        easy.tap()
+
+        let retry = app.buttons["review-retry-button"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 5), "首次保存失败后应显示内联重试")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-answer"].exists,
+            "保存失败后应停留在原卡答案面"
+        )
+        XCTAssertTrue(app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS '评分未保存'")
+        ).firstMatch.exists)
+
+        retry.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertEqual(
+            app.descendants(matching: .any)["review-statistics-total"].label, "合计 1 张"
+        )
+    }
+
+    @MainActor
+    func testReviewSpeechUnavailableKeepsStudyActionsReachable() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("No Voice")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["No Voice"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        let headword = app.textFields["vocabulary-headword-field"]
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
+        headword.tap()
+        headword.typeText("kaku")
+        meaning.tap()
+        meaning.typeText("write")
+        dismissKeyboard(in: app)
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
+
+        let notice = app.descendants(matching: .any)["review-speech-unavailable"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 3), "无日语语音时应显示降级提示")
+        let questionSpeech = app.buttons["review-question-speech-button"]
+        if questionSpeech.exists {
+            XCTAssertFalse(questionSpeech.isEnabled, "无语音时发音按钮应禁用")
+        }
+
+        showReviewAnswer(in: app)
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 3))
+        XCTAssertTrue(easy.isHittable)
+        easy.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+    }
+
+    @MainActor
+    func testReviewDarkModeKeepsActionsReachable() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let settingsTab = app.tabBars.buttons["设置"]
+        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
+        settingsTab.tap()
+        let appearance = app.descendants(matching: .any)["appearance-picker"]
+        XCTAssertTrue(appearance.waitForExistence(timeout: 5))
+        appearance.tap()
+        let dark = app.buttons["深色"]
+        XCTAssertTrue(dark.waitForExistence(timeout: 2))
+        dark.tap()
+        XCTAssertTrue(app.staticTexts["appearance-status"].waitForExistence(timeout: 5))
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("Dark Mode")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Dark Mode"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        let headword = app.textFields["vocabulary-headword-field"]
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
+        headword.tap()
+        headword.typeText("miru")
+        meaning.tap()
+        meaning.typeText("see")
+        dismissKeyboard(in: app)
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
+        showReviewAnswer(in: app)
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 3))
+        XCTAssertTrue(easy.isHittable)
+        easy.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.buttons["review-finish-button"].exists)
+    }
+
+    @MainActor
+    func testReviewAccessibilityXLTextKeepsActionsReachable() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchArguments += [
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"
+        ]
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("XL Text")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["XL Text"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        let kindPicker = app.descendants(matching: .any)["add-content-kind-picker"]
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
+        let segmentedPicker = app.segmentedControls["add-content-kind-picker"]
+        if segmentedPicker.exists {
+            segmentedPicker.buttons["语法"].tap()
+        } else {
+            kindPicker.tap()
+            let grammarChoice = app.buttons["语法"]
+            XCTAssertTrue(grammarChoice.waitForExistence(timeout: 2))
+            grammarChoice.tap()
+        }
+
+        let grammarForm = app.textFields["grammar-form-field"]
+        revealExistence(grammarForm, in: app)
+        XCTAssertTrue(grammarForm.exists)
+        grammarForm.tap()
+        grammarForm.typeText("a deliberately long grammar form for XL layout verification")
+        let meaning = app.textFields["grammar-meaning-field"]
+        revealExistence(meaning, in: app)
+        XCTAssertTrue(meaning.exists)
+        meaning.tap()
+        meaning.typeText("A deliberately long explanation that wraps across several lines.")
+        let keyboardDone = app.buttons["add-keyboard-done-button"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 2))
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+
+        let save = app.buttons["grammar-formal-save-button"]
+        reveal(save, in: app)
+        XCTAssertTrue(save.isHittable)
+        save.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
+
+        let showAnswer = app.buttons["review-show-answer-button"]
+        XCTAssertTrue(showAnswer.waitForExistence(timeout: 3))
+        let answerScroll = app.scrollViews["review-content-scroll"]
+        for _ in 0..<8 where !showAnswer.isHittable {
+            answerScroll.swipeUp()
+        }
+        XCTAssertGreaterThanOrEqual(showAnswer.frame.height, 44, "主操作点击区域不得小于 44pt")
+        XCTAssertTrue(showAnswer.isHittable)
+        showAnswer.tap()
+
+        var firstRowY: CGFloat?
+        for ratingID in ["again", "hard", "good", "easy"] {
+            let button = app.buttons["review-rating-\(ratingID)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 3))
+            XCTAssertTrue(button.isHittable, "特大字号下评分按钮 \(ratingID) 被内容遮挡")
+            if ratingID == "again" { firstRowY = button.frame.minY }
+            XCTAssertGreaterThanOrEqual(button.frame.height, 44, "评分按钮点击区域不足 44pt")
+        }
+        if let firstRowY {
+            XCTAssertGreaterThan(
+                app.buttons["review-rating-good"].frame.minY, firstRowY,
+                "特大字号下评分区应降级为两行布局"
+            )
+        }
+
+        app.buttons["review-rating-easy"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.buttons["review-finish-button"].exists)
+    }
+
+    @MainActor
+    func testReviewKeepsAnswerAndSubmissionLockedUntilNextCardIsReady() {
+        let app = launchReviewTransitionApp(loadDelay: 4)
+        let firstQuestionHasSpeech = app.buttons["review-question-speech-button"].exists
+        showReviewAnswer(in: app)
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 3))
+        easy.tap()
+
+        XCTAssertFalse(
+            app.buttons["review-show-answer-button"].exists,
+            "下一张尚未载入时，不应先收起旧卡答案并重新启用显示答案"
+        )
+        XCTAssertTrue(easy.exists)
+        XCTAssertFalse(easy.isEnabled)
+        XCTAssertTrue(app.descendants(matching: .any)["review-answer"].exists)
+
+        let showAnswer = app.buttons["review-show-answer-button"]
+        XCTAssertTrue(showAnswer.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.descendants(matching: .any)["review-answer"].exists)
+        XCTAssertNotEqual(app.buttons["review-question-speech-button"].exists, firstQuestionHasSpeech)
+        XCTAssertTrue(showAnswer.isEnabled)
+        XCTAssertTrue(app.buttons["review-undo-button"].isEnabled)
+        showReviewAnswer(in: app)
+        easy.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["review-statistics-total"].label.contains("2"))
+    }
+
+    @MainActor
+    func testReviewNextCardLoadFailureRetriesWithoutResubmittingScore() {
+        let app = launchReviewTransitionApp(loadDelay: 0, loadFailures: 1)
+        showReviewAnswer(in: app)
+        app.buttons["review-rating-easy"].tap()
+        let alert = app.alerts["载入失败"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["review-retry-button"].exists)
+        alert.buttons["重试"].tap()
+
+        let showAnswer = app.buttons["review-show-answer-button"]
+        XCTAssertTrue(showAnswer.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["review-progress-summary"].label.contains("已完成 1"))
+        showReviewAnswer(in: app)
+        app.buttons["review-rating-easy"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.descendants(matching: .any)["review-statistics-total"].label.contains("2"))
+        XCTAssertTrue(app.staticTexts["review-statistics-rating-easy"].label.contains("2"))
+    }
+
+    @MainActor
+    func testReviewAutoSpeechSupportsRatingUndoAndBackground() {
+        let app = launchReviewTransitionApp(loadDelay: 0, autoSpeech: true)
+        let showAnswer = app.buttons["review-show-answer-button"]
+        let easy = app.buttons["review-rating-easy"]
+        showReviewAnswer(in: app)
+        easy.tap()
+        XCTAssertTrue(showAnswer.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.alerts["无法播放日语发音"].exists)
+
+        app.buttons["review-undo-button"].tap()
+        showReviewAnswer(in: app)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.descendants(matching: .any)["review-answer"].waitForExistence(timeout: 5))
+        XCTAssertTrue(easy.isEnabled)
+        easy.tap()
+        XCTAssertTrue(showAnswer.waitForExistence(timeout: 5))
+        showReviewAnswer(in: app)
+        easy.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"].waitForExistence(timeout: 5)
+        )
+        XCTAssertFalse(app.alerts["无法播放日语发音"].exists)
+        app.buttons["review-finish-button"].tap()
+        XCTAssertTrue(app.tabBars.buttons["今日"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func launchReviewTransitionApp(
+        loadDelay: Double,
+        loadFailures: Int = 0,
+        autoSpeech: Bool = false
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_REVIEW_LOAD_DELAY"] = String(loadDelay)
+        app.launchEnvironment["OBOE_UI_TEST_REVIEW_LOAD_FAILURES"] = String(loadFailures)
+        app.launch()
+
+        if autoSpeech {
+            let settings = app.tabBars.buttons["设置"]
+            XCTAssertTrue(settings.waitForExistence(timeout: 5))
+            settings.tap()
+            for identifier in ["speech-auto-play-word-toggle", "speech-auto-play-example-toggle"] {
+                let toggle = app.switches[identifier]
+                reveal(toggle, in: app)
+                moveIntoInteractionSafeArea(toggle, in: app)
+                waitUntilEnabled(toggle)
+                setSwitch(toggle, enabled: true)
+            }
+        }
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckName = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckName.waitForExistence(timeout: 2))
+        deckName.tap()
+        deckName.typeText("Review Transition")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["Review Transition"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["添加"].tap()
+        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
+        let reverse = app.switches["vocabulary-direction-zh-ja"]
+        let form = app.collectionViews.firstMatch
+        for _ in 0..<8 {
+            if reverse.exists, reverse.isHittable,
+               reverse.frame.minY > app.navigationBars.firstMatch.frame.maxY,
+               reverse.frame.maxY < app.frame.maxY - 100 {
+                break
+            }
+            let movesDown = reverse.exists && reverse.frame.midY < app.frame.midY
+            form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(
+                    forDuration: 0.05,
+                    thenDragTo: form.coordinate(
+                        withNormalizedOffset: CGVector(dx: 0.5, dy: movesDown ? 0.7 : 0.3)
+                    )
+                )
+        }
+        XCTAssertTrue(reverse.exists)
+        XCTAssertTrue(reverse.isHittable, "方向开关不可点击：\(reverse.frame)")
+        waitUntilEnabled(reverse)
+        setSwitch(reverse, enabled: true)
+        let headword = app.textFields["vocabulary-headword-field"]
+        revealExistence(headword, in: app)
+        headword.tap()
+        headword.typeText("taberu")
+        let keyboardDone = app.buttons["add-keyboard-done-button"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 2))
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(meaning, in: app)
+        meaning.tap()
+        meaning.typeText("eat")
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
+        let save = app.buttons["vocabulary-formal-save-button"]
+        reveal(save, in: app)
+        save.tap()
+
+        app.tabBars.buttons["今日"].tap()
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(app.buttons["review-show-answer-button"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    @MainActor
+    private func showReviewAnswer(in app: XCUIApplication) {
+        let button = app.buttons["review-show-answer-button"]
+        XCTAssertTrue(button.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews["review-content-scroll"]
+        for _ in 0..<8 where !button.isHittable {
+            scroll.swipeUp()
+        }
+        XCTAssertTrue(button.isHittable, "显示答案按钮不可达")
+        button.tap()
     }
 
     @MainActor
@@ -1160,13 +1689,21 @@ final class OboeNavigationUITests: XCTestCase {
     @MainActor
     private func setSwitch(_ element: XCUIElement, enabled: Bool) {
         let expectedValue = enabled ? "1" : "0"
-        guard element.value as? String != expectedValue else { return }
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let expectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", expectedValue),
-            object: element
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 3), .completed)
+        for attempt in 0..<3 where element.value as? String != expectedValue {
+            if attempt == 0 {
+                element.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+            } else {
+                element.tap()
+            }
+            let expectation = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", expectedValue),
+                object: element
+            )
+            if XCTWaiter.wait(for: [expectation], timeout: 2) == .completed {
+                return
+            }
+        }
+        XCTAssertEqual(element.value as? String, expectedValue)
     }
 
     @MainActor

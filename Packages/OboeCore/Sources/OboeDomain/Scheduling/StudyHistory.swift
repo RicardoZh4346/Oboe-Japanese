@@ -66,6 +66,27 @@ public struct TodayReviewStatistics: Codable, Equatable, Sendable {
     }
 }
 
+public struct StudyCompletionStatistics: Codable, Equatable, Sendable {
+    public let newLearnedCardCount: Int
+    public let reviewedCardCount: Int
+    public let answerCount: Int
+    public let ratings: RatingDistribution
+
+    public init(
+        newLearnedCardCount: Int,
+        reviewedCardCount: Int,
+        answerCount: Int,
+        ratings: RatingDistribution
+    ) {
+        self.newLearnedCardCount = newLearnedCardCount
+        self.reviewedCardCount = reviewedCardCount
+        self.answerCount = answerCount
+        self.ratings = ratings
+    }
+
+    public var studiedCardCount: Int { newLearnedCardCount + reviewedCardCount }
+}
+
 public struct ReviewHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
     public let rating: ReviewRating
@@ -126,6 +147,10 @@ public struct CardReviewHistory: Codable, Equatable, Identifiable, Sendable {
 
 public protocol StudyHistoryRepository: Sendable {
     func fetchTodayStatistics(studyDayID: UUID) async throws -> TodayReviewStatistics
+    func fetchCompletionStatistics(
+        studyDayID: UUID,
+        deckID: UUID?
+    ) async throws -> StudyCompletionStatistics
     func fetchCardHistories(noteID: UUID) async throws -> [CardReviewHistory]
 }
 
@@ -138,6 +163,13 @@ public struct StudyHistoryService: Sendable {
 
     public func fetchTodayStatistics(studyDayID: UUID) async throws -> TodayReviewStatistics {
         try await repository.fetchTodayStatistics(studyDayID: studyDayID)
+    }
+
+    public func fetchCompletionStatistics(
+        studyDayID: UUID,
+        deckID: UUID? = nil
+    ) async throws -> StudyCompletionStatistics {
+        try await repository.fetchCompletionStatistics(studyDayID: studyDayID, deckID: deckID)
     }
 
     public func fetchCardHistories(noteID: UUID) async throws -> [CardReviewHistory] {

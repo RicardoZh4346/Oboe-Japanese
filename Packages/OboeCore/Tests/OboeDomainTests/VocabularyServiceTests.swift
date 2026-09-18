@@ -119,6 +119,10 @@ private actor VocabularyRepositorySpy: VocabularyRepository {
         draft
     }
 
+    func fetchVocabularyDraft(id: UUID) async throws -> VocabularyDraft? {
+        draft?.id == id ? draft : nil
+    }
+
     func deleteVocabularyDraft(id: UUID) async throws {
         if draft?.id == id {
             draft = nil

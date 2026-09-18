@@ -1,6 +1,7 @@
 import Observation
 import OboeDomain
 import OboeInfrastructure
+import OboeSharedCapture
 import SwiftUI
 
 @main
@@ -15,8 +16,14 @@ struct OboeApp: App {
                     await dependencies.start()
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    guard phase == .background else { return }
-                    Task { await dependencies.createDailySnapshotIfNeeded() }
+                    switch phase {
+                    case .active:
+                        Task { await dependencies.drainSharedCaptures() }
+                    case .background:
+                        Task { await dependencies.createDailySnapshotIfNeeded() }
+                    default:
+                        break
+                    }
                 }
         }
     }
@@ -49,6 +56,16 @@ final class AppDependencies {
     private(set) var portableBackupRestorationPreparer: PortableBackupRestorationPreparer?
     private(set) var jlptLibraryService: JLPTLibraryService?
     private(set) var jlptImporter: (any JLPTImporting)?
+    private(set) var inboxService: InboxService?
+    /// On-device OCR — independent of the database, so it survives restores.
+    /// UI tests substitute a deterministic stub via `OBOE_UI_TEST_OCR_STUB`.
+    let ocrService: any OCRRecognizing
+    private(set) var captureImportCoordinator: CaptureImportCoordinator?
+    private var captureQueueStore: (any CaptureQueueStoring)?
+    /// Controlled local storage for Inbox image attachments — lives outside
+    /// the database file so a restore sweep never touches the files, while
+    /// `onItemDeleted` and the orphan sweep keep the directory honest.
+    private(set) var inboxImageStore: InboxImageStore?
     private(set) var launchErrorMessage: String?
     private(set) var isLoading = true
     private(set) var isDatabaseOperationInProgress = false
@@ -58,7 +75,21 @@ final class AppDependencies {
     init() {
         let baseURL = Self.applicationDataURL()
         self.baseURL = baseURL
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] != nil {
+            speechService = UITestUnavailableSpeechService()
+        } else {
+            speechService = SystemJapaneseSpeechService()
+        }
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_OCR_STUB"] != nil {
+            ocrService = UITestStubOCRService()
+        } else {
+            ocrService = VisionOCRService()
+        }
+        #else
         speechService = SystemJapaneseSpeechService()
+        ocrService = VisionOCRService()
+        #endif
         databaseLifecycle = OboeDatabaseLifecycle(
             databaseURL: baseURL.appendingPathComponent("oboe.sqlite"),
             snapshotDirectoryURL: baseURL.appendingPathComponent("Snapshots", isDirectory: true)
@@ -74,11 +105,88 @@ final class AppDependencies {
         do {
             let database = try await databaseLifecycle.open()
             configureServices(database: database)
+            #if DEBUG
+            // UI-test seam: fabricate the post-restore pending-import state so
+            // the awaiting-import notice path can be exercised end to end.
+            // Must run before the first await after configureServices — a
+            // queued drain task must never see the flag still unset.
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AWAITING_IMPORT"] != nil {
+                refreshAwaitingSharedCaptures()
+            }
+            #endif
             try await reloadAppearancePreference()
+            await drainSharedCaptures()
+            await sweepOrphanedInboxImages()
         } catch {
             launchErrorMessage = "无法打开本地数据库：\(error.localizedDescription)"
         }
         isLoading = false
+    }
+
+    /// Shared-queue consumption is triggered by hints (cold start, returning
+    /// to foreground, entering the Inbox) — the pending directory is the
+    /// source of truth, and the coordinator coalesces duplicate drains.
+    /// While `sharedCapturesAwaitingImport` is set, files left at a restore
+    /// boundary wait for an explicit user choice instead of auto-replaying.
+    func drainSharedCaptures() async {
+        guard !isDatabaseOperationInProgress,
+              sharedCapturesAwaitingImport == nil else { return }
+        guard let report = try? await captureImportCoordinator?.drainPendingCaptures()
+        else { return }
+        if let latest = report.imported.last(where: {
+            $0.requestedAction == .continueInApp
+        }) {
+            pendingContinueItemID = latest.itemID
+        }
+    }
+
+    /// Inbox item imported with `continueInApp`, offered on the landing tab —
+    /// tapped or dismissed only by the user, never auto-navigating.
+    private(set) var pendingContinueItemID: UUID?
+
+    /// Share files still pending at a restore boundary. Recorded so old
+    /// files never silently replay into the fresh database — the Inbox
+    /// notice lets the user import them explicitly.
+    private(set) var sharedCapturesAwaitingImport: Int?
+
+    func clearPendingContinueItem() {
+        pendingContinueItemID = nil
+    }
+
+    /// The user chose to import the files recorded at the restore boundary.
+    func importAwaitingSharedCaptures() async {
+        sharedCapturesAwaitingImport = nil
+        await drainSharedCaptures()
+    }
+
+    /// Synchronous on purpose: it must run in the same un-interleaved stretch
+    /// as `configureServices`, so no drain can slip between building the
+    /// coordinator and recording the boundary count (an actor hop here would
+    /// reopen that window).
+    /// Reclaims attachment files no Inbox row references — abandoned picks,
+    /// items removed before the cleanup hook existed, restore-orphaned
+    /// resources. A creation-time buffer protects files still being attached.
+    private func sweepOrphanedInboxImages() async {
+        guard let inboxImageStore, let inboxService else { return }
+        guard let referenced = try? await inboxService.fetchImageReferences(),
+              let orphans = try? inboxImageStore.orphanedResourceIDs(
+                  keeping: referenced,
+                  olderThan: 60
+              ) else { return }
+        for resourceID in orphans {
+            try? inboxImageStore.delete(resourceID)
+        }
+    }
+
+    private func refreshAwaitingSharedCaptures() {
+        let count = try? captureQueueStore?.pendingFileURLs().count
+        sharedCapturesAwaitingImport = (count ?? 0) > 0 ? count : nil
+    }
+
+    /// Files still waiting in the shared queue. Nil when the App Group
+    /// container is unavailable — callers must not misreport that as zero.
+    func pendingSharedCaptureCount() -> Int? {
+        try? captureQueueStore?.pendingFileURLs().count
     }
 
     func applyPreparedRestoration(_ preparation: PreparedRestoration) async throws {
@@ -87,14 +195,19 @@ final class AppDependencies {
         }
         isDatabaseOperationInProgress = true
         defer { isDatabaseOperationInProgress = false }
+        await suspendBeforeDatabaseReplacement()
         do {
             let database = try await replaceDatabase(with: preparation.temporaryDatabaseURL)
             configureServices(database: database)
+            refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
+            await sweepOrphanedInboxImages()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
                 configureServices(database: restoredCurrent)
                 try? await reloadAppearancePreference()
+            } else {
+                await captureImportCoordinator?.resume()
             }
             throw error
         }
@@ -117,14 +230,19 @@ final class AppDependencies {
         }
         isDatabaseOperationInProgress = true
         defer { isDatabaseOperationInProgress = false }
+        await suspendBeforeDatabaseReplacement()
         do {
             let database = try await replaceDatabase(with: snapshot.url)
             configureServices(database: database)
+            refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
+            await sweepOrphanedInboxImages()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
                 configureServices(database: restoredCurrent)
                 try? await reloadAppearancePreference()
+            } else {
+                await captureImportCoordinator?.resume()
             }
             throw error
         }
@@ -151,6 +269,17 @@ final class AppDependencies {
         )
     }
 
+    /// Before the database is swapped underneath running work: bump the
+    /// generation so the view tree tears down (cancels editor/processing/AI
+    /// tasks bound to the previous services), then pause the shared-queue
+    /// importer and wait out its in-flight drain — pending files survive on
+    /// disk and the coordinator rebuilt by `configureServices` resumes them.
+    private func suspendBeforeDatabaseReplacement() async {
+        databaseGeneration &+= 1
+        await captureImportCoordinator?.pauseAndWait()
+        await Task.yield()
+    }
+
     private func replaceDatabase(with sourceURL: URL) async throws -> OboeDatabase {
         try await databaseLifecycle.replaceDatabase(with: sourceURL) { database in
             let service = Self.makeStudySessionService(database: database)
@@ -175,6 +304,25 @@ final class AppDependencies {
         )
         knowledgeSearchService = KnowledgeSearchService(
             repository: GRDBKnowledgeSearchRepository(database: database)
+        )
+        let inboxRepository = GRDBInboxRepository(database: database)
+        let imageStore = Self.resolveInboxImageStore(baseURL: baseURL)
+        inboxImageStore = imageStore
+        let inbox = InboxService(
+            repository: inboxRepository,
+            onItemDeleted: { reference in
+                // Attachment cleanup is best-effort: the Inbox row is gone
+                // either way, and a stray file is reclaimed by the next
+                // orphan sweep rather than failing the delete.
+                try? imageStore.delete(reference)
+            }
+        )
+        inboxService = inbox
+        let queueStore = Self.resolveCaptureQueueStore()
+        captureQueueStore = queueStore
+        captureImportCoordinator = CaptureImportCoordinator(
+            inboxService: inbox,
+            store: queueStore
         )
         contentCardService = ContentCardService(
             repository: GRDBContentCardRepository(database: database)
@@ -257,23 +405,93 @@ final class AppDependencies {
             workingDirectoryURL: baseURL.appendingPathComponent(
                 "RestorePreparation",
                 isDirectory: true
-            )
+            ),
+            inboxImageResourceExists: { reference in
+                imageStore.exists(reference)
+            }
         )
         databaseGeneration &+= 1
+    }
+
+    /// UI tests inject an isolated queue directory; production resolves the
+    /// shared App Group container. A nil store means the group entitlement is
+    /// absent (e.g. unsigned builds) — the coordinator reports that honestly.
+    nonisolated private static func resolveCaptureQueueStore() -> (any CaptureQueueStoring)? {
+        if let override = ProcessInfo.processInfo.environment["OBOE_UI_TEST_CAPTURE_QUEUE"],
+           !override.isEmpty {
+            return AppGroupCaptureStore(
+                queueDirectoryURL: URL(fileURLWithPath: override, isDirectory: true)
+            )
+        }
+        return AppGroupCaptureStore()
+    }
+
+    /// Image attachments live in the app's own container (not the App Group —
+    /// extensions never touch them). UI tests redirect the root via env.
+    nonisolated private static func resolveInboxImageStore(
+        baseURL: URL
+    ) -> InboxImageStore {
+        #if DEBUG
+        if let override = ProcessInfo.processInfo.environment["OBOE_UI_TEST_IMAGE_STORE"],
+           !override.isEmpty {
+            return InboxImageStore(
+                rootDirectoryURL: URL(fileURLWithPath: override, isDirectory: true)
+            )
+        }
+        #endif
+        return InboxImageStore(
+            rootDirectoryURL: baseURL.appendingPathComponent(
+                "InboxImages",
+                isDirectory: true
+            )
+        )
     }
 
     nonisolated private static func makeStudySessionService(
         database: OboeDatabase
     ) -> StudySessionService {
-        let submissionRepository = GRDBReviewSubmissionRepository(database: database)
+        let submissionRepository = makeSubmissionRepository(database: database)
         return StudySessionService(
             studyDayRepository: GRDBStudyDayPlanningRepository(database: database),
             queueRepository: GRDBTodayQueueRepository(database: database),
-            contentRepository: GRDBReviewCardContentRepository(database: database),
+            contentRepository: makeReviewContentRepository(database: database),
             submissionRepository: submissionRepository,
-            undoRepository: submissionRepository,
+            undoRepository: GRDBReviewSubmissionRepository(database: database),
             scheduler: SwiftFSRSReviewScheduler()
         )
+    }
+
+    nonisolated private static func makeReviewContentRepository(
+        database: OboeDatabase
+    ) -> any ReviewCardContentRepository {
+        let base = GRDBReviewCardContentRepository(database: database)
+        #if DEBUG
+        if let identifier = ProcessInfo.processInfo.environment["OBOE_UI_TEST_DATABASE_ID"],
+           UUID(uuidString: identifier) != nil,
+           let raw = ProcessInfo.processInfo.environment["OBOE_UI_TEST_REVIEW_LOAD_DELAY"],
+           let delay = Double(raw), delay.isFinite, delay >= 0 {
+            let failures = Int(
+                ProcessInfo.processInfo.environment["OBOE_UI_TEST_REVIEW_LOAD_FAILURES"] ?? "0"
+            ) ?? 0
+            return UITestDelayedReviewContentRepository(
+                base: base, delay: delay, remainingFailures: failures
+            )
+        }
+        #endif
+        return base
+    }
+
+    nonisolated private static func makeSubmissionRepository(
+        database: OboeDatabase
+    ) -> any ReviewSubmissionRepository {
+        let base = GRDBReviewSubmissionRepository(database: database)
+        #if DEBUG
+        if let raw = ProcessInfo.processInfo.environment["OBOE_UI_TEST_SUBMIT_FAILURES"],
+           let failures = Int(raw), failures > 0 {
+            return UITestFlakySubmissionRepository(base: base, remainingFailures: failures)
+        }
+        #endif
+        return base
     }
 
     private static func applicationDataURL() -> URL {
@@ -293,6 +511,35 @@ final class AppDependencies {
 }
 
 #if DEBUG
+private actor UITestDelayedReviewContentRepository: ReviewCardContentRepository {
+    private let base: any ReviewCardContentRepository
+    private let delay: Double
+    private var remainingFailures: Int
+    private var hasLoaded = false
+
+    init(base: any ReviewCardContentRepository, delay: Double, remainingFailures: Int) {
+        self.base = base
+        self.delay = delay
+        self.remainingFailures = remainingFailures
+    }
+
+    func fetchReviewCardContent(cardID: UUID) async throws -> ReviewCardContent? {
+        if hasLoaded {
+            try await Task.sleep(for: .seconds(delay))
+            if remainingFailures > 0 {
+                remainingFailures -= 1
+                throw NSError(
+                    domain: "OboeUITest",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "测试注入的下一张载入失败"]
+                )
+            }
+        }
+        hasLoaded = true
+        return try await base.fetchReviewCardContent(cardID: cardID)
+    }
+}
+
 /// UI tests run as unsigned simulator builds, where Keychain access can fail with
 /// a missing-entitlement error. Release composition always uses Keychain.
 private actor UITestAICredentialStore: AICredentialStore {
@@ -348,6 +595,92 @@ private struct UITestSentenceAnalysisClient: SentenceAnalysisClient {
     ) async throws -> String {
         try await Task.sleep(for: .seconds(1))
         return #"{"schemaVersion":1,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示移动的目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"に","meaningZH":"表示移动目的地","partOfSpeech":"","usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"动词「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partOfSpeech":"五段动词","usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partOfSpeech":"","usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}},{"kind":"expression","surface":"未对齐项目","canonicalForm":"未对齐项目","reading":"","meaningZH":"即使定位失败，解释仍然可读","roleZH":"验证安全降级","spans":[{"text":"存在しない","occurrence":1}],"cardDraft":null}],"warnings":["请核对语境后再用于学习"]}"#
+    }
+}
+
+/// Deterministic OCR for UI tests — real Vision output varies by simulator
+/// build, so the scripted blocks keep the selection/edit/save flow stable.
+/// `OBOE_UI_TEST_OCR_FAIL=1` simulates a recognition failure instead;
+/// `OBOE_UI_TEST_OCR_LONG=1` returns a block over the Inbox length limit.
+private struct UITestStubOCRService: OCRRecognizing {
+    func recognize(imageData: Data) async throws -> OCRResult {
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_OCR_FAIL"] != nil {
+            throw OCRError.recognitionFailed("测试注入的识别失败")
+        }
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_OCR_LONG"] != nil {
+            return OCRResult(
+                blocks: [
+                    OCRTextBlock(
+                        id: 0,
+                        text: String(repeating: "あ", count: InboxText.maximumCharacterCount + 1),
+                        confidence: 0.9,
+                        boundingBox: OCRBoundingBox(x: 0.1, y: 0.1, width: 0.8, height: 0.2)
+                    ),
+                ],
+                recognizedLanguages: ["ja-JP"]
+            )
+        }
+        return OCRResult(
+            blocks: [
+                OCRTextBlock(
+                    id: 0,
+                    text: "今日はいい天気です",
+                    confidence: 0.96,
+                    boundingBox: OCRBoundingBox(x: 0.1, y: 0.1, width: 0.8, height: 0.2)
+                ),
+                OCRTextBlock(
+                    id: 1,
+                    text: "駅まで歩きます",
+                    confidence: 0.42,
+                    boundingBox: OCRBoundingBox(x: 0.1, y: 0.4, width: 0.8, height: 0.2)
+                ),
+            ],
+            recognizedLanguages: ["ja-JP"]
+        )
+    }
+}
+
+/// Simulates a device without a Japanese voice so UI tests can cover the
+/// speech-unavailable and speech-error review states.
+private final class UITestUnavailableSpeechService: SpeechService {
+    let availability: JapaneseSpeechAvailability = .unavailable
+
+    func speak(_ texts: [String], onError: @escaping SpeechFailureHandler) {
+        onError(.voiceUnavailable)
+    }
+
+    func stop() {}
+}
+
+/// Fails the first `remainingFailures` commit attempts with a recoverable
+/// error, then forwards everything to the real repository.
+private actor UITestFlakySubmissionRepository: ReviewSubmissionRepository {
+    private let base: any ReviewSubmissionRepository
+    private var remainingFailures: Int
+
+    init(base: any ReviewSubmissionRepository, remainingFailures: Int) {
+        self.base = base
+        self.remainingFailures = remainingFailures
+    }
+
+    func fetchSubmittedReview(eventID: UUID) async throws -> ReviewLogRecord? {
+        try await base.fetchSubmittedReview(eventID: eventID)
+    }
+
+    func fetchReviewContext(cardID: UUID) async throws -> ReviewSubmissionContext? {
+        try await base.fetchReviewContext(cardID: cardID)
+    }
+
+    func commitReview(_ mutation: ReviewSubmissionMutation) async throws -> ReviewLogRecord {
+        if remainingFailures > 0 {
+            remainingFailures -= 1
+            throw NSError(
+                domain: "OboeUITest",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "测试注入的保存失败"]
+            )
+        }
+        return try await base.commitReview(mutation)
     }
 }
 #endif

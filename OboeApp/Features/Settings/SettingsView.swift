@@ -52,6 +52,9 @@ struct SettingsView: View {
     @State private var showAIEnablePrivacyConfirmation = false
     @State private var showRemoveAPIKeyConfirmation = false
     @State private var aiStatusMessage: String?
+    /// Share files still sitting in the pending queue — they live outside the
+    /// database, so the export scope note must say they are not included.
+    @State private var pendingSharedCaptureCount: Int?
 
     var body: some View {
         NavigationStack {
@@ -150,10 +153,17 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-privacy-note")
 
-                    Text("AI 服务连接与凭据不会写入备份。")
+                    Text("AI 服务连接与凭据不会写入备份；图片附件不随备份迁移，跨设备恢复后正文保留。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-scope-note")
+
+                    if let pendingSharedCaptureCount, pendingSharedCaptureCount > 0 {
+                        Text("还有 \(pendingSharedCaptureCount) 个尚未导入的共享内容，不会包含在本次备份中。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("portable-backup-pending-share-note")
+                    }
 
                     Button {
                         isSelectingBackup = true
@@ -246,6 +256,7 @@ struct SettingsView: View {
                     if didExport {
                         lastSuccessfulExportAtMilliseconds = Date().timeIntervalSince1970 * 1_000
                     }
+                    refreshPendingSharedCaptures()
                     Task {
                         try? await exporter.removeExport(at: presentation.url)
                     }
@@ -307,6 +318,7 @@ struct SettingsView: View {
             }
             .task {
                 appearancePreference = dependencies.appearancePreference
+                refreshPendingSharedCaptures()
                 await loadLearningSettings()
                 await loadSpeechPreferences()
                 await loadAIConfiguration()
@@ -316,8 +328,11 @@ struct SettingsView: View {
                 connectionTestTask?.cancel()
             }
             .onChange(of: scenePhase) { _, phase in
-                guard phase != .active else { return }
-                connectionTestTask?.cancel()
+                guard phase == .active else {
+                    connectionTestTask?.cancel()
+                    return
+                }
+                refreshPendingSharedCaptures()
             }
             .alert("启用 AI 功能？", isPresented: $showAIEnablePrivacyConfirmation) {
                 Button("取消", role: .cancel) {}
@@ -852,6 +867,12 @@ struct SettingsView: View {
         }
     }
 
+    /// The pending queue lives outside the database — the count refreshes on
+    /// appear and foreground so the export scope note stays honest.
+    private func refreshPendingSharedCaptures() {
+        pendingSharedCaptureCount = dependencies.pendingSharedCaptureCount()
+    }
+
     private func prepareExport() {
         isPreparingExport = true
         errorMessage = nil
@@ -1086,6 +1107,34 @@ private struct RestorationImpactPreviewView: View {
                     impactRow("卡片", current: preparation.current.cardCount, backup: preparation.backup.cardCount)
                     impactRow("评分历史", current: preparation.current.reviewCount, backup: preparation.backup.reviewCount)
                     impactRow("草稿", current: preparation.current.draftCount, backup: preparation.backup.draftCount)
+                    impactRow(
+                        "收集箱",
+                        current: preparation.current.inboxItemCount,
+                        backup: preparation.backup.inboxItemCount
+                    )
+                    impactRow(
+                        "处理中",
+                        current: preparation.current.processingInboxItemCount,
+                        backup: preparation.backup.processingInboxItemCount
+                    )
+                }
+
+                if !preparation.restoresInboxData {
+                    Section {
+                        Label(
+                            "此备份早于收集箱格式，恢复后收集箱将为空。",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("portable-backup-preview-inbox-empty-warning")
+                    }
+                }
+
+                Section {
+                    Text("备份不包含 API 密钥、AI 连接配置、共享中转文件和本地图片附件；条目中的图片引用若无法解析将置空并保留正文。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("portable-backup-preview-excluded-scopes")
                 }
 
                 Section {

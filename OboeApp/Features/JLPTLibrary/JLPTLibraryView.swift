@@ -409,9 +409,7 @@ private struct JLPTVocabularyDetailView: View {
 
                     Section {
                         Button("朗读", systemImage: "speaker.wave.2") {
-                            do {
-                                try speechService.speak([vocabulary.reading])
-                            } catch {
+                            speechService.speak([vocabulary.reading]) { error in
                                 errorMessage = error.localizedDescription
                             }
                         }

@@ -117,7 +117,7 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(result, .moved(cardCount: 1))
 
-        let state = try database.pool.read { db in
+        let state = try await database.pool.read { db in
             let noteDeck: String? = try String.fetchOne(
                 db,
                 sql: "SELECT deck_id FROM notes WHERE id = ?",
@@ -133,16 +133,19 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
                 db,
                 sql: "SELECT card_id, card_key, note_id, deck_id_at_review FROM review_logs WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(reviewLogID)]
-            )
+            ).map { (
+                $0["card_id"] as String?, $0["card_key"] as String?,
+                $0["note_id"] as String?, $0["deck_id_at_review"] as String?
+            ) }
             return (noteDeck, cardNote, taskCount, log)
         }
         XCTAssertEqual(state.0, DatabaseValueCodec.encode(destinationDeckID))
         XCTAssertEqual(state.1, DatabaseValueCodec.encode(noteID))
         XCTAssertEqual(state.2, 1)
-        XCTAssertEqual(state.3?["card_id"] as String?, DatabaseValueCodec.encode(cardID))
-        XCTAssertEqual(state.3?["card_key"] as String?, DatabaseValueCodec.encode(cardID))
-        XCTAssertEqual(state.3?["note_id"] as String?, DatabaseValueCodec.encode(noteID))
-        XCTAssertEqual(state.3?["deck_id_at_review"] as String?, DatabaseValueCodec.encode(sourceDeckID))
+        XCTAssertEqual(state.3?.0, DatabaseValueCodec.encode(cardID))
+        XCTAssertEqual(state.3?.1, DatabaseValueCodec.encode(cardID))
+        XCTAssertEqual(state.3?.2, DatabaseValueCodec.encode(noteID))
+        XCTAssertEqual(state.3?.3, DatabaseValueCodec.encode(sourceDeckID))
     }
 
     func testDeletingKnowledgePointCascadesBodyAndKeepsMinimalReviewLog() async throws {
@@ -201,7 +204,7 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
             .deleted(KnowledgePointDeletionImpact(cardCount: 1, reviewLogCount: 1))
         )
 
-        let state = try database.pool.read { db in
+        let state = try await database.pool.read { db in
             let bodyCount = try Int.fetchOne(
                 db,
                 sql: """
@@ -219,15 +222,18 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
                 db,
                 sql: "SELECT card_id, card_key, note_id, deck_id_at_review FROM review_logs WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(reviewLogID)]
-            )
+            ).map { (
+                $0["card_id"] as String?, $0["card_key"] as String?,
+                $0["note_id"] as String?, $0["deck_id_at_review"] as String?
+            ) }
             return (bodyCount, tagCount, log)
         }
         XCTAssertEqual(state.0, 0)
         XCTAssertEqual(state.1, 1, "未关联标签保留，之后仍可复用")
-        XCTAssertNil(state.2?["card_id"] as String?)
-        XCTAssertEqual(state.2?["card_key"] as String?, DatabaseValueCodec.encode(cardID))
-        XCTAssertEqual(state.2?["note_id"] as String?, DatabaseValueCodec.encode(noteID))
-        XCTAssertEqual(state.2?["deck_id_at_review"] as String?, DatabaseValueCodec.encode(deckID))
+        XCTAssertNil(state.2?.0)
+        XCTAssertEqual(state.2?.1, DatabaseValueCodec.encode(cardID))
+        XCTAssertEqual(state.2?.2, DatabaseValueCodec.encode(noteID))
+        XCTAssertEqual(state.2?.3, DatabaseValueCodec.encode(deckID))
         let missingDeletion = try await repository.deleteKnowledgePoint(noteID: noteID)
         XCTAssertEqual(missingDeletion, .notFound)
     }
@@ -308,7 +314,7 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
             .deleted(DeckDeletionImpact(noteCount: 1, cardCount: 1, reviewLogCount: 1))
         )
 
-        let state = try database.pool.read { db in
+        let state = try await database.pool.read { db in
             let movedDeck: String? = try String.fetchOne(
                 db,
                 sql: "SELECT deck_id FROM notes WHERE id = ?",
@@ -333,7 +339,10 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
                 db,
                 sql: "SELECT card_id, card_key, note_id, deck_id_at_review FROM review_logs WHERE card_key = ?",
                 arguments: [DatabaseValueCodec.encode(deleteCardID)]
-            )
+            ).map { (
+                $0["card_id"] as String?, $0["card_key"] as String?,
+                $0["note_id"] as String?, $0["deck_id_at_review"] as String?
+            ) }
             let movedHistoryDeck: String? = try String.fetchOne(
                 db,
                 sql: "SELECT deck_id_at_review FROM review_logs WHERE card_key = ?",
@@ -345,10 +354,10 @@ final class GRDBContentLifecycleRepositoryTests: XCTestCase {
         XCTAssertEqual(state.1, 1)
         XCTAssertEqual(state.2, 0)
         XCTAssertEqual(state.3, 0)
-        XCTAssertNil(state.4?["card_id"] as String?)
-        XCTAssertEqual(state.4?["card_key"] as String?, DatabaseValueCodec.encode(deleteCardID))
-        XCTAssertEqual(state.4?["note_id"] as String?, DatabaseValueCodec.encode(deleteNoteID))
-        XCTAssertEqual(state.4?["deck_id_at_review"] as String?, DatabaseValueCodec.encode(deleteSourceID))
+        XCTAssertNil(state.4?.0)
+        XCTAssertEqual(state.4?.1, DatabaseValueCodec.encode(deleteCardID))
+        XCTAssertEqual(state.4?.2, DatabaseValueCodec.encode(deleteNoteID))
+        XCTAssertEqual(state.4?.3, DatabaseValueCodec.encode(deleteSourceID))
         XCTAssertEqual(state.5, DatabaseValueCodec.encode(moveSourceID))
     }
 }

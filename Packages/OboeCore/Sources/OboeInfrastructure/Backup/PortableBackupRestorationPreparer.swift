@@ -29,9 +29,14 @@ public struct PortableBackupPreparationLimits: Equatable, Sendable {
 
 public struct PortableBackupDataSummary: Equatable, Sendable {
     public let recordCounts: [String: Int]
+    public let processingInboxItemCount: Int
 
-    public init(recordCounts: [String: Int]) {
+    public init(
+        recordCounts: [String: Int],
+        processingInboxItemCount: Int = 0
+    ) {
         self.recordCounts = recordCounts
+        self.processingInboxItemCount = processingInboxItemCount
     }
 
     public var deckCount: Int { recordCounts["deck", default: 0] }
@@ -39,6 +44,16 @@ public struct PortableBackupDataSummary: Equatable, Sendable {
     public var cardCount: Int { recordCounts["card", default: 0] }
     public var reviewCount: Int { recordCounts["review", default: 0] }
     public var draftCount: Int { recordCounts["draft", default: 0] }
+    public var inboxItemCount: Int { recordCounts["inboxItem", default: 0] }
+    public var processingContextCount: Int {
+        recordCounts["inboxProcessingContext", default: 0]
+    }
+    public var captureImportReceiptCount: Int {
+        recordCounts["captureImportReceipt", default: 0]
+    }
+    public var inboxCommitReceiptCount: Int {
+        recordCounts["inboxCommitReceipt", default: 0]
+    }
 }
 
 public struct PreparedRestoration: Equatable, Sendable, Identifiable {
@@ -51,6 +66,7 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
     public let exportedAt: Date
     public let backup: PortableBackupDataSummary
     public let current: PortableBackupDataSummary
+    public let excludedScopes: [String]
 
     public init(
         id: UUID,
@@ -61,7 +77,8 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
         sourceAppVersion: String,
         exportedAt: Date,
         backup: PortableBackupDataSummary,
-        current: PortableBackupDataSummary
+        current: PortableBackupDataSummary,
+        excludedScopes: [String] = []
     ) {
         self.id = id
         self.temporaryDatabaseURL = temporaryDatabaseURL
@@ -72,6 +89,13 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
         self.exportedAt = exportedAt
         self.backup = backup
         self.current = current
+        self.excludedScopes = excludedScopes
+    }
+
+    /// Only the v3 contract carries Inbox records — restoring a v1/v2 backup
+    /// means the Inbox becomes empty, which the preview must state clearly.
+    public var restoresInboxData: Bool {
+        sourceFormatVersion >= 3
     }
 }
 
@@ -149,15 +173,18 @@ public actor PortableBackupRestorationPreparer {
     private let currentDatabase: OboeDatabase
     private let workingDirectoryURL: URL
     private let limits: PortableBackupPreparationLimits
+    private let inboxImageResourceExists: @Sendable (String) -> Bool
 
     public init(
         currentDatabase: OboeDatabase,
         workingDirectoryURL: URL,
-        limits: PortableBackupPreparationLimits = PortableBackupPreparationLimits()
+        limits: PortableBackupPreparationLimits = PortableBackupPreparationLimits(),
+        inboxImageResourceExists: @escaping @Sendable (String) -> Bool = { _ in false }
     ) {
         self.currentDatabase = currentDatabase
         self.workingDirectoryURL = workingDirectoryURL
         self.limits = limits
+        self.inboxImageResourceExists = inboxImageResourceExists
     }
 
     public func prepare(fileURL: URL) async throws -> PreparedRestoration {
@@ -190,11 +217,16 @@ public actor PortableBackupRestorationPreparer {
 
         do {
             let manifest = try await temporaryDatabase.pool.write { db in
-                try Self.parseAndImport(
+                let manifest = try Self.parseAndImport(
                     fileURL: fileURL,
                     into: db,
                     limits: limits
                 )
+                try Self.finalizeImportedInboxData(
+                    in: db,
+                    resourceExists: inboxImageResourceExists
+                )
+                return manifest
             }
             try Task.checkCancellation()
             let backupSummary = try await temporaryDatabase.pool.read { db in
@@ -230,7 +262,8 @@ public actor PortableBackupRestorationPreparer {
                 sourceAppVersion: manifest.appVersion,
                 exportedAt: manifest.exportedAt,
                 backup: backupSummary,
-                current: currentSummary
+                current: currentSummary,
+                excludedScopes: manifest.excludedScopes
             )
         } catch {
             try? temporaryDatabase.close()
@@ -277,6 +310,7 @@ private extension PortableBackupRestorationPreparer {
         let appVersion: String
         let exportedAt: Date
         let counts: [String: Int]
+        let excludedScopes: [String]
     }
 
     struct ColumnMetadata: Sendable {
@@ -346,6 +380,7 @@ private extension PortableBackupRestorationPreparer {
         "recordType", "format", "formatVersion", "appVersion", "exportedAt",
         "encoding", "lineEnding", "checksumAlgorithm", "recordOrder", "counts"
     ]
+    static let manifestKeysV3: Set<String> = manifestKeys.union(["excludedScopes"])
     static let footerKeys: Set<String> = ["recordType", "checksumAlgorithm", "checksum"]
     static let uuidColumns: Set<String> = [
         "decks.id", "notes.id", "notes.deck_id", "examples.id", "examples.note_id",
@@ -354,7 +389,12 @@ private extension PortableBackupRestorationPreparer {
         "daily_tasks.study_day_id", "daily_tasks.card_id", "review_logs.id",
         "review_logs.event_id", "review_logs.card_id", "review_logs.card_key",
         "review_logs.note_id", "review_logs.deck_id_at_review", "review_logs.study_day_id",
-        "review_logs.profile_id", "drafts.id"
+        "review_logs.profile_id", "drafts.id",
+        "inbox_items.id",
+        "inbox_processing_contexts.id", "inbox_processing_contexts.inbox_item_id",
+        "inbox_processing_contexts.draft_id",
+        "capture_import_receipts.capture_id", "capture_import_receipts.inbox_item_id",
+        "inbox_commit_receipts.operation_id", "inbox_commit_receipts.processing_context_id"
     ]
 
     static func fileSize(at url: URL) throws -> Int64 {
@@ -378,9 +418,16 @@ private extension PortableBackupRestorationPreparer {
         }
         let manifestObject = try jsonObject(from: manifestLine, lineNumber: lineNumber)
         let manifest = try parseManifest(manifestObject, limits: limits)
-        let sourceSpecifications = manifest.sourceFormatVersion == 1
-            ? PortableBackupFormatV1.tableSpecifications
-            : PortableBackupFormatV2.tableSpecifications
+        let sourceSpecifications: [PortableBackupTableSpecification]
+        switch manifest.sourceFormatVersion {
+        case 1: sourceSpecifications = PortableBackupFormatV1.tableSpecifications
+        case 2: sourceSpecifications = PortableBackupFormatV2.tableSpecifications
+        case 3: sourceSpecifications = PortableBackupFormatV3.tableSpecifications
+        default:
+            throw PortableBackupPreparationError.unsupportedFormatVersion(
+                manifest.sourceFormatVersion
+            )
+        }
         let sourceRecordTypes = sourceSpecifications.map(\.recordType)
         let sourceSpecificationByType = Dictionary(
             uniqueKeysWithValues: sourceSpecifications.map { ($0.recordType, $0) }
@@ -427,7 +474,7 @@ private extension PortableBackupRestorationPreparer {
             }
 
             guard let sourceSpecification = sourceSpecificationByType[recordType],
-                  let currentSpecification = PortableBackupFormatV2.specificationByRecordType[recordType],
+                  let currentSpecification = PortableBackupFormatV3.specificationByRecordType[recordType],
                   let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
                 throw PortableBackupPreparationError.unexpectedRecordType(
                     line: lineNumber,
@@ -464,6 +511,7 @@ private extension PortableBackupRestorationPreparer {
                 try insert(
                     migratedObject,
                     specification: currentSpecification,
+                    sourceFormatVersion: manifest.sourceFormatVersion,
                     metadata: metadata[currentSpecification.tableName, default: [:]],
                     lineNumber: lineNumber,
                     limits: limits,
@@ -485,8 +533,18 @@ private extension PortableBackupRestorationPreparer {
         _ object: [String: Any],
         limits: PortableBackupPreparationLimits
     ) throws -> ParsedManifest {
-        guard Set(object.keys) == manifestKeys else {
-            throw PortableBackupPreparationError.invalidManifest("字段集合不符合 v1。")
+        // A higher-than-current format is rejected on version alone — its field
+        // contract is unknown by definition. At or below currentVersion the key
+        // set must match the declared version exactly (v3 adds excludedScopes).
+        if let peeked = object["formatVersion"] as? Int,
+           peeked > PortableBackupFormat.currentVersion {
+            throw PortableBackupPreparationError.futureFormatVersion(peeked)
+        }
+        let expectedKeys = object["formatVersion"] as? Int == 3
+            ? manifestKeysV3
+            : manifestKeys
+        guard Set(object.keys) == expectedKeys else {
+            throw PortableBackupPreparationError.invalidManifest("字段集合不符合清单契约。")
         }
         guard try requiredString(object["recordType"], field: "recordType", context: "manifest")
                 == "manifest",
@@ -525,9 +583,14 @@ private extension PortableBackupRestorationPreparer {
         guard let exportedAt = iso8601Date(from: exportedAtString) else {
             throw PortableBackupPreparationError.invalidManifest("exportedAt 不是有效 UTC ISO 8601。")
         }
-        let expectedRecordTypes = version == 1
-            ? PortableBackupFormatV1.recordTypes
-            : PortableBackupFormatV2.recordTypes
+        let expectedRecordTypes: [String]
+        switch version {
+        case 1: expectedRecordTypes = PortableBackupFormatV1.recordTypes
+        case 2: expectedRecordTypes = PortableBackupFormatV2.recordTypes
+        case 3: expectedRecordTypes = PortableBackupFormatV3.recordTypes
+        default:
+            throw PortableBackupPreparationError.unsupportedFormatVersion(version)
+        }
         guard let recordOrder = object["recordOrder"] as? [String],
               recordOrder == expectedRecordTypes else {
             throw PortableBackupPreparationError.invalidManifest("recordOrder 不符合 v\(version)。")
@@ -556,11 +619,22 @@ private extension PortableBackupRestorationPreparer {
                 limit: limits.maximumRecordCount
             )
         }
+        var excludedScopes: [String] = []
+        if version >= 3 {
+            guard let scopes = object["excludedScopes"] as? [String],
+                  scopes.allSatisfy({ !$0.isEmpty }) else {
+                throw PortableBackupPreparationError.invalidManifest(
+                    "excludedScopes 必须是非空字符串数组。"
+                )
+            }
+            excludedScopes = scopes
+        }
         return ParsedManifest(
             sourceFormatVersion: version,
             appVersion: appVersion,
             exportedAt: exportedAt,
-            counts: counts
+            counts: counts,
+            excludedScopes: excludedScopes
         )
     }
 
@@ -568,7 +642,7 @@ private extension PortableBackupRestorationPreparer {
         if version > PortableBackupFormat.currentVersion {
             throw PortableBackupPreparationError.futureFormatVersion(version)
         }
-        guard version == 1 || version == 2 else {
+        guard version >= 1 else {
             throw PortableBackupPreparationError.unsupportedFormatVersion(version)
         }
     }
@@ -632,7 +706,7 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        for specification in PortableBackupFormatV2.tableSpecifications {
+        for specification in PortableBackupFormatV3.tableSpecifications {
             let rows = try Row.fetchAll(
                 db,
                 sql: "PRAGMA table_info(\(specification.tableName))"
@@ -664,6 +738,7 @@ private extension PortableBackupRestorationPreparer {
     static func insert(
         _ object: [String: Any],
         specification: PortableBackupTableSpecification,
+        sourceFormatVersion: Int,
         metadata: [String: ColumnMetadata],
         lineNumber: Int,
         limits: PortableBackupPreparationLimits,
@@ -673,7 +748,7 @@ private extension PortableBackupRestorationPreparer {
         guard Set(object.keys) == expectedKeys else {
             throw PortableBackupPreparationError.invalidRecord(
                 line: lineNumber,
-                reason: "\(specification.recordType) 字段集合不符合 v1。"
+                reason: "\(specification.recordType) 字段集合不符合 v\(sourceFormatVersion)。"
             )
         }
         var values: [DatabaseValue] = []
@@ -770,7 +845,104 @@ private extension PortableBackupRestorationPreparer {
         }
         try validateTimeZones(in: db)
         try validateScheduling(in: db)
+        try validateInboxData(in: db)
         return try summarizeDatabase(db)
+    }
+
+    /// v3 Inbox records carry semantic payloads the column-level checks cannot
+    /// see: resume-JSON must decode against the current payload contract, the
+    /// context payload version must be understood, and commit-receipt digests
+    /// must be canonical SHA-256 hex. Historical note IDs inside result_json
+    /// may legitimately reference deleted notes — intentionally unchecked.
+    static func validateInboxData(in db: Database) throws {
+        let contextRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, payload_version, resume_payload_json
+                FROM inbox_processing_contexts
+                """
+        )
+        for row in contextRows {
+            let contextID: String = row["id"]
+            let payloadVersion: Int = row["payload_version"]
+            guard payloadVersion == CaptureResumePayloadFormat.currentVersion else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "处理上下文 \(contextID) 的续编版本 \(payloadVersion) 未知。"
+                )
+            }
+            if let resumeJSON: String = row["resume_payload_json"] {
+                guard (try? CaptureResumePayloadCodec.decode(resumeJSON)) != nil else {
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "处理上下文 \(contextID) 的续编数据无法解码。"
+                    )
+                }
+            }
+        }
+        let receiptHashes = try Row.fetchAll(
+            db,
+            sql: "SELECT operation_id, payload_hash FROM inbox_commit_receipts"
+        )
+        for row in receiptHashes {
+            let hash: String = row["payload_hash"]
+            guard isLowercaseSHA256Hex(hash) else {
+                let operationID: String = row["operation_id"]
+                throw PortableBackupPreparationError.databaseValidation(
+                    "提交回执 \(operationID) 的摘要格式无效。"
+                )
+            }
+        }
+    }
+
+    /// Runs inside the import transaction: a malformed attachment reference is
+    /// a contract violation (reject), while a well-formed but unresolvable
+    /// resource ID degrades to NULL so the restored item keeps its text.
+    static func finalizeImportedInboxData(
+        in db: Database,
+        resourceExists: (String) -> Bool
+    ) throws {
+        let references = try String.fetchAll(
+            db,
+            sql: """
+                SELECT DISTINCT image_reference
+                FROM inbox_items
+                WHERE image_reference IS NOT NULL
+                """
+        )
+        for reference in references {
+            guard isControlledInboxResourceID(reference) else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "inbox_items.image_reference 不是受控资源 ID。"
+                )
+            }
+            guard !resourceExists(reference) else { continue }
+            try db.execute(
+                sql: """
+                    UPDATE inbox_items
+                    SET image_reference = NULL
+                    WHERE image_reference = ?
+                    """,
+                arguments: [reference]
+            )
+        }
+    }
+
+    /// Attachment references are opaque resource IDs, never filesystem paths —
+    /// reject anything that could traverse or address the local file system.
+    static func isControlledInboxResourceID(_ value: String) -> Bool {
+        guard value.count <= 128, !value.isEmpty else { return false }
+        return value.allSatisfy { character in
+            ("a"..."z").contains(character)
+                || ("A"..."Z").contains(character)
+                || ("0"..."9").contains(character)
+                || character == "-"
+                || character == "_"
+        }
+    }
+
+    static func isLowercaseSHA256Hex(_ value: String) -> Bool {
+        value.count == 64 && value.allSatisfy { character in
+            ("0"..."9").contains(character) || ("a"..."f").contains(character)
+        }
     }
 
     static func validateTimeZones(in db: Database) throws {
@@ -896,13 +1068,20 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        for specification in PortableBackupFormatV2.tableSpecifications {
+        for specification in PortableBackupFormatV3.tableSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(specification.tableName)"
             ) ?? 0
         }
-        return PortableBackupDataSummary(recordCounts: counts)
+        let processingCount = try Int.fetchOne(
+            db,
+            sql: "SELECT COUNT(*) FROM inbox_items WHERE status = 'processing'"
+        ) ?? 0
+        return PortableBackupDataSummary(
+            recordCounts: counts,
+            processingInboxItemCount: processingCount
+        )
     }
 
     static func requiredString(

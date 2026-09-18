@@ -101,7 +101,11 @@ public struct TodayPlan: Codable, Equatable, Sendable {
 
 public protocol TodayQueueRepository: Sendable {
     func buildQueue(for studyDay: StudyDay, at instant: Date) async throws -> TodayPlan
-    func fetchSummary(for studyDay: StudyDay, at instant: Date) async throws -> TodayStudySummary
+    func fetchSummary(
+        for studyDay: StudyDay,
+        deckID: UUID?,
+        at instant: Date
+    ) async throws -> TodayStudySummary
 }
 
 public struct BuildTodayPlan: Sendable {

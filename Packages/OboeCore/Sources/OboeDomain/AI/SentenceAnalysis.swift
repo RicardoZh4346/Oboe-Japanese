@@ -261,6 +261,7 @@ public protocol SentenceAnalysisClient: Sendable {
 public protocol SentenceAnalysisDraftRepository: Sendable {
     func saveSentenceAnalysisDraft(_ draft: SentenceAnalysisDraft) async throws
     func fetchLatestSentenceAnalysisDraft() async throws -> SentenceAnalysisDraft?
+    func fetchSentenceAnalysisDraft(id: UUID) async throws -> SentenceAnalysisDraft?
     func deleteSentenceAnalysisDraft(id: UUID) async throws
 }
 
@@ -358,6 +359,10 @@ public actor SentenceAnalysisService {
 
     public func fetchLatestDraft() async throws -> SentenceAnalysisDraft? {
         try await draftRepository.fetchLatestSentenceAnalysisDraft()
+    }
+
+    public func fetchDraft(id: UUID) async throws -> SentenceAnalysisDraft? {
+        try await draftRepository.fetchSentenceAnalysisDraft(id: id)
     }
 
     public func deleteDraft(id: UUID) async throws {

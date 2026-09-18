@@ -27,11 +27,13 @@ final class GRDBSentenceAnalysisCardRepositoryTests: XCTestCase {
             try Row.fetchAll(
                 db,
                 sql: "SELECT kind, headword, origin FROM notes ORDER BY kind DESC"
-            )
+            ).map { (
+                $0["kind"] as String?, $0["headword"] as String?, $0["origin"] as String?
+            ) }
         }
         XCTAssertEqual(rows.count, 2)
-        XCTAssertEqual(rows.map { $0["headword"] as String }, ["行く", "～たことがある"])
-        XCTAssertTrue(rows.allSatisfy { ($0["origin"] as String) == "ai" })
+        XCTAssertEqual(rows.map(\.1), ["行く", "～たことがある"])
+        XCTAssertTrue(rows.allSatisfy { $0.2 == "ai" })
         let exampleCount = try await database.pool.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM examples") ?? -1
         }
@@ -54,7 +56,8 @@ final class GRDBSentenceAnalysisCardRepositoryTests: XCTestCase {
                     SentenceAnalysisCardBatchCommit(
                         deckID: deckID,
                         items: [.vocabulary(first), .grammar(second)]
-                    )
+                    ),
+                    capture: nil
                 )
             XCTFail("Expected the duplicate note ID to fail")
         } catch {

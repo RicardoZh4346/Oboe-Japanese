@@ -2,6 +2,7 @@
 .build/
 build/
 artifacts/
+*.ipa
 .swiftpm/
 DerivedData/
 .codex_tmp/
@@ -13,3 +14,5 @@ xcuserdata/
 *.p12
 *.cer
 *.xcarchive
+Oboe-v0.3-需求文档.md
+docs/

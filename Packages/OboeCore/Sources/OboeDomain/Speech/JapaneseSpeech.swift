@@ -61,10 +61,12 @@ public enum JapaneseSpeechError: Error, Equatable, Sendable {
     case audioSessionUnavailable
 }
 
+public typealias SpeechFailureHandler = @MainActor @Sendable (JapaneseSpeechError) -> Void
+
 @MainActor
 public protocol SpeechService: AnyObject {
     var availability: JapaneseSpeechAvailability { get }
-    func speak(_ texts: [String]) throws
+    func speak(_ texts: [String], onError: @escaping SpeechFailureHandler)
     func stop()
 }
 

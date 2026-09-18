@@ -70,6 +70,76 @@ final class GRDBStudyHistoryRepositoryTests: XCTestCase {
         XCTAssertEqual(reverse.activeAnswerCount, 0)
         XCTAssertNil(reverse.lastReviewedAt)
     }
+
+    func testCompletionStatisticsDeduplicateCardsAndScopeByDeckAtReview() async throws {
+        let fixture = try await StudyHistoryFixture.make()
+        defer { fixture.remove() }
+        let repository = GRDBStudyHistoryRepository(database: fixture.database)
+        let deckB = try await fixture.addDeck()
+
+        try await fixture.addReviewLog(
+            cardID: fixture.forwardCardID, noteID: fixture.noteID,
+            deckID: fixture.deckID, rating: .easy, wasFirstStudy: false,
+            at: fixture.baseDate.addingTimeInterval(200)
+        )
+        let cardB = try await fixture.addCard(inDeck: deckB)
+        try await fixture.addReviewLog(
+            cardID: cardB.cardID, noteID: cardB.noteID,
+            deckID: deckB, rating: .hard, wasFirstStudy: false,
+            at: fixture.baseDate.addingTimeInterval(210)
+        )
+        let movedCard = try await fixture.addCard(inDeck: deckB)
+        try await fixture.addReviewLog(
+            cardID: movedCard.cardID, noteID: movedCard.noteID,
+            deckID: fixture.deckID, rating: .again, wasFirstStudy: false,
+            at: fixture.baseDate.addingTimeInterval(220)
+        )
+
+        let global = try await repository.fetchCompletionStatistics(
+            studyDayID: fixture.studyDayID, deckID: nil
+        )
+        XCTAssertEqual(global.newLearnedCardCount, 1)
+        XCTAssertEqual(global.reviewedCardCount, 2)
+        XCTAssertEqual(global.studiedCardCount, 3)
+        XCTAssertEqual(global.answerCount, 5)
+        XCTAssertEqual(
+            global.ratings,
+            RatingDistribution(again: 2, hard: 1, good: 1, easy: 1)
+        )
+
+        let scopeA = try await repository.fetchCompletionStatistics(
+            studyDayID: fixture.studyDayID, deckID: fixture.deckID
+        )
+        XCTAssertEqual(scopeA.newLearnedCardCount, 1)
+        XCTAssertEqual(scopeA.reviewedCardCount, 1)
+        XCTAssertEqual(scopeA.answerCount, 4)
+        XCTAssertEqual(
+            scopeA.ratings,
+            RatingDistribution(again: 2, hard: 0, good: 1, easy: 1)
+        )
+
+        let scopeB = try await repository.fetchCompletionStatistics(
+            studyDayID: fixture.studyDayID, deckID: deckB
+        )
+        XCTAssertEqual(scopeB.newLearnedCardCount, 0)
+        XCTAssertEqual(scopeB.reviewedCardCount, 1)
+        XCTAssertEqual(scopeB.answerCount, 1)
+        XCTAssertEqual(
+            scopeB.ratings,
+            RatingDistribution(again: 0, hard: 1, good: 0, easy: 0)
+        )
+
+        let emptyDeck = try await fixture.addDeck()
+        let empty = try await repository.fetchCompletionStatistics(
+            studyDayID: fixture.studyDayID, deckID: emptyDeck
+        )
+        XCTAssertEqual(empty, StudyCompletionStatistics(
+            newLearnedCardCount: 0,
+            reviewedCardCount: 0,
+            answerCount: 0,
+            ratings: RatingDistribution(again: 0, hard: 0, good: 0, easy: 0)
+        ))
+    }
 }
 
 private final class StudyHistoryFixture: @unchecked Sendable {
@@ -80,6 +150,7 @@ private final class StudyHistoryFixture: @unchecked Sendable {
     let forwardCardID: UUID
     let reverseCardID: UUID
     let studyDayID: UUID
+    let profileID: UUID
     let baseDate: Date
 
     private init(
@@ -90,6 +161,7 @@ private final class StudyHistoryFixture: @unchecked Sendable {
         forwardCardID: UUID,
         reverseCardID: UUID,
         studyDayID: UUID,
+        profileID: UUID,
         baseDate: Date
     ) {
         self.directoryURL = directoryURL
@@ -99,6 +171,7 @@ private final class StudyHistoryFixture: @unchecked Sendable {
         self.forwardCardID = forwardCardID
         self.reverseCardID = reverseCardID
         self.studyDayID = studyDayID
+        self.profileID = profileID
         self.baseDate = baseDate
     }
 
@@ -275,8 +348,90 @@ private final class StudyHistoryFixture: @unchecked Sendable {
             forwardCardID: forwardCardID,
             reverseCardID: reverseCardID,
             studyDayID: studyDayID,
+            profileID: profileID,
             baseDate: baseDate
         )
+    }
+
+    func addDeck() async throws -> UUID {
+        let id = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms) VALUES (?, 'P12b-B', 1, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(id)]
+            )
+        }
+        return id
+    }
+
+    func addCard(inDeck deckID: UUID) async throws -> (cardID: UUID, noteID: UUID) {
+        let noteID = UUID()
+        let cardID = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO notes(
+                        id, deck_id, kind, headword, meaning_zh,
+                        content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', '読む', '读', 1, 1, 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(noteID), DatabaseValueCodec.encode(deckID)]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO cards(
+                        id, note_id, template_kind, is_enabled, state, due_at_ms,
+                        last_review_at_ms, stability, difficulty, reps, lapses,
+                        scheduled_days, elapsed_days, learning_step, first_studied_at_ms,
+                        state_version, algorithm_version, profile_id
+                    ) VALUES (?, ?, ?, 1, 2, ?, ?, 2.5, 6, 2, 0, 1, 0, 0, ?, 0, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(cardID), DatabaseValueCodec.encode(noteID),
+                    CardTemplateKind.vocabularyJapaneseToChinese.rawValue,
+                    try DatabaseValueCodec.encode(baseDate.addingTimeInterval(86_400)),
+                    try DatabaseValueCodec.encode(baseDate),
+                    try DatabaseValueCodec.encode(baseDate),
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    DatabaseValueCodec.encode(profileID)
+                ]
+            )
+        }
+        return (cardID, noteID)
+    }
+
+    func addReviewLog(
+        cardID: UUID,
+        noteID: UUID,
+        deckID: UUID,
+        rating: ReviewRating,
+        wasFirstStudy: Bool,
+        at date: Date,
+        undoneAt: Date? = nil
+    ) async throws {
+        let snapshot = ReviewSchedulingSnapshot(
+            scheduling: SchedulingCard(
+                dueAt: date.addingTimeInterval(86_400),
+                stability: 2.5,
+                difficulty: 6,
+                scheduledDays: 1,
+                repetitions: 2,
+                state: .review,
+                lastReviewAt: date
+            ),
+            firstStudiedAt: baseDate,
+            stateVersion: 1,
+            algorithmVersion: SwiftFSRSReviewScheduler.algorithmVersion,
+            profileID: profileID
+        )
+        try await database.pool.write { db in
+            try Self.insertLog(
+                db: db, cardID: cardID, noteID: noteID, deckID: deckID,
+                studyDayID: studyDayID, profileID: profileID,
+                at: date, rating: rating, wasFirstStudy: wasFirstStudy,
+                previous: snapshot, next: snapshot, undoneAt: undoneAt
+            )
+        }
     }
 
     private static func insertLog(

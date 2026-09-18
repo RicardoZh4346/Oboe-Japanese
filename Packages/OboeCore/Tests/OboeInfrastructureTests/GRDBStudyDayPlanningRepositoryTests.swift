@@ -90,27 +90,27 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
         let cardID = try XCTUnwrap(cardIDs.first)
         let repository = GRDBStudyDayPlanningRepository(database: fixture.database)
         _ = try await repository.loadOrCreateSettings(defaultTimeZoneID: "Asia/Shanghai")
-        let before = try fixture.database.pool.read { db in
+        let before = try await fixture.database.pool.read { db in
             try Row.fetchOne(
                 db,
                 sql: "SELECT due_at_ms, state_version, profile_id FROM cards WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(cardID)]
-            )!
+            ).map { ($0["due_at_ms"] as Int64?, $0["state_version"] as Int?, $0["profile_id"] as String?) }
         }
 
         let settings = try await repository.updateRetentionPreset(.intensive)
 
         XCTAssertEqual(settings.retentionPreset, .intensive)
-        let after = try fixture.database.pool.read { db in
+        let after = try await fixture.database.pool.read { db in
             try Row.fetchOne(
                 db,
                 sql: "SELECT due_at_ms, state_version, profile_id FROM cards WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(cardID)]
-            )!
+            ).map { ($0["due_at_ms"] as Int64?, $0["state_version"] as Int?, $0["profile_id"] as String?) }
         }
-        XCTAssertEqual(after["due_at_ms"] as Int64?, before["due_at_ms"] as Int64?)
-        XCTAssertEqual(after["state_version"] as Int?, before["state_version"] as Int?)
-        XCTAssertNotEqual(after["profile_id"] as String?, before["profile_id"] as String?)
+        XCTAssertEqual(after?.0, before?.0)
+        XCTAssertEqual(after?.1, before?.1)
+        XCTAssertNotEqual(after?.2, before?.2)
 
         let loadedContext = try await GRDBReviewSubmissionRepository(database: fixture.database)
             .fetchReviewContext(cardID: cardID)

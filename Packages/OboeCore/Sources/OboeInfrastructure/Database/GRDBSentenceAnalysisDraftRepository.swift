@@ -63,36 +63,62 @@ public struct GRDBSentenceAnalysisDraftRepository: SentenceAnalysisDraftReposito
                            prompt_version, updated_at_ms
                     FROM drafts
                     WHERE draft_kind = 'sentence_analysis'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM inbox_processing_contexts ipc
+                          WHERE ipc.draft_id = drafts.id
+                      )
                     ORDER BY updated_at_ms DESC, id DESC
                     LIMIT 1
                     """
             ) else {
                 return nil
             }
-            let payloadVersion: Int = row["payload_version"]
-            guard payloadVersion == Self.draftPayloadVersion else {
-                throw GRDBSentenceAnalysisDraftRepositoryError.unsupportedDraftPayloadVersion(
-                    payloadVersion
-                )
+            return try Self.decodeDraft(row)
+        }
+    }
+
+    public func fetchSentenceAnalysisDraft(id: UUID) async throws -> SentenceAnalysisDraft? {
+        try await pool.read { db in
+            guard let row = try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT id, payload_version, payload_json, provider_id, model_id,
+                           prompt_version, updated_at_ms
+                    FROM drafts
+                    WHERE id = ? AND draft_kind = 'sentence_analysis'
+                    """,
+                arguments: [DatabaseValueCodec.encode(id)]
+            ) else {
+                return nil
             }
-            let payloadJSON: String = row["payload_json"]
-            guard let data = payloadJSON.data(using: .utf8),
-                  let payload = try? JSONDecoder().decode(DraftPayload.self, from: data),
-                  payload.result == nil || payload.result?.sentence == payload.sentence else {
-                throw GRDBSentenceAnalysisDraftRepositoryError.invalidDraftPayload
-            }
-            let idValue: String = row["id"]
-            let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
-            return SentenceAnalysisDraft(
-                id: try DatabaseValueCodec.decodeUUID(idValue),
-                sentence: payload.sentence,
-                result: payload.result,
-                providerID: row["provider_id"],
-                modelID: row["model_id"],
-                promptVersion: row["prompt_version"],
-                updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
+            return try Self.decodeDraft(row)
+        }
+    }
+
+    private static func decodeDraft(_ row: Row) throws -> SentenceAnalysisDraft {
+        let payloadVersion: Int = row["payload_version"]
+        guard payloadVersion == Self.draftPayloadVersion else {
+            throw GRDBSentenceAnalysisDraftRepositoryError.unsupportedDraftPayloadVersion(
+                payloadVersion
             )
         }
+        let payloadJSON: String = row["payload_json"]
+        guard let data = payloadJSON.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(DraftPayload.self, from: data),
+              payload.result == nil || payload.result?.sentence == payload.sentence else {
+            throw GRDBSentenceAnalysisDraftRepositoryError.invalidDraftPayload
+        }
+        let idValue: String = row["id"]
+        let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
+        return SentenceAnalysisDraft(
+            id: try DatabaseValueCodec.decodeUUID(idValue),
+            sentence: payload.sentence,
+            result: payload.result,
+            providerID: row["provider_id"],
+            modelID: row["model_id"],
+            promptVersion: row["prompt_version"],
+            updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
+        )
     }
 
     public func deleteSentenceAnalysisDraft(id: UUID) async throws {
