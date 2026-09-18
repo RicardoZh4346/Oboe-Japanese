@@ -46,16 +46,41 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 
 ## 获取与安装
 
-可在 [Releases](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 `Oboe-v0.3.0.ipa`。该文件为 **arm64 未签名构建**，不能直接安装；第三方重签或侧载工具不属于 Oboe，也不受本项目维护或担保。
+可在 [v0.3.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.3.0) 下载 `Oboe-v0.3.0.ipa`。该文件是 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
 
-自行用 Xcode 安装到 iPhone：
+> iLoader、LocalDevVPN 和 SideStore 均为第三方项目，不属于 Oboe，也不受本项目维护或担保。请只从其官方页面下载，不要向他人发送 Apple Account 验证信息或设备配对文件。
 
-1. 打开 `Oboe.xcodeproj`，为 Oboe 和 OboeShareExtension 两个 target 选择自己的开发团队。
-2. 将主 App 的占位 Bundle ID `org.example.Oboe` 改成你有权使用的唯一 ID。
-3. 将扩展 Bundle ID 改成 `<主 App Bundle ID>.ShareExtension`，保持主 App ID 前缀关系。
-4. 为两个 target 配置同一个 App Group，例如 `group.<主 App Bundle ID>`，并让两个 entitlements 和两个 `Info.plist` 中的 `OboeAppGroupIdentifier` 保持一致。
-5. 保留主 App 的 Keychain Sharing 和 `$(AppIdentifierPrefix)$(CFBundleIdentifier)` access group。
-6. 连接并信任 iPhone、开启开发者模式，然后选择设备运行。
+### 准备工作
+
+- 一台运行 iOS 17 或更高版本、已设置锁屏密码的 iPhone；
+- 一个 Apple Account；
+- 一台用于首次安装的电脑和一根可传输数据的 USB 线；
+- iPhone 与电脑连接到同一 Wi-Fi；蜂窝网络不能替代此连接；
+- 从 [iLoader 官网](https://iloader.app/) 或 [iLoader GitHub 仓库](https://github.com/nab138/iloader) 下载 iLoader；
+- 按 [SideStore 官方准备指南](https://docs.sidestore.io/docs/installation/prerequisites) 在 iPhone 上安装 LocalDevVPN。
+
+### 1. 使用 iLoader 安装 SideStore
+
+1. 通过 USB 将 iPhone 连接到电脑，在两端确认“信任此电脑”。
+2. 打开 iLoader，登录 Apple Account，并选择已连接的 iPhone。
+3. 选择 **Install SideStore (Stable)**，等待 SideStore 安装完成；iLoader 会同时处理设备配对文件。
+4. 在 iPhone 上打开“设置 → 通用 → VPN 与设备管理”，选择对应的开发者 App 并确认信任。
+5. 打开“设置 → 隐私与安全性 → 开发者模式”，启用后按提示重启并再次确认。
+6. 打开 LocalDevVPN，点按 **Connect**。
+7. 打开 SideStore，登录与 iLoader 中相同的 Apple Account。
+8. 进入 **My Apps**，点按 SideStore 右侧的 **7 DAYS** 完成首次刷新；出现证书撤销或刷新提示时按提示确认。
+
+如 iOS 更新、还原或重新配对后 SideStore 报配对错误，请重新连接电脑，并使用 iLoader 替换配对文件。完整安装流程见 [SideStore 官方安装指南](https://docs.sidestore.io/docs/installation/install)。
+
+### 2. 使用 SideStore 安装 Oboe
+
+1. 在 iPhone 上从 [v0.3.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.3.0) 下载 `Oboe-v0.3.0.ipa`，并保存到“文件”App。
+2. 确认 iPhone 已连接 Wi-Fi，且 LocalDevVPN 处于 **Connected** 状态。
+3. 打开 SideStore，进入 **My Apps**，点按右上角 **+**，选择刚下载的 IPA。
+4. 等待 SideStore 完成签名与安装，然后从主屏幕启动 Oboe。
+5. 免费 Apple Account 签名通常 7 天到期；到期前保持 Wi-Fi 和 LocalDevVPN 已连接，在 SideStore 的 **My Apps** 中刷新 Oboe。
+
+免费 Apple Account 最多同时激活 3 个 App（包含 SideStore），并且 7 天内最多注册 10 个 App ID。安装或刷新失败时，先确认 Wi-Fi 与 LocalDevVPN 均已连接；仍然失败可参考 [SideStore 常见问题](https://docs.sidestore.io/docs/troubleshooting/common-issues)。
 
 重签可能改变 Bundle ID、App Group 和 Keychain access group，因此旧安装中的 API Key 可能无法继续读取；App Group 授权不匹配时，分享扩展会禁用保存并显示签名诊断。
 
@@ -131,7 +156,6 @@ OboeShareExtension/        系统分享扩展
 Packages/OboeCore/         Domain、Infrastructure、共享采集协议
 OboeUITests/               导航、布局与端到端 UI 测试
 Scripts/                   JLPT 词库生成与校验工具
-docs/                      v0.3 技术设计与实施记录
 .github/workflows/ci.yml   持续集成
 ```
 
