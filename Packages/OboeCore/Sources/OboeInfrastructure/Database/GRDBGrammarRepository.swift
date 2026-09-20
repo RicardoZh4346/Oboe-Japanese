@@ -163,7 +163,7 @@ public struct GRDBGrammarRepository: GrammarRepository, Sendable {
         }
     }
 
-    private static func replacePrimaryExample(
+    static func replacePrimaryExample(
         noteID: UUID,
         content: GrammarExampleContent?,
         existingExampleIDs: [String],

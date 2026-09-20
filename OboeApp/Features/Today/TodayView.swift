@@ -8,6 +8,9 @@ struct TodayView: View {
     let historyService: StudyHistoryService
     let deckService: DeckManagementService
     let speechPreferencesService: SpeechPreferencesService
+    let adaptiveCardService: AdaptiveCardService
+    let adaptivePreferencesService: AdaptivePreferencesService
+    let aiRepairService: AIRepairService
     let speechService: any SpeechService
     let inboxService: InboxService
     let processingServices: InboxProcessingServices
@@ -30,6 +33,9 @@ struct TodayView: View {
         historyService: StudyHistoryService,
         deckService: DeckManagementService,
         speechPreferencesService: SpeechPreferencesService,
+        adaptiveCardService: AdaptiveCardService,
+        adaptivePreferencesService: AdaptivePreferencesService,
+        aiRepairService: AIRepairService,
         speechService: any SpeechService,
         inboxService: InboxService,
         processingServices: InboxProcessingServices,
@@ -44,6 +50,9 @@ struct TodayView: View {
         self.historyService = historyService
         self.deckService = deckService
         self.speechPreferencesService = speechPreferencesService
+        self.adaptiveCardService = adaptiveCardService
+        self.adaptivePreferencesService = adaptivePreferencesService
+        self.aiRepairService = aiRepairService
         self.speechService = speechService
         self.inboxService = inboxService
         self.processingServices = processingServices
@@ -57,7 +66,9 @@ struct TodayView: View {
             initialValue: TodayViewModel(
                 studyService: studyService,
                 historyService: historyService,
-                deckService: deckService
+                deckService: deckService,
+                adaptiveCardService: adaptiveCardService,
+                adaptivePreferencesService: adaptivePreferencesService
             )
         )
     }
@@ -75,6 +86,9 @@ struct TodayView: View {
                                 todayStatistics(statistics)
                             }
                             inboxEntry
+                            if model.showsAdaptiveEntry {
+                                adaptiveEntry
+                            }
                             if let item = pendingContinueItem {
                                 continueCaptureEntry(item)
                             }
@@ -109,6 +123,19 @@ struct TodayView: View {
                     service: studyService,
                     historyService: historyService,
                     speechPreferencesService: speechPreferencesService,
+                    adaptiveCardService: adaptiveCardService,
+                    adaptivePreferencesService: adaptivePreferencesService,
+                    aiRepairService: aiRepairService,
+                    deckService: deckService,
+                    repairNoteEditor: { noteID, kind, onUpdated in
+                        AnyView(
+                            noteEditorDestination(
+                                noteID: noteID,
+                                kind: kind,
+                                onUpdated: onUpdated
+                            )
+                        )
+                    },
                     speechService: speechService,
                     scope: scope
                 )
@@ -166,7 +193,7 @@ struct TodayView: View {
                     .accessibilityLabel("今日完成比例")
             }
             LazyVGrid(columns: summaryColumns, spacing: 12) {
-                SummaryMetric(title: "新卡", value: summary.newCount, tint: .blue, identifier: "today-new-count")
+                SummaryMetric(title: "新词", value: summary.newCount, tint: .blue, identifier: "today-new-count")
                 SummaryMetric(title: "待复习", value: summary.reviewCount, tint: .orange, identifier: "today-review-count")
                 SummaryMetric(title: "学习中", value: summary.learningCount, tint: .purple, identifier: "today-learning-count")
                 SummaryMetric(title: "剩余", value: summary.remainingCount, tint: .indigo, identifier: "today-remaining-count")
@@ -332,6 +359,106 @@ struct TodayView: View {
         .accessibilityIdentifier("today-inbox-entry")
     }
 
+    /// Home entry for the Adaptive center (T03): visible only while enabled
+    /// leech cards exist AND reminders are on; count comes from the same
+    /// snapshot the list page filters, so the number can never disagree.
+    private var adaptiveEntry: some View {
+        NavigationLink {
+            AdaptiveCenterView(
+                service: adaptiveCardService,
+                contentCardService: processingServices.contentCardService,
+                aiRepairService: aiRepairService,
+                deckService: deckService,
+                noteEditor: { item, onUpdated in
+                    AnyView(noteEditorDestination(for: item, onUpdated: onUpdated))
+                },
+                repairNoteEditor: { noteID, kind, onUpdated in
+                    AnyView(noteEditorDestination(noteID: noteID, kind: kind, onUpdated: onUpdated))
+                },
+                learningTimeZoneID: { [studyService] in
+                    try await studyService.loadLearningSettings(
+                        defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                    ).learningTimeZoneID
+                }
+            )
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.headline)
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text("需要关注")
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(model.adaptiveLeechCount) 张卡最近经常遗忘")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("today-adaptive-count")
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .padding()
+            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("需要关注，\(model.adaptiveLeechCount) 张卡最近经常遗忘")
+        .accessibilityIdentifier("today-adaptive-entry")
+    }
+
+    /// T04 edit reflow: the Adaptive detail's edit entry reuses the existing
+    /// note detail/editor screens — same services, same validation, same
+    /// content-version bump. `onUpdated` lets the detail reload fresh
+    /// evidence after the editor persisted a change.
+    @ViewBuilder
+    private func noteEditorDestination(
+        for item: AdaptiveCardItem,
+        onUpdated: @escaping () async -> Void
+    ) -> some View {
+        noteEditorDestination(
+            noteID: item.noteID,
+            kind: item.templateKind.knowledgePointKind,
+            onUpdated: onUpdated
+        )
+    }
+
+    /// T07: the AI repair sheet's manual-edit fallback needs the same
+    /// editors keyed by note id + kind instead of an `AdaptiveCardItem`.
+    @ViewBuilder
+    private func noteEditorDestination(
+        noteID: UUID,
+        kind: KnowledgePointKind,
+        onUpdated: @escaping () async -> Void
+    ) -> some View {
+        switch kind {
+        case .vocabulary:
+            VocabularyDetailView(
+                noteID: noteID,
+                service: processingServices.vocabularyService,
+                knowledgeService: processingServices.knowledgePointService,
+                deckService: deckService,
+                contentCardService: processingServices.contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
+        case .grammar:
+            GrammarDetailView(
+                noteID: noteID,
+                service: processingServices.grammarService,
+                knowledgeService: processingServices.knowledgePointService,
+                deckService: deckService,
+                contentCardService: processingServices.contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
+        }
+    }
+
     @MainActor
     private func observeInboxCount() async {
         do {
@@ -479,21 +606,33 @@ private final class TodayViewModel {
     private let studyService: StudySessionService
     private let historyService: StudyHistoryService
     private let deckService: DeckManagementService
+    private let adaptiveCardService: AdaptiveCardService
+    private let adaptivePreferencesService: AdaptivePreferencesService
 
     var plan: TodayPlan?
     var statistics: TodayReviewStatistics?
     var decks: [DeckSummary] = []
+    var adaptiveLeechCount = 0
+    var leechRemindersEnabled = true
     var isLoading = true
     var loadErrorMessage: String?
+
+    var showsAdaptiveEntry: Bool {
+        adaptiveLeechCount > 0 && leechRemindersEnabled
+    }
 
     init(
         studyService: StudySessionService,
         historyService: StudyHistoryService,
-        deckService: DeckManagementService
+        deckService: DeckManagementService,
+        adaptiveCardService: AdaptiveCardService,
+        adaptivePreferencesService: AdaptivePreferencesService
     ) {
         self.studyService = studyService
         self.historyService = historyService
         self.deckService = deckService
+        self.adaptiveCardService = adaptiveCardService
+        self.adaptivePreferencesService = adaptivePreferencesService
     }
 
     func load() async {
@@ -509,6 +648,7 @@ private final class TodayViewModel {
             plan = freshPlan
             decks = try await decksRequest
             statistics = try await statisticsRequest
+            await loadAdaptiveState()
             loadErrorMessage = nil
         } catch is CancellationError {
             return
@@ -516,6 +656,28 @@ private final class TodayViewModel {
             loadErrorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Adaptive entry data is deliberately non-fatal: a classification failure
+    /// hides the entry for this refresh rather than breaking the Today page.
+    private func loadAdaptiveState() async {
+        do {
+            async let snapshotRequest = adaptiveCardService.snapshot(at: Date())
+            async let preferencesRequest = adaptivePreferencesService.load(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            let snapshot = try await snapshotRequest
+            let epoch = await adaptiveCardService.currentEpoch()
+            guard snapshot.generation.epoch == epoch else {
+                return
+            }
+            adaptiveLeechCount = snapshot.leechCount
+            leechRemindersEnabled = (try await preferencesRequest).leechRemindersEnabled
+        } catch is CancellationError {
+            return
+        } catch {
+            adaptiveLeechCount = 0
+        }
     }
 
     func counts(for deckID: UUID) -> (now: Int, later: Int) {

@@ -40,14 +40,27 @@ func rewriteBackup(
     try output.write(to: destinationURL)
 }
 
-/// Reshapes a v3 export into a restorable older format for fixture tests:
-/// strips v3-only records/keys and (for v1) the note source_ref column.
+/// Reshapes a current export into a restorable older format for fixture
+/// tests. v3 keeps every record type (only the four v4 settings columns are
+/// stripped); v1/v2 additionally lose the Inbox records, `excludedScopes`,
+/// and (for v1) the note `source_ref` column.
 func downgradeBackupToLegacyFormat(_ objects: inout [[String: Any]], version: Int) {
+    precondition((1...3).contains(version), "downgrade only produces v1–v3 files")
+    let v4PlusSettingsKeys = [
+        "typed_answer_zh_ja", "auto_play_listening_audio",
+        "typed_answer_listening", "leech_reminders_enabled", "primary_deck_id"
+    ]
+    objects[0]["formatVersion"] = version
+    for index in objects.indices where objects[index]["recordType"] as? String == "settings" {
+        for key in v4PlusSettingsKeys {
+            objects[index].removeValue(forKey: key)
+        }
+    }
+    guard version <= 2 else { return }
     let legacyTypes = [
         "deck", "note", "example", "tag", "noteTag", "profile", "card",
         "studyDay", "dailyTask", "review", "draft", "settings"
     ]
-    objects[0]["formatVersion"] = version
     objects[0].removeValue(forKey: "excludedScopes")
     objects[0]["recordOrder"] = legacyTypes
     if var counts = objects[0]["counts"] as? [String: Any] {

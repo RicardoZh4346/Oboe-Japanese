@@ -83,12 +83,18 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
                 nowMilliseconds: now,
                 in: db
             )
-            let availableNow = Self.separateSiblings(
-                items.filter { $0.availability == .now }.sorted(by: Self.nowOrdering)
-            )
-            let availableLater = Self.separateSiblings(
-                items.filter { $0.availability == .later }.sorted(by: Self.laterOrdering)
-            )
+            // T21 (设计 §9): the queue keeps its raw eligibility order —
+            // admission/priority for `now`, pure due time for `later`.
+            // Sibling separation moved to display-time selection
+            // (`SiblingSelectionPolicy` in the session), so a static swap
+            // here would double-apply and cannot see the last presented
+            // note anyway.
+            let availableNow = items
+                .filter { $0.availability == .now }
+                .sorted(by: Self.nowOrdering)
+            let availableLater = items
+                .filter { $0.availability == .later }
+                .sorted(by: Self.laterOrdering)
             return TodayPlan(
                 studyDay: studyDay,
                 availableNow: availableNow,
@@ -220,7 +226,8 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
             arguments: StatementArguments(values)
         ) ?? 0
         return TodayStudySummary(
-            newCount: items.count { $0.category == .new },
+            // 新卡额度按“词”计：同一笔记的多个方向合计为一个新词。
+            newCount: Set(items.filter { $0.category == .new }.map(\.noteID)).count,
             reviewCount: items.count { $0.category == .review },
             learningCount: items.count { $0.category == .learning || $0.category == .relearning },
             completedCount: completedCount
@@ -243,6 +250,12 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
         if lhs.category.priority != rhs.category.priority {
             return lhs.category.priority < rhs.category.priority
         }
+        // 同一词的方向卡固定按 日→中、中→日、听力（从易到难），
+        // 先于 admittedAt/dueAt/UUID 比较，保证旧预约也按此顺序出现。
+        if lhs.noteID == rhs.noteID,
+           lhs.templateKind.directionQueueRank != rhs.templateKind.directionQueueRank {
+            return lhs.templateKind.directionQueueRank < rhs.templateKind.directionQueueRank
+        }
         if lhs.category == .new, rhs.category == .new {
             return lhs.admittedAt == rhs.admittedAt
                 ? lhs.cardID.uuidString < rhs.cardID.uuidString
@@ -261,17 +274,4 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
         return lhs.cardID.uuidString < rhs.cardID.uuidString
     }
 
-    private static func separateSiblings(_ input: [TodayQueueItem]) -> [TodayQueueItem] {
-        guard input.count > 2 else { return input }
-        var items = input
-        for index in 1..<items.count where items[index].noteID == items[index - 1].noteID {
-            if let replacement = items[(index + 1)...].firstIndex(where: {
-                $0.noteID != items[index - 1].noteID
-                    && $0.category.priority == items[index].category.priority
-            }) {
-                items.swapAt(index, replacement)
-            }
-        }
-        return items
-    }
 }

@@ -58,10 +58,79 @@ final class ContentCardServiceTests: XCTestCase {
         XCTAssertEqual(commit?.content.headword, "食べる")
         XCTAssertEqual(commit?.createdAt, timestamp)
     }
+
+    /// T15: `.listening` maps to `vocabulary_listening` and all three
+    /// directions commit through the same vocabulary card path.
+    func testVocabularyCommitMapsListeningDirection() async throws {
+        let repository = ContentCardRepositorySpy()
+        let service = ContentCardService(repository: repository)
+
+        let result = try await service.commitVocabulary(
+            draftID: nil,
+            deckID: UUID(),
+            formData: VocabularyFormData(headword: "聞く", meaningZH: "听"),
+            directions: [.japaneseToChinese, .chineseToJapanese, .listening]
+        )
+
+        XCTAssertEqual(result.cardCount, 3)
+        let commit = await repository.vocabularyCommit()
+        XCTAssertEqual(
+            commit?.cards.map(\.templateKind),
+            [.vocabularyJapaneseToChinese, .vocabularyListening, .vocabularyChineseToJapanese],
+            "seeds stay sorted by template raw value"
+        )
+        XCTAssertEqual(VocabularyCardDirection.listening.templateKind, .vocabularyListening)
+    }
+
+    /// T15: a listening seed is a vocabulary template — it can never land on
+    /// a grammar note, and a grammar template can never land on a vocabulary
+    /// note. The service rejects before any repository write.
+    func testReplaceDirectionsRejectsTemplatesOutsideNoteKind() async throws {
+        let service = ContentCardService(repository: ContentCardRepositorySpy())
+
+        await XCTAssertThrowsErrorAsync(
+            try await service.replaceEnabledCardDirections(
+                noteID: UUID(),
+                kind: .grammar,
+                enabledTemplates: [.vocabularyListening]
+            )
+        ) { error in
+            XCTAssertEqual(error as? ContentCardError, .invalidTemplateForKnowledgePoint)
+        }
+        await XCTAssertThrowsErrorAsync(
+            try await service.replaceEnabledCardDirections(
+                noteID: UUID(),
+                kind: .vocabulary,
+                enabledTemplates: [.grammarFormToExplanation]
+            )
+        ) { error in
+            XCTAssertEqual(error as? ContentCardError, .invalidTemplateForKnowledgePoint)
+        }
+    }
+
+    func testSingleCardCommandsDelegateToRepository() async throws {
+        let repository = ContentCardRepositorySpy()
+        let timestamp = Date(timeIntervalSince1970: 100)
+        let service = ContentCardService(repository: repository, now: { timestamp })
+        let cardID = UUID()
+
+        let suspended = try await service.setCardEnabled(cardID: cardID, isEnabled: false)
+        let toggle = await repository.toggleCall()
+        XCTAssertEqual(toggle?.cardID, cardID)
+        XCTAssertEqual(toggle?.isEnabled, false)
+        XCTAssertEqual(toggle?.at, timestamp)
+        XCTAssertEqual(suspended.isEnabled, false)
+
+        try await service.deleteCard(cardID: cardID)
+        let deleted = await repository.deletedCardID()
+        XCTAssertEqual(deleted, cardID)
+    }
 }
 
 private actor ContentCardRepositorySpy: ContentCardRepository {
     private var capturedVocabulary: VocabularyContentCommit?
+    private var capturedToggle: (cardID: UUID, isEnabled: Bool, at: Date)?
+    private var capturedDelete: UUID?
 
     func commitVocabulary(
         _ commit: VocabularyContentCommit,
@@ -88,8 +157,33 @@ private actor ContentCardRepositorySpy: ContentCardRepository {
         []
     }
 
+    func setCardEnabled(
+        cardID: UUID,
+        isEnabled: Bool,
+        at updatedAt: Date
+    ) async throws -> CardDirectionState {
+        capturedToggle = (cardID, isEnabled, updatedAt)
+        return CardDirectionState(
+            cardID: cardID,
+            templateKind: .vocabularyJapaneseToChinese,
+            isEnabled: isEnabled
+        )
+    }
+
+    func deleteCard(cardID: UUID) async throws {
+        capturedDelete = cardID
+    }
+
     func vocabularyCommit() -> VocabularyContentCommit? {
         capturedVocabulary
+    }
+
+    func toggleCall() -> (cardID: UUID, isEnabled: Bool, at: Date)? {
+        capturedToggle
+    }
+
+    func deletedCardID() -> UUID? {
+        capturedDelete
     }
 }
 

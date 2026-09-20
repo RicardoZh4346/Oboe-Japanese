@@ -193,6 +193,7 @@ final class OboeInboxUITests: XCTestCase {
         )
         XCTAssertFalse(app.buttons["ai-card-generate-button"].exists)
         let headword = app.textFields["vocabulary-headword-field"]
+        reveal(headword, in: app)
         XCTAssertTrue(headword.waitForExistence(timeout: 5))
         XCTAssertEqual(headword.value as? String, "食べる")
 
@@ -228,6 +229,7 @@ final class OboeInboxUITests: XCTestCase {
         relaunched.buttons["继续处理"].tap()
 
         let restoredHeadword = relaunched.textFields["vocabulary-headword-field"]
+        reveal(restoredHeadword, in: relaunched)
         XCTAssertTrue(restoredHeadword.waitForExistence(timeout: 5))
         XCTAssertEqual(restoredHeadword.value as? String, "食べる")
         let restoredMeaning = relaunched.textFields["vocabulary-meaning-field"]
@@ -391,12 +393,14 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
         guard app.keyboards.firstMatch.exists else { return }
-        let returnKey = app.keyboards.buttons["return"]
-        if returnKey.exists {
-            returnKey.tap()
-        } else {
-            app.keyboards.firstMatch.swipeDown()
+        for name in ["done", "Done", "完成", "return", "换行"] {
+            let key = app.keyboards.buttons[name]
+            if key.exists {
+                key.tap()
+                return
+            }
         }
+        app.keyboards.firstMatch.swipeDown()
     }
 
     /// Fills the fake credential and enables AI so the UITest clients answer.

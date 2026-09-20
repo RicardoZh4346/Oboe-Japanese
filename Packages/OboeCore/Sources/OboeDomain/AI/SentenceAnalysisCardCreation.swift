@@ -27,7 +27,7 @@ public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Senda
         exampleJapanese: String = "",
         exampleTranslationZH: String = "",
         notes: String = "",
-        vocabularyDirections: Set<VocabularyCardDirection> = [.japaneseToChinese],
+        vocabularyDirections: Set<VocabularyCardDirection> = Set(VocabularyCardDirection.allCases),
         createDespiteDuplicate: Bool = false
     ) {
         self.id = id
@@ -76,7 +76,6 @@ public enum SentenceAnalysisCardCreationError: Error, Equatable, Sendable {
     case tooManyItems(maximum: Int)
     case deckRequired
     case duplicateSourceItem
-    case cardDirectionRequired
 }
 
 extension SentenceAnalysisCardCreationError: LocalizedError {
@@ -92,8 +91,6 @@ extension SentenceAnalysisCardCreationError: LocalizedError {
             "请选择目标牌组。"
         case .duplicateSourceItem:
             "同一分析项目不能在一个批次中重复保存。"
-        case .cardDirectionRequired:
-            "每个单词至少需要一个卡片方向。"
         }
     }
 }
@@ -204,9 +201,6 @@ public struct SentenceAnalysisCardCreationService: Sendable {
         for draft in drafts {
             switch draft.kind {
             case .vocabulary:
-                guard !draft.vocabularyDirections.isEmpty else {
-                    throw SentenceAnalysisCardCreationError.cardDirectionRequired
-                }
                 _ = try draft.vocabularyForm.validatedContent()
             case .grammar:
                 _ = try draft.grammarForm.validatedContent()
@@ -228,7 +222,9 @@ public struct SentenceAnalysisCardCreationService: Sendable {
         let items = try drafts.map { draft -> SentenceAnalysisCardCommitItem in
             switch draft.kind {
             case .vocabulary:
-                let cards = draft.vocabularyDirections
+                // 词汇知识点固定创建全部三个方向；草稿里的方向字段仅为
+                // 旧续编载荷兼容保留，不参与建卡。
+                let cards = VocabularyCardDirection.allCases
                     .map(\.templateKind)
                     .sorted { $0.rawValue < $1.rawValue }
                     .map { NewCardSeed(id: makeID(), templateKind: $0) }

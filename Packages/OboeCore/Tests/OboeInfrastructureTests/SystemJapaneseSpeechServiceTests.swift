@@ -219,6 +219,156 @@ final class SystemJapaneseSpeechServiceTests: XCTestCase {
         XCTAssertFalse(tracker.clear())
     }
 
+    // MARK: - T18 playback events (设计 §8.3)
+
+    @MainActor
+    func testPlaybackEventsCarryRequestIDAndComplete() async throws {
+        let completed = expectation(description: "Playback completed")
+        let backend = SpeechPlaybackProbe()
+        let service = try makeService(backend: backend)
+        var events: [SpeechPlaybackEvent] = []
+        var requestID: UUID?
+        requestID = service.speakWithEvents(["日本語"]) { event in
+            events.append(event)
+            XCTAssertEqual(event.requestID, requestID)
+            if case .completed = event { completed.fulfill() }
+        }
+        await fulfillment(of: [completed], timeout: 3)
+        XCTAssertEqual(events, [.started(requestID: requestID!), .completed(requestID: requestID!)])
+    }
+
+    @MainActor
+    func testFailureEventCarriesRequestID() async throws {
+        let failed = expectation(description: "Playback failed")
+        let service = try makeService(backend: SpeechPlaybackProbe(error: .audioSessionUnavailable))
+        var requestID: UUID?
+        requestID = service.speakWithEvents(["日本語"]) { event in
+            XCTAssertEqual(event.requestID, requestID)
+            if case .failed = event { failed.fulfill() }
+        }
+        await fulfillment(of: [failed], timeout: 3)
+    }
+
+    @MainActor
+    func testPreFlightFailuresEmitFailedWithRequestID() async throws {
+        // Pre-flight failures fire synchronously — the requestID carried by
+        // the event must equal the returned ID.
+        let noVoice = SystemJapaneseSpeechService(voiceProvider: { nil })
+        var emptyEvent: SpeechPlaybackEvent?
+        let emptyID = noVoice.speakWithEvents(["  "]) { emptyEvent = $0 }
+        XCTAssertEqual(emptyEvent, .failed(requestID: emptyID, error: .noSpeakableText))
+        var voiceEvent: SpeechPlaybackEvent?
+        let voiceID = noVoice.speakWithEvents(["日本語"]) { voiceEvent = $0 }
+        XCTAssertEqual(voiceEvent, .failed(requestID: voiceID, error: .voiceUnavailable))
+    }
+
+    @MainActor
+    func testStopEmitsCancelledForInFlightRequest() async throws {
+        let started = expectation(description: "Playback started")
+        let cancelled = expectation(description: "Playback cancelled")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let backend = SpeechPlaybackProbe(
+            onStart: { _ in
+                started.fulfill()
+                XCTAssertEqual(gate.wait(timeout: .now() + 3), .success)
+            }
+        )
+        let service = try makeService(backend: backend)
+        var events: [SpeechPlaybackEvent] = []
+        var requestID: UUID?
+        requestID = service.speakWithEvents(["日本語"]) { event in
+            events.append(event)
+            if case .cancelled = event { cancelled.fulfill() }
+        }
+        await fulfillment(of: [started], timeout: 3)
+        service.stop()
+        await fulfillment(of: [cancelled], timeout: 3)
+        XCTAssertEqual(events.last, .cancelled(requestID: requestID!))
+    }
+
+    @MainActor
+    func testNewRequestCancelsInFlightRequestWithItsOwnID() async throws {
+        let firstStarted = expectation(description: "First started")
+        let secondDone = expectation(description: "Second completed")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let backend = SpeechPlaybackProbe(
+            onStart: { texts in
+                if texts == ["first"] {
+                    firstStarted.fulfill()
+                    XCTAssertEqual(gate.wait(timeout: .now() + 3), .success)
+                }
+            }
+        )
+        let service = try makeService(backend: backend)
+        var firstEvents: [SpeechPlaybackEvent] = []
+        let firstID = service.speakWithEvents(["first"]) { event in
+            firstEvents.append(event)
+        }
+        await fulfillment(of: [firstStarted], timeout: 3)
+        var secondID: UUID?
+        secondID = service.speakWithEvents(["second"]) { event in
+            XCTAssertEqual(event.requestID, secondID)
+            if case .completed = event { secondDone.fulfill() }
+        }
+        gate.signal()
+        await fulfillment(of: [secondDone], timeout: 3)
+        // The superseded request was cancelled while still in flight and
+        // must never reach a terminal event.
+        XCTAssertEqual(firstEvents, [.cancelled(requestID: firstID)])
+    }
+
+    @MainActor
+    func testCompletedRequestEmitsNoCancelledOnStop() async throws {
+        let completed = expectation(description: "Playback completed")
+        let service = try makeService(backend: SpeechPlaybackProbe())
+        let lateEvent = expectation(description: "No post-completion event")
+        lateEvent.isInverted = true
+        service.speakWithEvents(["日本語"]) { event in
+            switch event {
+            case .completed: completed.fulfill()
+            case .cancelled, .failed: lateEvent.fulfill()
+            case .started: break
+            }
+        }
+        await fulfillment(of: [completed], timeout: 3)
+        service.stop()
+        await fulfillment(of: [lateEvent], timeout: 0.2)
+    }
+
+    @MainActor
+    func testCancelledRequestReportsNoLateCompletion() async throws {
+        let started = expectation(description: "Playback started")
+        let gate = DispatchSemaphore(value: 0)
+        defer { gate.signal() }
+        let backend = SpeechPlaybackProbe(
+            onStart: { _ in
+                started.fulfill()
+                XCTAssertEqual(gate.wait(timeout: .now() + 3), .success)
+            }
+        )
+        let service = try makeService(backend: backend)
+        let lateEvent = expectation(description: "No late event")
+        lateEvent.isInverted = true
+        var sawCancelled = false
+        service.speakWithEvents(["日本語"]) { event in
+            switch event {
+            case .cancelled:
+                sawCancelled = true
+            case .completed, .failed:
+                lateEvent.fulfill()
+            case .started:
+                break
+            }
+        }
+        await fulfillment(of: [started], timeout: 3)
+        service.stop()
+        gate.signal()
+        await fulfillment(of: [lateEvent], timeout: 0.5)
+        XCTAssertTrue(sawCancelled)
+    }
+
     @MainActor
     private func japaneseVoice() throws -> AVSpeechSynthesisVoice {
         guard let voice = AVSpeechSynthesisVoice(language: "ja-JP") else {
@@ -276,14 +426,20 @@ private final class SpeechPlaybackProbe: JapaneseSpeechPlaybackBackend, @uncheck
         self.onStop = onStop
     }
 
-    func speak(_ texts: [String], voiceIdentifier: String, request: SpeechPlaybackRequest) throws {
+    func speak(
+        _ texts: [String],
+        voiceIdentifier: String,
+        request: SpeechPlaybackRequest,
+        onFinish: @escaping @Sendable () -> Void
+    ) throws {
         lock.withLock { started.append(texts) }
         onStart(texts)
-        defer { onFinish(texts) }
+        defer { self.onFinish(texts) }
         if delay > 0 { Thread.sleep(forTimeInterval: delay) }
         if let error { throw error }
         if !request.isCancelled {
             lock.withLock { spoken.append(texts) }
+            onFinish()
         }
     }
 

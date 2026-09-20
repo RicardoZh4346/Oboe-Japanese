@@ -226,6 +226,9 @@ public struct VocabularyDraft: Codable, Equatable, Identifiable, Sendable {
 public enum VocabularyCardDirection: String, Codable, CaseIterable, Hashable, Sendable {
     case japaneseToChinese
     case chineseToJapanese
+    /// Audio-prompt → Chinese meaning. Persisted as `vocabulary_listening`;
+    /// the review question face is built by the dedicated listening view.
+    case listening
 }
 
 public struct NewVocabularyCommitRequest: Equatable, Sendable {

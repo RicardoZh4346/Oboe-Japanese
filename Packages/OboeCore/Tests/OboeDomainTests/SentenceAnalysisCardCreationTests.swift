@@ -53,7 +53,8 @@ final class SentenceAnalysisCardCreationTests: XCTestCase {
         let saved = try await service.commit(deckID: UUID(), drafts: drafts)
 
         XCTAssertEqual(saved.noteIDs.count, 2)
-        XCTAssertEqual(saved.cardCount, 2)
+        // 词汇固定创建全部三方向 + 语法一张卡。
+        XCTAssertEqual(saved.cardCount, VocabularyCardDirection.allCases.count + 1)
         let commitCount = await repository.commitCount()
         XCTAssertEqual(commitCount, 1)
         let itemKinds = await repository.lastItemKinds()
@@ -72,19 +73,17 @@ final class SentenceAnalysisCardCreationTests: XCTestCase {
             XCTAssertEqual(error as? SentenceAnalysisCardCreationError, .selectedItemNotFound)
         }
 
+        // 方向字段仅作续编载荷兼容保留：即使旧载荷里方向为空，
+        // 提交仍然固定创建全部三个方向。
         var vocabulary = try service.makeDrafts(
             from: result,
             selectedItemIDs: [result.items[1].id]
         )[0]
         vocabulary.vocabularyDirections = []
-        do {
-            _ = try await service.commit(deckID: UUID(), drafts: [vocabulary])
-            XCTFail("Expected a card-direction validation failure")
-        } catch {
-            XCTAssertEqual(error as? SentenceAnalysisCardCreationError, .cardDirectionRequired)
-        }
+        let batch = try await service.commit(deckID: UUID(), drafts: [vocabulary])
+        XCTAssertEqual(batch.cardCount, VocabularyCardDirection.allCases.count)
         let commitCount = await repository.commitCount()
-        XCTAssertEqual(commitCount, 0)
+        XCTAssertEqual(commitCount, 1)
     }
 }
 

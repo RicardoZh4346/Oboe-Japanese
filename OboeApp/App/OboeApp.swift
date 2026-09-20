@@ -12,6 +12,7 @@ struct OboeApp: App {
     var body: some Scene {
         WindowGroup {
             RootTabView(dependencies: dependencies)
+                .modifier(UITestTraitOverrideModifier())
                 .task {
                     await dependencies.start()
                 }
@@ -26,6 +27,40 @@ struct OboeApp: App {
                     }
                 }
         }
+    }
+}
+
+/// DEBUG-only UI-test trait override (T14): `OBOE_UI_TEST_DYNAMIC_TYPE`
+/// forces a Dynamic Type size (e.g. `ax5`) so layout/accessibility-size
+/// branches can be exercised in simulator UI tests without changing
+/// persisted settings. Reduce Motion is a read-only trait and stays on the
+/// real-device checklist (T28). The override is a no-op in release builds
+/// and when the variable is absent or unrecognized.
+private struct UITestTraitOverrideModifier: ViewModifier {
+    #if DEBUG
+    private static var dynamicTypeSize: DynamicTypeSize? {
+        switch ProcessInfo.processInfo.environment["OBOE_UI_TEST_DYNAMIC_TYPE"] {
+        case "extraLarge", "xl": return .xLarge
+        case "xxxLarge": return .xxxLarge
+        case "accessibility1", "ax1": return .accessibility1
+        case "accessibility3", "ax3": return .accessibility3
+        case "accessibility5", "ax5": return .accessibility5
+        default: return nil
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if let size = Self.dynamicTypeSize {
+            content.environment(\.dynamicTypeSize, size)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 
@@ -47,13 +82,23 @@ final class AppDependencies {
     private(set) var studyHistoryService: StudyHistoryService?
     private(set) var appearancePreferencesService: AppearancePreferencesService?
     private(set) var speechPreferencesService: SpeechPreferencesService?
+    /// Shared invalidation token for every `AdaptiveCardService` rebuild —
+    /// bumping it after a database replacement guarantees snapshots read from
+    /// the old file can never reach the new view tree (design §4.3).
+    private let adaptiveInvalidationCenter = AdaptiveInvalidationCenter()
+    private(set) var adaptiveCardService: AdaptiveCardService?
+    private(set) var adaptivePreferencesService: AdaptivePreferencesService?
     private(set) var aiConfigurationService: AIConfigurationService?
     private(set) var aiConnectionTestService: AIConnectionTestService?
     private(set) var aiCardGenerationService: AICardGenerationService?
     private(set) var sentenceAnalysisService: SentenceAnalysisService?
     private(set) var sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService?
+    /// T07 AI repair session service — user-triggered analysis only; the
+    /// draft store keeps explanations and candidates resumable.
+    private(set) var aiRepairService: AIRepairService?
     private(set) var portableBackupExporter: PortableBackupExporter?
     private(set) var portableBackupRestorationPreparer: PortableBackupRestorationPreparer?
+    private(set) var jlptProgressService: JLPTProgressService?
     private(set) var jlptLibraryService: JLPTLibraryService?
     private(set) var jlptImporter: (any JLPTImporting)?
     private(set) var inboxService: InboxService?
@@ -76,7 +121,10 @@ final class AppDependencies {
         let baseURL = Self.applicationDataURL()
         self.baseURL = baseURL
         #if DEBUG
-        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] != nil {
+        if let stubMode = ProcessInfo.processInfo.environment["OBOE_UI_TEST_SPEECH_STUB"],
+           let mode = UITestStubSpeechService.Mode(rawValue: stubMode) {
+            speechService = UITestStubSpeechService(mode: mode)
+        } else if ProcessInfo.processInfo.environment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] != nil {
             speechService = UITestUnavailableSpeechService()
         } else {
             speechService = SystemJapaneseSpeechService()
@@ -113,8 +161,44 @@ final class AppDependencies {
             if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AWAITING_IMPORT"] != nil {
                 refreshAwaitingSharedCaptures()
             }
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_ADAPTIVE_SEED"] != nil {
+                try? await seedAdaptiveUITestData(database: database)
+            }
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_LISTENING_SEED"] != nil {
+                try? await seedListeningUITestData(database: database)
+            }
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_SIBLING_SEED"] != nil {
+                try? await seedSiblingUITestData(database: database)
+            }
+            // T25 seam: builtin-JLPT leech fixture for the weak list.
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_JLPT_WEAK_SEED"] != nil {
+                try? await seedJLPTWeakUITestData(database: database)
+            }
+            // T07 UI-test seam: persist an enabled configuration + stub
+            // credential so repair analysis runs without typing through
+            // Settings (the credential lives only in the UITest store).
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AI_ENABLED"] != nil,
+               let aiConfigurationService {
+                var draft = AIConfigurationDraft.deepSeekDefault
+                draft.isEnabled = true
+                _ = try? await aiConfigurationService.save(
+                    draft,
+                    apiKey: "ui-test-key",
+                    defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                )
+            }
             #endif
             try await reloadAppearancePreference()
+            #if DEBUG
+            // UI-test seam: force dark appearance for layout verification
+            // without touching the persisted preference.
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_APPEARANCE_DARK"] != nil {
+                appearancePreference = .dark
+            }
+            #endif
+            // T06/T07 resume sweep: analyzing drafts revert to retryable and
+            // vanished targets become blocked — never auto-requests anything.
+            try? await aiRepairService?.restoreDraftsForLaunch()
             await drainSharedCaptures()
             await sweepOrphanedInboxImages()
         } catch {
@@ -201,6 +285,7 @@ final class AppDependencies {
             configureServices(database: database)
             refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
+            try? await aiRepairService?.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
@@ -236,6 +321,7 @@ final class AppDependencies {
             configureServices(database: database)
             refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
+            try? await aiRepairService?.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
@@ -276,6 +362,9 @@ final class AppDependencies {
     /// disk and the coordinator rebuilt by `configureServices` resumes them.
     private func suspendBeforeDatabaseReplacement() async {
         databaseGeneration &+= 1
+        // Epoch bump before the swap: any adaptive snapshot still in flight
+        // from the outgoing database is tagged with a dead generation.
+        await adaptiveCardService?.invalidate()
         await captureImportCoordinator?.pauseAndWait()
         await Task.yield()
     }
@@ -335,7 +424,13 @@ final class AppDependencies {
            let repository = try? GRDBJLPTLibraryRepository(databaseURL: libraryURL) {
             jlptLibraryService = JLPTLibraryService(repository: repository)
             jlptImporter = GRDBJLPTImporter(database: database)
+            jlptProgressService = JLPTProgressService(
+                libraryRepository: repository,
+                associationRepository: GRDBJLPTNoteAssociationRepository(database: database),
+                adaptiveRepository: GRDBAdaptiveRepository(database: database)
+            )
         } else {
+            jlptProgressService = nil
             jlptLibraryService = nil
             jlptImporter = nil
             launchErrorMessage = "无法载入内置 JLPT 词库。"
@@ -349,6 +444,13 @@ final class AppDependencies {
         )
         speechPreferencesService = SpeechPreferencesService(
             repository: GRDBSpeechPreferencesRepository(database: database)
+        )
+        adaptivePreferencesService = AdaptivePreferencesService(
+            repository: GRDBAdaptivePreferencesRepository(database: database)
+        )
+        adaptiveCardService = AdaptiveCardService(
+            repository: GRDBAdaptiveRepository(database: database),
+            invalidation: adaptiveInvalidationCenter
         )
         let credentialStore: any AICredentialStore
         let connectionClient: any AIConnectionClient
@@ -396,6 +498,31 @@ final class AppDependencies {
         sentenceAnalysisCardCreationService = SentenceAnalysisCardCreationService(
             repository: GRDBSentenceAnalysisCardRepository(database: database)
         )
+        let repairClient: any AIRepairClient
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_DATABASE_ID"] != nil {
+            repairClient = UITestAIRepairClient()
+        } else {
+            repairClient = ChatCompletionsAIRepairClient()
+        }
+        #else
+        repairClient = ChatCompletionsAIRepairClient()
+        #endif
+        if let adaptiveCardService {
+            aiRepairService = AIRepairService(
+                draftStore: GRDBAIRepairDraftRepository(database: database),
+                commitStore: GRDBAIRepairCommitRepository(database: database),
+                configurationRepository: aiRepository,
+                credentialStore: credentialStore,
+                client: repairClient,
+                vocabularyRepository: GRDBVocabularyRepository(database: database),
+                grammarRepository: GRDBGrammarRepository(database: database),
+                contentCardRepository: GRDBContentCardRepository(database: database),
+                adaptiveCardService: adaptiveCardService
+            )
+        } else {
+            aiRepairService = nil
+        }
         portableBackupExporter = PortableBackupExporter(
             database: database,
             workingDirectoryURL: baseURL.appendingPathComponent("Exports", isDirectory: true)
@@ -587,6 +714,23 @@ private struct UITestAICardGenerationClient: AICardGenerationClient {
     }
 }
 
+/// Deterministic repair analysis for UI tests (T07): a short delay keeps the
+/// analyzing state observable so cancel can be exercised end to end.
+/// `OBOE_UI_TEST_AI_REPAIR_FAIL=1` simulates a transport failure instead.
+private struct UITestAIRepairClient: AIRepairClient {
+    func analyze(
+        context: AIRepairRequestContext,
+        configuration: AIConfiguration,
+        credential: String
+    ) async throws -> String {
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AI_REPAIR_FAIL"] != nil {
+            throw AIConnectionError.serviceUnavailable(statusCode: 503)
+        }
+        try await Task.sleep(for: .milliseconds(3_000))
+        return #"{"schemaVersion":1,"problemTypes":["similar_words_confusion","example_too_complex"],"summary":"这张卡可能因近形词混淆而难记，例句也偏复杂。","suggestions":[{"type":"add_disambiguation","title":"补充辨析说明","reason":"与近形词区分度不足","replacement":{"notes":"注意与「受け取る」区分：受ける偏被动接受。"}},{"type":"split_card","title":"拆为两张卡","reason":"义项跨语境，合并回忆目标过宽","splitNotes":[{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"接受（考试、治疗等）","partOfSpeech":"动词","jlpt":"N3","examples":[{"japanese":"試験を受ける","translationZH":"参加考试"}]},{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"遭受（损失、攻击等）","partOfSpeech":"动词","jlpt":"N3","examples":[{"japanese":"被害を受ける","translationZH":"遭受损失"}]}]}]}"#
+    }
+}
+
 private struct UITestSentenceAnalysisClient: SentenceAnalysisClient {
     func analyze(
         input: SentenceAnalysisInput,
@@ -645,11 +789,73 @@ private struct UITestStubOCRService: OCRRecognizing {
 private final class UITestUnavailableSpeechService: SpeechService {
     let availability: JapaneseSpeechAvailability = .unavailable
 
-    func speak(_ texts: [String], onError: @escaping SpeechFailureHandler) {
-        onError(.voiceUnavailable)
+    @discardableResult
+    func speakWithEvents(_ texts: [String], onEvent: @escaping SpeechEventHandler) -> UUID {
+        let requestID = UUID()
+        onEvent(.failed(requestID: requestID, error: .voiceUnavailable))
+        return requestID
     }
 
     func stop() {}
+}
+
+/// T18 seam (`OBOE_UI_TEST_SPEECH_STUB=ok|fail|pending`): deterministic
+/// playback events that don't depend on the simulator's voice install or
+/// real TTS timing. `ok` completes shortly after start; `fail` reports
+/// `audioSessionUnavailable`; `pending` starts but never finishes.
+@MainActor
+private final class UITestStubSpeechService: SpeechService {
+    enum Mode: String {
+        case ok, fail, pending
+    }
+
+    private let mode: Mode
+    private var inFlight: (id: UUID, onEvent: SpeechEventHandler)?
+
+    init(mode: Mode) {
+        self.mode = mode
+    }
+
+    var availability: JapaneseSpeechAvailability {
+        .available(voiceName: "UITestStubVoice")
+    }
+
+    @discardableResult
+    func speakWithEvents(_ texts: [String], onEvent: @escaping SpeechEventHandler) -> UUID {
+        cancelInFlight()
+        let requestID = UUID()
+        inFlight = (requestID, onEvent)
+        Task { @MainActor in
+            guard self.inFlight?.id == requestID else { return }
+            onEvent(.started(requestID: requestID))
+            switch self.mode {
+            case .ok:
+                try? await Task.sleep(for: .milliseconds(250))
+                guard self.inFlight?.id == requestID else { return }
+                self.inFlight = nil
+                onEvent(.completed(requestID: requestID))
+            case .fail:
+                guard self.inFlight?.id == requestID else { return }
+                self.inFlight = nil
+                onEvent(.failed(requestID: requestID, error: .audioSessionUnavailable))
+            case .pending:
+                break
+            }
+        }
+        return requestID
+    }
+
+    /// Matches the real service: an interrupted request reports `.cancelled`
+    /// so a backgrounded/pending playback never reads as failure or success.
+    func stop() {
+        cancelInFlight()
+    }
+
+    private func cancelInFlight() {
+        guard let inFlight else { return }
+        self.inFlight = nil
+        inFlight.onEvent(.cancelled(requestID: inFlight.id))
+    }
 }
 
 /// Fails the first `remainingFailures` commit attempts with a recoverable

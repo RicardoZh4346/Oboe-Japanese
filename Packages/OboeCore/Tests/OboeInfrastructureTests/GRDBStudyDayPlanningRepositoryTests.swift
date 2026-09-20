@@ -181,7 +181,7 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
         try reopened.close()
     }
 
-    func testGlobalReservationRoundRobinsDecksAndCountsTwoDirectionsSeparately() async throws {
+    func testGlobalReservationRoundRobinsDecksAndCountsDirectionsAsOneWord() async throws {
         let fixture = try await StudyPlanFixture.make()
         defer { fixture.remove() }
         let firstDeck = try await fixture.addDeck(sortOrder: 0)
@@ -211,12 +211,281 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
             repository: GRDBStudyDayPlanningRepository(database: fixture.database)
         ).setDailyNewCardLimit(4, at: instant, defaultTimeZoneID: "Asia/Shanghai")
 
-        XCTAssertEqual(plan.reservedCount, 4)
+        // 额度按词计：4 个词入选，双方向词的全部方向卡一起收录 → 5 张预约卡。
+        XCTAssertEqual(plan.reservedNoteCount, 4)
+        XCTAssertEqual(plan.reservedCount, 5)
         XCTAssertEqual(plan.availableCount, 0)
         XCTAssertEqual(plan.reservations.map(\.deckID), [
-            firstDeck, secondDeck, firstDeck, secondDeck
+            firstDeck, firstDeck, secondDeck, firstDeck, secondDeck
         ])
-        XCTAssertEqual(Set(plan.reservations.map(\.cardID)).intersection(dualCards).count, 2)
+        XCTAssertTrue(
+            Set(dualCards).isSubset(of: Set(plan.reservations.map(\.cardID))),
+            "双方向词的两张方向卡随词一起入选"
+        )
+    }
+
+    func testAllDirectionsOfOneWordShareASingleQuotaSlot() async throws {
+        let fixture = try await StudyPlanFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck(sortOrder: 0)
+        let allDirections: [CardTemplateKind] = [
+            .vocabularyJapaneseToChinese, .vocabularyChineseToJapanese, .vocabularyListening
+        ]
+        let firstWord = try await fixture.addVocabulary(
+            deckID: deckID, templates: allDirections, sequence: 0
+        )
+        _ = try await fixture.addVocabulary(deckID: deckID, templates: allDirections, sequence: 1)
+        _ = try await fixture.addVocabulary(deckID: deckID, templates: allDirections, sequence: 2)
+        let instant = localDate(2026, 9, 10, 12, 0, timeZoneID: "Asia/Shanghai")
+        let repository = GRDBStudyDayPlanningRepository(database: fixture.database)
+        let prepare = PrepareStudyDay(repository: repository)
+
+        let plan = try await prepare.setDailyNewCardLimit(
+            2,
+            at: instant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(plan.reservedNoteCount, 2, "额度单位是词：2 个词入选")
+        XCTAssertEqual(plan.reservedCount, 6, "每个词的 3 个方向一起进队列")
+        XCTAssertEqual(plan.availableCount, 0)
+
+        // 首学第一个词的一个方向后：该词已占名额（按词去重），剩余两个方向
+        // 免费留在今日队列；第二个词的预约不变，总额度仍为 2 词。
+        try await fixture.insertReviewLog(
+            cardID: try XCTUnwrap(firstWord.first),
+            studyDayID: plan.studyDay.id,
+            wasFirstStudy: true,
+            at: instant.addingTimeInterval(30)
+        )
+        let afterFirstStudy = try await prepare(
+            at: instant.addingTimeInterval(60),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(afterFirstStudy.usedCount, 1, "同一词任一方向首学只占一个名额")
+        XCTAssertEqual(afterFirstStudy.reservedNoteCount, 1)
+        XCTAssertEqual(afterFirstStudy.availableCount, 0)
+        XCTAssertEqual(
+            Set(afterFirstStudy.reservations.map(\.cardID)).intersection(firstWord).count,
+            2,
+            "已开始的词剩余方向免费续学，不占新名额"
+        )
+    }
+
+    func testUnfinishedWordConsumesSlotAgainOnNextStudyDay() async throws {
+        let fixture = try await StudyPlanFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck(sortOrder: 0)
+        let allDirections: [CardTemplateKind] = [
+            .vocabularyJapaneseToChinese, .vocabularyChineseToJapanese, .vocabularyListening
+        ]
+        let firstWord = try await fixture.addVocabulary(
+            deckID: deckID, templates: allDirections, sequence: 0
+        )
+        let secondWord = try await fixture.addVocabulary(
+            deckID: deckID, templates: allDirections, sequence: 1
+        )
+        let instant = localDate(2026, 9, 10, 12, 0, timeZoneID: "Asia/Shanghai")
+        let repository = GRDBStudyDayPlanningRepository(database: fixture.database)
+        let prepare = PrepareStudyDay(repository: repository)
+
+        let day1 = try await prepare.setDailyNewCardLimit(
+            2,
+            at: instant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(day1.reservedNoteCount, 2)
+        // 当天只学了第一个词的一个方向。
+        try await fixture.insertReviewLog(
+            cardID: try XCTUnwrap(firstWord.first),
+            studyDayID: day1.studyDay.id,
+            wasFirstStudy: true,
+            at: instant.addingTimeInterval(30)
+        )
+
+        // 次日：第一个词剩余两个方向重新占一个名额继续学，第二个词同样占位。
+        let nextInstant = day1.studyDay.endsAt.addingTimeInterval(3600)
+        let day2 = try await prepare(
+            at: nextInstant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertNotEqual(day2.studyDay.id, day1.studyDay.id)
+        XCTAssertEqual(day2.usedCount, 0)
+        XCTAssertEqual(day2.reservedNoteCount, 2)
+        XCTAssertEqual(day2.reservedCount, 5, "词1 剩 2 个方向 + 词2 全部 3 个方向")
+        XCTAssertEqual(
+            Set(day2.reservations.map(\.cardID)).intersection(firstWord).count, 2
+        )
+        XCTAssertEqual(
+            Set(day2.reservations.map(\.cardID)).intersection(secondWord).count, 3
+        )
+    }
+
+    func testDeckAddedAfterFullReservationWinsFairShareOfQuota() async throws {
+        let fixture = try await StudyPlanFixture.make()
+        defer { fixture.remove() }
+        let firstDeck = try await fixture.addDeck(sortOrder: 0)
+        for index in 0..<12 {
+            _ = try await fixture.addVocabulary(
+                deckID: firstDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: index
+            )
+        }
+        let instant = localDate(2026, 9, 10, 12, 0, timeZoneID: "Asia/Shanghai")
+        let prepare = PrepareStudyDay(
+            repository: GRDBStudyDayPlanningRepository(database: fixture.database)
+        )
+        let initial = try await prepare.setDailyNewCardLimit(
+            10,
+            at: instant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(initial.reservedCount, 10)
+        XCTAssertEqual(Set(initial.reservations.map(\.deckID)), [firstDeck])
+        let originalAdmissions = Dictionary(
+            uniqueKeysWithValues: initial.reservations.map { ($0.cardID, $0.admittedAt) }
+        )
+
+        let secondDeck = try await fixture.addDeck(sortOrder: 1)
+        for index in 0..<3 {
+            _ = try await fixture.addVocabulary(
+                deckID: secondDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: 100 + index
+            )
+        }
+        let rebalanced = try await prepare(
+            at: instant.addingTimeInterval(60),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+
+        XCTAssertEqual(rebalanced.reservedCount, 10)
+        XCTAssertEqual(
+            rebalanced.reservations.filter { $0.deckID == secondDeck }.count,
+            3,
+            "新加入的牌组必须立即获得当日额度份额，而不是等明天"
+        )
+        XCTAssertEqual(
+            rebalanced.reservations.filter { $0.deckID == firstDeck }.count,
+            7
+        )
+        for reservation in rebalanced.reservations where reservation.deckID == firstDeck {
+            XCTAssertEqual(
+                reservation.admittedAt,
+                originalAdmissions[reservation.cardID],
+                "保留下来的预约必须保持原始 admittedAt，队列顺序稳定"
+            )
+        }
+
+        let stable = try await prepare(
+            at: instant.addingTimeInterval(120),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(
+            stable.reservations.map(\.cardID),
+            rebalanced.reservations.map(\.cardID),
+            "候选集不变时重算必须收敛到同一分配，不能反复换入换出"
+        )
+    }
+
+    func testPrimaryDeckClaimsQuotaFirstAndSwitchingRebalances() async throws {
+        let fixture = try await StudyPlanFixture.make()
+        defer { fixture.remove() }
+        let firstDeck = try await fixture.addDeck(sortOrder: 0)
+        let secondDeck = try await fixture.addDeck(sortOrder: 1)
+        for index in 0..<12 {
+            _ = try await fixture.addVocabulary(
+                deckID: firstDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: index
+            )
+        }
+        for index in 0..<3 {
+            _ = try await fixture.addVocabulary(
+                deckID: secondDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: 100 + index
+            )
+        }
+        let instant = localDate(2026, 9, 10, 12, 0, timeZoneID: "Asia/Shanghai")
+        let repository = GRDBStudyDayPlanningRepository(database: fixture.database)
+        let prepare = PrepareStudyDay(repository: repository)
+        let initial = try await prepare.setDailyNewCardLimit(
+            10,
+            at: instant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        // 无主牌组时保持轮转公平：B 3 张全部入选，A 7 张。
+        XCTAssertEqual(initial.reservations.filter { $0.deckID == secondDeck }.count, 3)
+        XCTAssertEqual(initial.reservations.filter { $0.deckID == firstDeck }.count, 7)
+
+        // A 设为主牌组后重算：额度先满足 A 的 12 张候选，B 的预约让位。
+        let primaryFirst = try await prepare.setPrimaryDeck(
+            firstDeck,
+            at: instant.addingTimeInterval(60),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(primaryFirst.reservedCount, 10)
+        XCTAssertEqual(
+            Set(primaryFirst.reservations.map(\.deckID)),
+            [firstDeck],
+            "主牌组候选充足时应当独占全部新卡额度"
+        )
+
+        // 切回 B 为主牌组：B 的 3 张立即全部获得额度，A 保留剩余 7 张。
+        let switched = try await prepare.setPrimaryDeck(
+            secondDeck,
+            at: instant.addingTimeInterval(120),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(switched.reservedCount, 10)
+        XCTAssertEqual(switched.reservations.filter { $0.deckID == secondDeck }.count, 3)
+        XCTAssertEqual(switched.reservations.filter { $0.deckID == firstDeck }.count, 7)
+
+        let settings = try await repository.loadOrCreateSettings(
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(settings.primaryDeckID, secondDeck)
+
+        // 取消主牌组后回到纯轮转分配，分配结果不再变化。
+        let cleared = try await prepare.setPrimaryDeck(
+            nil,
+            at: instant.addingTimeInterval(180),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(cleared.reservations.map(\.cardID), switched.reservations.map(\.cardID))
+    }
+
+    func testStarvedDeckReclaimsReservationAfterItsCardsBecomeEligible() async throws {
+        let fixture = try await StudyPlanFixture.make()
+        defer { fixture.remove() }
+        let firstDeck = try await fixture.addDeck(sortOrder: 0)
+        let secondDeck = try await fixture.addDeck(sortOrder: 1)
+        for index in 0..<12 {
+            _ = try await fixture.addVocabulary(
+                deckID: firstDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: index
+            )
+        }
+        for index in 0..<4 {
+            _ = try await fixture.addVocabulary(
+                deckID: secondDeck,
+                templates: [.vocabularyJapaneseToChinese],
+                sequence: 100 + index
+            )
+        }
+        let instant = localDate(2026, 9, 10, 12, 0, timeZoneID: "Asia/Shanghai")
+        let prepare = PrepareStudyDay(
+            repository: GRDBStudyDayPlanningRepository(database: fixture.database)
+        )
+        let plan = try await prepare.setDailyNewCardLimit(
+            10,
+            at: instant,
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == secondDeck }.count, 4)
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == firstDeck }.count, 6)
     }
 
     func testNewContentFillsRemainingSlotAndDeletingStudiedCardDoesNotRefundQuota() async throws {
@@ -459,6 +728,22 @@ private final class StudyPlanFixture: @unchecked Sendable {
                 sql: "SELECT deck_id FROM notes WHERE id = ?",
                 arguments: [noteID]
             )!
+            if wasFirstStudy {
+                // 与真实评分路径一致：首学后卡进入 learning，且
+                // first_studied_at_ms 置位——否则该卡仍会被当作新卡候选。
+                try db.execute(
+                    sql: """
+                        UPDATE cards
+                        SET state = MAX(state, 1),
+                            first_studied_at_ms = COALESCE(first_studied_at_ms, ?)
+                        WHERE id = ?
+                        """,
+                    arguments: [
+                        try DatabaseValueCodec.encode(instant),
+                        DatabaseValueCodec.encode(cardID)
+                    ]
+                )
+            }
             try db.execute(
                 sql: """
                     INSERT INTO review_logs(

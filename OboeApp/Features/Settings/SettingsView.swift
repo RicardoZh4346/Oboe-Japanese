@@ -10,6 +10,7 @@ struct SettingsView: View {
     let restorationPreparer: PortableBackupRestorationPreparer
     let studyService: StudySessionService
     let speechPreferencesService: SpeechPreferencesService
+    let adaptivePreferencesService: AdaptivePreferencesService
     let aiConfigurationService: AIConfigurationService
     let aiConnectionTestService: AIConnectionTestService
     let speechService: any SpeechService
@@ -42,6 +43,9 @@ struct SettingsView: View {
     @State private var speechPreferences = SpeechPreferences.defaults
     @State private var isLoadingSpeechPreferences = true
     @State private var isUpdatingSpeechPreferences = false
+    @State private var adaptivePreferences = AdaptivePreferences.defaults
+    @State private var isLoadingAdaptivePreferences = true
+    @State private var isUpdatingAdaptivePreferences = false
     @State private var aiDraft = AIConfigurationDraft.deepSeekDefault
     @State private var loadedAIStatus: AIConfigurationStatus?
     @State private var apiKeyInput = ""
@@ -103,6 +107,21 @@ struct SettingsView: View {
                     .disabled(isLoadingSpeechPreferences || isUpdatingSpeechPreferences)
                     .accessibilityIdentifier("speech-auto-play-example-toggle")
 
+                    Toggle(
+                        "听力卡自动播放",
+                        isOn: Binding(
+                            get: { adaptivePreferences.autoPlayListeningAudio },
+                            set: { updateAutoPlayListeningAudio($0) }
+                        )
+                    )
+                    .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
+                    .accessibilityIdentifier("adaptive-autoplay-listening-toggle")
+
+                    Text("默认开启。听力卡出题时自动播放一次音频；关闭后仍可手动播放。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("adaptive-autoplay-listening-note")
+
                     switch speechService.availability {
                     case let .available(voiceName):
                         Label("日语语音可用：\(voiceName)", systemImage: "checkmark.circle")
@@ -121,6 +140,55 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("speech-offline-note")
+                }
+
+                Section("主动回忆") {
+                    Toggle(
+                        "中文→日文输入",
+                        isOn: Binding(
+                            get: { adaptivePreferences.typedAnswerChineseToJapanese },
+                            set: { updateTypedAnswerChineseToJapanese($0) }
+                        )
+                    )
+                    .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
+                    .accessibilityIdentifier("adaptive-typed-answer-zh-ja-toggle")
+
+                    Text("默认关闭。开启后，中文→日文卡需先输入回答再查看答案；从下一张卡开始生效，评分仍由你选择。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("adaptive-typed-answer-zh-ja-note")
+
+                    Toggle(
+                        "听力卡输入",
+                        isOn: Binding(
+                            get: { adaptivePreferences.typedAnswerListening },
+                            set: { updateTypedAnswerListening($0) }
+                        )
+                    )
+                    .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
+                    .accessibilityIdentifier("adaptive-typed-answer-listening-toggle")
+
+                    Text("默认关闭。开启后，听力卡需先用日语复述听到的内容再查看答案；从下一张卡开始生效，评分仍由你选择。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("adaptive-typed-answer-listening-note")
+                }
+
+                Section("易错卡") {
+                    Toggle(
+                        "复习提醒",
+                        isOn: Binding(
+                            get: { adaptivePreferences.leechRemindersEnabled },
+                            set: { isEnabled in updateLeechReminders(isEnabled) }
+                        )
+                    )
+                    .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
+                    .accessibilityIdentifier("adaptive-leech-reminders-toggle")
+
+                    Text("开启后：首页显示“需要关注”入口，答案页对近期经常遗忘的卡片显示轻提示；问题页不做任何提示。关闭不影响易错判定与列表。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("adaptive-leech-reminders-note")
                 }
 
                 aiSettingsSection
@@ -321,6 +389,7 @@ struct SettingsView: View {
                 refreshPendingSharedCaptures()
                 await loadLearningSettings()
                 await loadSpeechPreferences()
+                await loadAdaptivePreferences()
                 await loadAIConfiguration()
                 await loadLocalSnapshots()
             }
@@ -360,7 +429,7 @@ struct SettingsView: View {
     private var learningSettingsSection: some View {
         Section("学习计划") {
             Stepper(value: $dailyNewCardLimit, in: 0...999) {
-                LabeledContent("每日新卡", value: "\(dailyNewCardLimit) 张")
+                LabeledContent("每日新词", value: "\(dailyNewCardLimit) 个")
             }
             .disabled(isLoadingLearningSettings || isSavingLearningSettings)
             .accessibilityIdentifier("learning-daily-new-limit-stepper")
@@ -864,6 +933,87 @@ struct SettingsView: View {
                 await loadSpeechPreferences()
             }
             isUpdatingSpeechPreferences = false
+        }
+    }
+
+    private func loadAdaptivePreferences() async {
+        isLoadingAdaptivePreferences = true
+        do {
+            adaptivePreferences = try await adaptivePreferencesService.load(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+        } catch {
+            errorMessage = "无法读取学习偏好：\(error.localizedDescription)"
+        }
+        isLoadingAdaptivePreferences = false
+    }
+
+    private func updateTypedAnswerChineseToJapanese(_ isEnabled: Bool) {
+        guard !isLoadingAdaptivePreferences, !isUpdatingAdaptivePreferences else { return }
+        let previous = adaptivePreferences
+        isUpdatingAdaptivePreferences = true
+        Task {
+            defer { isUpdatingAdaptivePreferences = false }
+            do {
+                adaptivePreferences = try await adaptivePreferencesService
+                    .setTypedAnswerChineseToJapanese(isEnabled)
+            } catch {
+                adaptivePreferences = previous
+                errorMessage = "无法保存输入设置：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func updateAutoPlayListeningAudio(_ isEnabled: Bool) {
+        guard !isLoadingAdaptivePreferences, !isUpdatingAdaptivePreferences else { return }
+        let previous = adaptivePreferences
+        isUpdatingAdaptivePreferences = true
+        Task {
+            defer { isUpdatingAdaptivePreferences = false }
+            do {
+                adaptivePreferences = try await adaptivePreferencesService
+                    .setAutoPlayListeningAudio(isEnabled)
+            } catch {
+                adaptivePreferences = previous
+                errorMessage = "无法保存自动播放设置：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func updateTypedAnswerListening(_ isEnabled: Bool) {
+        guard !isLoadingAdaptivePreferences, !isUpdatingAdaptivePreferences else { return }
+        let previous = adaptivePreferences
+        isUpdatingAdaptivePreferences = true
+        Task {
+            defer { isUpdatingAdaptivePreferences = false }
+            do {
+                adaptivePreferences = try await adaptivePreferencesService
+                    .setTypedAnswerListening(isEnabled)
+            } catch {
+                adaptivePreferences = previous
+                errorMessage = "无法保存输入设置：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func updateLeechReminders(_ isEnabled: Bool) {
+        guard !isUpdatingAdaptivePreferences else { return }
+        adaptivePreferences = AdaptivePreferences(
+            typedAnswerChineseToJapanese: adaptivePreferences.typedAnswerChineseToJapanese,
+            autoPlayListeningAudio: adaptivePreferences.autoPlayListeningAudio,
+            typedAnswerListening: adaptivePreferences.typedAnswerListening,
+            leechRemindersEnabled: isEnabled
+        )
+        isUpdatingAdaptivePreferences = true
+        Task {
+            do {
+                adaptivePreferences = try await adaptivePreferencesService
+                    .setLeechRemindersEnabled(isEnabled)
+            } catch {
+                errorMessage = "无法保存易错卡设置：\(error.localizedDescription)"
+                await loadAdaptivePreferences()
+            }
+            isUpdatingAdaptivePreferences = false
         }
     }
 

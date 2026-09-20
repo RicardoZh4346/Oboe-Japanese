@@ -118,6 +118,10 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
             }
 
             try db.execute(
+                sql: "UPDATE app_settings SET primary_deck_id = NULL WHERE primary_deck_id = ?",
+                arguments: [DatabaseValueCodec.encode(id)]
+            )
+            try db.execute(
                 sql: "DELETE FROM decks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM notes WHERE deck_id = decks.id)",
                 arguments: [DatabaseValueCodec.encode(id)]
             )
@@ -160,6 +164,10 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
                 )
             }
 
+            try db.execute(
+                sql: "UPDATE app_settings SET primary_deck_id = NULL WHERE primary_deck_id = ?",
+                arguments: [DatabaseValueCodec.encode(id)]
+            )
             try db.execute(
                 sql: "DELETE FROM decks WHERE id = ?",
                 arguments: [DatabaseValueCodec.encode(id)]

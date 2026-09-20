@@ -178,7 +178,7 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
         }
     }
 
-    private static func replacePrimaryExample(
+    static func replacePrimaryExample(
         noteID: UUID,
         content: VocabularyExampleContent?,
         existingExampleIDs: [String],

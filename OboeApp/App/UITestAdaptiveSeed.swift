@@ -1,0 +1,718 @@
+#if DEBUG
+import Foundation
+import GRDB
+import OboeDomain
+import OboeInfrastructure
+
+extension AppDependencies {
+    /// `OBOE_UI_TEST_ADAPTIVE_SEED`: deterministic adaptive fixture for UI
+    /// tests (T03) — one deck, one vocabulary note with a leech ja→zh card
+    /// (lapses 6, six due-review Agains) and a warning zh→ja card (lapses 3,
+    /// due later so it never enters today's queue). Covers the home entry,
+    /// list filters, detail page and the answer-face reminder.
+    func seedAdaptiveUITestData(database: OboeDatabase) async throws {
+        let deckID = UUID()
+        let noteID = UUID()
+        let leechCardID = UUID()
+        let warningCardID = UUID()
+        let typedRecallSeed = ProcessInfo.processInfo.environment["OBOE_UI_TEST_TYPED_RECALL_SEED"]
+        let typedRecall = typedRecallSeed != nil
+        // T14: "long" seeds a verbose zh→ja answer so the answer face must
+        // scroll — used by the accessibility-size and long-answer checks.
+        let longAnswer = typedRecallSeed == "long"
+        let now = Date()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let dayMs = Int64(86_400_000)
+
+        let profile = SchedulerProfile.standard
+        let parametersJSON = String(
+            decoding: try JSONEncoder().encode(profile.parameters),
+            as: UTF8.self
+        )
+        let profileID = UUID()
+
+        try await database.pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
+                    VALUES (?, ?, 0, ?, ?)
+                    """,
+                arguments: [DatabaseValueCodec.encode(deckID), "自适应测试", nowMs, nowMs]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO scheduler_profiles(
+                        id, configuration_version, algorithm_version, library_revision,
+                        parameters_json, desired_retention, max_interval_days, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(profileID),
+                    profile.configurationVersion,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    SwiftFSRSReviewScheduler.dependencyRevision,
+                    parametersJSON,
+                    profile.targetRetention,
+                    profile.maximumIntervalDays,
+                    nowMs
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO notes(
+                        id, deck_id, kind, headword, reading, meaning_zh,
+                        origin, content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, 'manual', 1, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(noteID),
+                    DatabaseValueCodec.encode(deckID),
+                    longAnswer
+                        ? "毎日コツコツと練習を続けることが、上達へのいちばんの近道です"
+                        : "受ける",
+                    longAnswer
+                        ? "まいにちコツコツとれんしゅうをつづけることが、じょうたつへのいちばんのちかみちです"
+                        : "うける",
+                    longAnswer
+                        ? "每天坚持踏实练习，是通往进步最近的道路；请结合自己的实际情况灵活运用。"
+                        : "接受；遭受",
+                    nowMs,
+                    nowMs
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO cards(
+                        id, note_id, template_kind, is_enabled, state, due_at_ms,
+                        stability, difficulty, reps, lapses, scheduled_days,
+                        elapsed_days, learning_step, first_studied_at_ms,
+                        state_version, algorithm_version, profile_id
+                    ) VALUES (?, ?, 'vocabulary_ja_zh', 1, 2, ?, 4.2, 9.1, 14, 6, 0, 0, 0, ?, 14, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(leechCardID),
+                    DatabaseValueCodec.encode(noteID),
+                    typedRecall ? nowMs + 2 * dayMs : nowMs - 2 * dayMs,
+                    nowMs - 60 * dayMs,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    DatabaseValueCodec.encode(profileID)
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO cards(
+                        id, note_id, template_kind, is_enabled, state, due_at_ms,
+                        stability, difficulty, reps, lapses, scheduled_days,
+                        elapsed_days, learning_step, first_studied_at_ms,
+                        state_version, algorithm_version, profile_id
+                    ) VALUES (?, ?, 'vocabulary_zh_ja', 1, 2, ?, 6.0, 7.0, 9, 3, 0, 0, 0, ?, 9, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(warningCardID),
+                    DatabaseValueCodec.encode(noteID),
+                    typedRecall ? nowMs - 2 * dayMs : nowMs + 2 * dayMs,
+                    nowMs - 45 * dayMs,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    DatabaseValueCodec.encode(profileID)
+                ]
+            )
+        }
+
+        // T14 seam: layout tests at maximum text size skip the Settings UI —
+        // the row's hittable point can collide with the tab bar — so the
+        // typed-recall preference is enabled through the real service. The
+        // load() call first materializes the app_settings row; on a fresh
+        // database a bare UPDATE would touch zero rows and silently no-op.
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_TYPED_RECALL_PREF"] != nil {
+            _ = try? await adaptivePreferencesService?.load(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            _ = try? await adaptivePreferencesService?.setTypedAnswerChineseToJapanese(true)
+        }
+
+        // Materialize today's study day and admit the due leech card into the
+        // queue so the answer-face reminder can be exercised end to end.
+        guard let plan = try await studySessionService?.buildTodayPlan(
+            defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+        ) else { return }
+        let studyDayID = plan.studyDay.id
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        encoder.outputFormatting = [.sortedKeys]
+
+        func snapshot(
+            state: SchedulingState,
+            dueAt: Date,
+            stability: Double,
+            difficulty: Double,
+            repetitions: Int,
+            lapses: Int,
+            stateVersion: Int
+        ) throws -> String {
+            let snapshot = ReviewSchedulingSnapshot(
+                scheduling: SchedulingCard(
+                    dueAt: dueAt,
+                    stability: stability,
+                    difficulty: difficulty,
+                    elapsedDays: 0,
+                    scheduledDays: 0,
+                    learningStep: 0,
+                    repetitions: repetitions,
+                    lapses: lapses,
+                    state: state,
+                    lastReviewAt: nil
+                ),
+                firstStudiedAt: nil,
+                stateVersion: stateVersion,
+                algorithmVersion: SwiftFSRSReviewScheduler.algorithmVersion,
+                profileID: profileID
+            )
+            return String(decoding: try encoder.encode(snapshot), as: UTF8.self)
+        }
+
+        // Precompute snapshot JSON on the main actor — the GRDB write closure
+        // is @Sendable and cannot call the local function above.
+        var previousJSONs: [String] = []
+        var nextJSONs: [String] = []
+        var reviewedAts: [Date] = []
+        for index in 0..<6 {
+            let reviewedAt = now.addingTimeInterval(TimeInterval(-(1 + index * 3)) * 86_400)
+            reviewedAts.append(reviewedAt)
+            previousJSONs.append(try snapshot(
+                state: .review,
+                dueAt: reviewedAt.addingTimeInterval(-86_400),
+                stability: 3.0,
+                difficulty: 8.8,
+                repetitions: 10 + index,
+                lapses: 5,
+                stateVersion: index * 2
+            ))
+            nextJSONs.append(try snapshot(
+                state: .relearning,
+                dueAt: reviewedAt.addingTimeInterval(600_000),
+                stability: 1.0,
+                difficulty: 9.0,
+                repetitions: 11 + index,
+                lapses: 6,
+                stateVersion: index * 2 + 1
+            ))
+        }
+
+        let seededLogTimes = reviewedAts
+        let seededPreviousJSONs = previousJSONs
+        let seededNextJSONs = nextJSONs
+        try await database.pool.write { db in
+            for index in 0..<6 {
+                let reviewedAt = seededLogTimes[index]
+                try db.execute(
+                    sql: """
+                        INSERT INTO review_logs(
+                            id, event_id, card_id, card_key, note_id, deck_id_at_review,
+                            reviewed_at_ms, study_day_id, was_first_study, rating,
+                            previous_state_json, next_state_json, duration_ms,
+                            content_version, profile_id, algorithm_version, undone_at_ms
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 900, 1, ?, ?, NULL)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(UUID()),
+                        DatabaseValueCodec.encode(UUID()),
+                        DatabaseValueCodec.encode(leechCardID),
+                        DatabaseValueCodec.encode(leechCardID),
+                        DatabaseValueCodec.encode(noteID),
+                        DatabaseValueCodec.encode(deckID),
+                        DatabaseValueCodec.encode(reviewedAt),
+                        DatabaseValueCodec.encode(studyDayID),
+                        ReviewRating.again.rawValue,
+                        seededPreviousJSONs[index],
+                        seededNextJSONs[index],
+                        DatabaseValueCodec.encode(profileID),
+                        SwiftFSRSReviewScheduler.algorithmVersion
+                    ]
+                )
+            }
+        }
+
+        // T26 seam (`OBOE_UI_TEST_TREND_SEED`): a second note whose leech
+        // state forms strictly inside the current comparison week — all
+        // its Again logs sit after the learning-zone Monday-04:00
+        // boundary, so the report counts it under 新出现 while the
+        // original card stays 仍经常遗忘. The boundary is computed with
+        // the same domain helper and the same stored learning time zone
+        // the report itself resolves.
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_TREND_SEED"] != nil {
+            let timeZoneID = (try? await studySessionService?.loadLearningSettings(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            ).learningTimeZoneID) ?? TimeZone.autoupdatingCurrent.identifier
+            let weekStart = (try? AdaptiveTrendWeek.start(
+                atOrBefore: now,
+                timeZoneID: timeZoneID
+            )) ?? now
+            let span = max(1, now.timeIntervalSince(weekStart))
+            let trendNoteID = UUID()
+            let trendCardID = UUID()
+
+            var trendPreviousJSONs: [String] = []
+            var trendNextJSONs: [String] = []
+            var trendReviewedAts: [Date] = []
+            for index in 0..<6 {
+                let reviewedAt = weekStart.addingTimeInterval(
+                    span * (0.1 + 0.15 * Double(index))
+                )
+                trendReviewedAts.append(reviewedAt)
+                trendPreviousJSONs.append(try snapshot(
+                    state: .review,
+                    dueAt: reviewedAt.addingTimeInterval(-86_400),
+                    stability: 3.0,
+                    difficulty: 8.8,
+                    repetitions: 10 + index,
+                    lapses: 5,
+                    stateVersion: index * 2
+                ))
+                trendNextJSONs.append(try snapshot(
+                    state: .relearning,
+                    dueAt: reviewedAt.addingTimeInterval(600_000),
+                    stability: 1.0,
+                    difficulty: 9.0,
+                    repetitions: 11 + index,
+                    lapses: 6,
+                    stateVersion: index * 2 + 1
+                ))
+            }
+
+            let seededTrendTimes = trendReviewedAts
+            let seededTrendPreviousJSONs = trendPreviousJSONs
+            let seededTrendNextJSONs = trendNextJSONs
+            try await database.pool.write { db in
+                try db.execute(
+                    sql: """
+                        INSERT INTO notes(
+                            id, deck_id, kind, headword, reading, meaning_zh,
+                            origin, content_version, created_at_ms, updated_at_ms
+                        ) VALUES (?, ?, 'vocabulary', ?, ?, ?, 'manual', 1, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(trendNoteID),
+                        DatabaseValueCodec.encode(deckID),
+                        "覚える",
+                        "おぼえる",
+                        "记住",
+                        nowMs,
+                        nowMs
+                    ]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, first_studied_at_ms,
+                            state_version, algorithm_version, profile_id
+                        ) VALUES (?, ?, 'vocabulary_ja_zh', 1, 2, ?, 1.0, 9.0, 16, 6, 0, 0, 0, ?, 16, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(trendCardID),
+                        DatabaseValueCodec.encode(trendNoteID),
+                        nowMs + 2 * dayMs,
+                        nowMs - 30 * dayMs,
+                        SwiftFSRSReviewScheduler.algorithmVersion,
+                        DatabaseValueCodec.encode(profileID)
+                    ]
+                )
+                for index in 0..<6 {
+                    try db.execute(
+                        sql: """
+                            INSERT INTO review_logs(
+                                id, event_id, card_id, card_key, note_id, deck_id_at_review,
+                                reviewed_at_ms, study_day_id, was_first_study, rating,
+                                previous_state_json, next_state_json, duration_ms,
+                                content_version, profile_id, algorithm_version, undone_at_ms
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 900, 1, ?, ?, NULL)
+                            """,
+                        arguments: [
+                            DatabaseValueCodec.encode(UUID()),
+                            DatabaseValueCodec.encode(UUID()),
+                            DatabaseValueCodec.encode(trendCardID),
+                            DatabaseValueCodec.encode(trendCardID),
+                            DatabaseValueCodec.encode(trendNoteID),
+                            DatabaseValueCodec.encode(deckID),
+                            DatabaseValueCodec.encode(seededTrendTimes[index]),
+                            DatabaseValueCodec.encode(studyDayID),
+                            ReviewRating.again.rawValue,
+                            seededTrendPreviousJSONs[index],
+                            seededTrendNextJSONs[index],
+                            DatabaseValueCodec.encode(profileID),
+                            SwiftFSRSReviewScheduler.algorithmVersion
+                        ]
+                    )
+                }
+            }
+        }
+    }
+    /// `OBOE_UI_TEST_LISTENING_SEED`: T17 fixture — one deck with two notes:
+    /// 聞く/きく carries a due `vocabulary_listening` card (earliest due, so it
+    /// is served first), 食べる/たべる carries a due `vocabulary_zh_ja` card so
+    /// the same session exercises the audio face then a visual face.
+    func seedListeningUITestData(database: OboeDatabase) async throws {
+        let deckID = UUID()
+        let listeningNoteID = UUID()
+        let visualNoteID = UUID()
+        let listeningCardID = UUID()
+        let visualCardID = UUID()
+        let now = Date()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let dayMs = Int64(86_400_000)
+
+        let profile = SchedulerProfile.standard
+        let parametersJSON = String(
+            decoding: try JSONEncoder().encode(profile.parameters),
+            as: UTF8.self
+        )
+        let profileID = UUID()
+
+        try await database.pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
+                    VALUES (?, ?, 0, ?, ?)
+                    """,
+                arguments: [DatabaseValueCodec.encode(deckID), "听力测试", nowMs, nowMs]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO scheduler_profiles(
+                        id, configuration_version, algorithm_version, library_revision,
+                        parameters_json, desired_retention, max_interval_days, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(profileID),
+                    profile.configurationVersion,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    SwiftFSRSReviewScheduler.dependencyRevision,
+                    parametersJSON,
+                    profile.targetRetention,
+                    profile.maximumIntervalDays,
+                    nowMs
+                ]
+            )
+            for (noteID, headword, reading, meaning) in [
+                (listeningNoteID, "聞く", "きく", "听；询问"),
+                (visualNoteID, "食べる", "たべる", "吃")
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO notes(
+                            id, deck_id, kind, headword, reading, meaning_zh,
+                            origin, content_version, created_at_ms, updated_at_ms
+                        ) VALUES (?, ?, 'vocabulary', ?, ?, ?, 'manual', 1, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(noteID),
+                        DatabaseValueCodec.encode(deckID),
+                        headword,
+                        reading,
+                        meaning,
+                        nowMs,
+                        nowMs
+                    ]
+                )
+            }
+            // T19: an example on the listening note makes the accessibility
+            // traversal's "no answer text on the question face" assertion
+            // cover all four content classes (headword/reading/meaning/
+            // example) — it must never appear until reveal.
+            try db.execute(
+                sql: """
+                    INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order)
+                    VALUES (?, ?, ?, ?, 0)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(UUID()),
+                    DatabaseValueCodec.encode(listeningNoteID),
+                    "毎朝ラジオを聞く。",
+                    "每天早上听广播。"
+                ]
+            )
+            for (cardID, noteID, template, dueAt) in [
+                (listeningCardID, listeningNoteID, "vocabulary_listening", nowMs - 2 * dayMs),
+                (visualCardID, visualNoteID, "vocabulary_zh_ja", nowMs - dayMs)
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, first_studied_at_ms,
+                            state_version, algorithm_version, profile_id
+                        ) VALUES (?, ?, ?, 1, 2, ?, 4.0, 8.0, 8, 0, 0, 0, 0, ?, 8, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(cardID),
+                        DatabaseValueCodec.encode(noteID),
+                        template,
+                        dueAt,
+                        nowMs - 40 * dayMs,
+                        SwiftFSRSReviewScheduler.algorithmVersion,
+                        DatabaseValueCodec.encode(profileID)
+                    ]
+                )
+            }
+        }
+
+        // Admit the due cards into today's queue so 今日 shows a start entry.
+        _ = try await studySessionService?.buildTodayPlan(
+            defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+        )
+
+        // T18 seam: `OBOE_UI_TEST_LISTENING_AUTOPLAY_OFF` disables the
+        // listening autoplay preference through the real service — the
+        // load() first materializes the app_settings row so the UPDATE
+        // doesn't silently no-op on a fresh database.
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_LISTENING_AUTOPLAY_OFF"] != nil {
+            _ = try? await adaptivePreferencesService?.load(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            _ = try? await adaptivePreferencesService?.setAutoPlayListeningAudio(false)
+        }
+        // T19 seam: enable the optional listening typed-recall input without
+        // driving Settings UI — same materialize-then-update ordering as the
+        // autoplay seam above.
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] != nil {
+            _ = try? await adaptivePreferencesService?.load(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            _ = try? await adaptivePreferencesService?.setTypedAnswerListening(true)
+        }
+    }
+
+    /// `OBOE_UI_TEST_SIBLING_SEED`: sibling-separation fixture for T21 —
+    /// deck「错开牌组」holds note A（読む/よむ/读）with listening + ja→zh +
+    /// zh→ja cards and note B（書く/かく/写）with one ja→zh card; deck
+    /// 「干扰牌组」holds note C（習う）with the globally earliest due card so
+    /// deck-scoped sessions prove filtering. Queue order (raw due):
+    /// C(-500) → A-listening(-400) → A-ja2zh(-300) → A-zh2ja(-200) → B(-100).
+    /// With speech unavailable the listening card precheck-skips; with
+    /// `OBOE_UI_TEST_SPEECH_STUB=fail` it presents then fails — exercising
+    /// the rollback of `lastPresentedNoteID` on skip (§9.2).
+    func seedSiblingUITestData(database: OboeDatabase) async throws {
+        let deckAID = UUID()
+        let deckBID = UUID()
+        let noteAID = UUID()
+        let noteBID = UUID()
+        let noteCID = UUID()
+        let now = Date()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let dayMs = Int64(86_400_000)
+
+        let profile = SchedulerProfile.standard
+        let parametersJSON = String(
+            decoding: try JSONEncoder().encode(profile.parameters),
+            as: UTF8.self
+        )
+        let profileID = UUID()
+
+        try await database.pool.write { db in
+            for (deckID, name, order) in [
+                (deckAID, "错开牌组", 0),
+                (deckBID, "干扰牌组", 1)
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(deckID), name, order, nowMs, nowMs
+                    ]
+                )
+            }
+            try db.execute(
+                sql: """
+                    INSERT INTO scheduler_profiles(
+                        id, configuration_version, algorithm_version, library_revision,
+                        parameters_json, desired_retention, max_interval_days, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(profileID),
+                    profile.configurationVersion,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    SwiftFSRSReviewScheduler.dependencyRevision,
+                    parametersJSON,
+                    profile.targetRetention,
+                    profile.maximumIntervalDays,
+                    nowMs
+                ]
+            )
+            for (noteID, deckID, headword, reading, meaning) in [
+                (noteAID, deckAID, "読む", "よむ", "读"),
+                (noteBID, deckAID, "書く", "かく", "写"),
+                (noteCID, deckBID, "習う", "ならう", "学习")
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO notes(
+                            id, deck_id, kind, headword, reading, meaning_zh,
+                            origin, content_version, created_at_ms, updated_at_ms
+                        ) VALUES (?, ?, 'vocabulary', ?, ?, ?, 'manual', 1, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(noteID),
+                        DatabaseValueCodec.encode(deckID),
+                        headword,
+                        reading,
+                        meaning,
+                        nowMs,
+                        nowMs
+                    ]
+                )
+            }
+            for (noteID, template, offset) in [
+                (noteAID, "vocabulary_listening", -400_000),
+                (noteAID, "vocabulary_ja_zh", -300_000),
+                (noteAID, "vocabulary_zh_ja", -200_000),
+                (noteBID, "vocabulary_ja_zh", -100_000),
+                // Globally earliest due — a scoped session must never see it.
+                (noteCID, "vocabulary_ja_zh", -500_000)
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, first_studied_at_ms,
+                            state_version, algorithm_version, profile_id
+                        ) VALUES (?, ?, ?, 1, 2, ?, 4.0, 8.0, 8, 0, 0, 0, 0, ?, 8, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(UUID()),
+                        DatabaseValueCodec.encode(noteID),
+                        template,
+                        nowMs + Int64(offset),
+                        nowMs - 40 * dayMs,
+                        SwiftFSRSReviewScheduler.algorithmVersion,
+                        DatabaseValueCodec.encode(profileID)
+                    ]
+                )
+            }
+        }
+
+        // Admit the due cards into today's queue so 今日 shows start entries.
+        _ = try await studySessionService?.buildTodayPlan(
+            defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+        )
+    }
+
+    /// `OBOE_UI_TEST_JLPT_WEAK_SEED`: T25 fixture — a `builtin_jlpt` note
+    /// bound to the real N5 entry 食べる (exact source_ref match) carrying
+    /// TWO leech directions (ja→zh lapses 6, zh→ja lapses 7) so the weak
+    /// list must show the word once and expand to both directions; plus a
+    /// same-headword `manual` note whose leech card proves unassociated
+    /// notes never enter the builtin weak list (they stay visible only in
+    /// the Adaptive center).
+    func seedJLPTWeakUITestData(database: OboeDatabase) async throws {
+        let deckID = UUID()
+        let builtinNoteID = UUID()
+        let manualNoteID = UUID()
+        let now = Date()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let dayMs = Int64(86_400_000)
+
+        let profile = SchedulerProfile.standard
+        let parametersJSON = String(
+            decoding: try JSONEncoder().encode(profile.parameters),
+            as: UTF8.self
+        )
+        let profileID = UUID()
+
+        try await database.pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
+                    VALUES (?, ?, 0, ?, ?)
+                    """,
+                arguments: [DatabaseValueCodec.encode(deckID), "弱项测试", nowMs, nowMs]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO scheduler_profiles(
+                        id, configuration_version, algorithm_version, library_revision,
+                        parameters_json, desired_retention, max_interval_days, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(profileID),
+                    profile.configurationVersion,
+                    SwiftFSRSReviewScheduler.algorithmVersion,
+                    SwiftFSRSReviewScheduler.dependencyRevision,
+                    parametersJSON,
+                    profile.targetRetention,
+                    profile.maximumIntervalDays,
+                    nowMs
+                ]
+            )
+            // The builtin note associates to the real library entry 食べる —
+            // its id is the bundled vocabulary's stable source_ref.
+            try db.execute(
+                sql: """
+                    INSERT INTO notes(
+                        id, deck_id, kind, headword, reading, meaning_zh,
+                        origin, source_ref, content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', '食べる', 'たべる', '吃',
+                              'builtin_jlpt',
+                              'openjlpt:N5:df220e3db92cd43c596cbf63d8b3435c49df5e8fb4da32b65014ff9ab3c29bbd',
+                              1, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(builtinNoteID),
+                    DatabaseValueCodec.encode(deckID),
+                    nowMs,
+                    nowMs
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO notes(
+                        id, deck_id, kind, headword, reading, meaning_zh,
+                        origin, content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', '食べる', 'たべる', '吃',
+                              'manual', 1, ?, ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(manualNoteID),
+                    DatabaseValueCodec.encode(deckID),
+                    nowMs,
+                    nowMs
+                ]
+            )
+            for (noteID, template, lapses) in [
+                (builtinNoteID, "vocabulary_ja_zh", 6),
+                (builtinNoteID, "vocabulary_zh_ja", 7),
+                (manualNoteID, "vocabulary_ja_zh", 6)
+            ] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, first_studied_at_ms,
+                            state_version, algorithm_version, profile_id
+                        ) VALUES (?, ?, ?, 1, 2, ?, 3.0, 8.0, 12, ?, 0, 0, 0, ?, 12, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(UUID()),
+                        DatabaseValueCodec.encode(noteID),
+                        template,
+                        nowMs + 30 * dayMs,
+                        lapses,
+                        nowMs - 60 * dayMs,
+                        SwiftFSRSReviewScheduler.algorithmVersion,
+                        DatabaseValueCodec.encode(profileID)
+                    ]
+                )
+            }
+        }
+    }
+}
+#endif

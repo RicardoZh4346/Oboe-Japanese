@@ -2,7 +2,7 @@ import Foundation
 
 public enum PortableBackupFormat {
     public static let identifier = "oboe-portable-backup"
-    public static let currentVersion = 3
+    public static let currentVersion = 5
     public static let fileExtension = "oboe-backup"
     public static let checksumAlgorithm = "sha256"
 
@@ -208,6 +208,67 @@ enum PortableBackupFormatV3 {
                 return [specification]
             }
             return [inboxItem, processingContext, importReceipt, commitReceipt, specification]
+        }
+
+    static let recordTypes = tableSpecifications.map(\.recordType)
+    static let specificationByRecordType = Dictionary(
+        uniqueKeysWithValues: tableSpecifications.map { ($0.recordType, $0) }
+    )
+}
+
+/// v4 (Oboe v0.4): identical record types and order as v3 — the only widening
+/// is the `settings` record gaining the four Adaptive-preference columns
+/// (`typed_answer_zh_ja`, `auto_play_listening_audio`,
+/// `typed_answer_listening`, `leech_reminders_enabled`). The widened `cards`
+/// template CHECK (`vocabulary_listening`) and `drafts` kind CHECK
+/// (`ai_repair`) live in the schema, not the record contract.
+enum PortableBackupFormatV4 {
+    /// Column names a v3-or-earlier `settings` record lacks; restoration fills
+    /// them with the v0.4 defaults (OFF/ON/OFF/ON).
+    static let settingsColumnsAddedInV4 = [
+        "typed_answer_zh_ja",
+        "auto_play_listening_audio",
+        "typed_answer_listening",
+        "leech_reminders_enabled"
+    ]
+
+    static let settings = PortableBackupTableSpecification(
+        tableName: "app_settings",
+        recordType: "settings",
+        columns: [
+            "id", "schema_version", "learning_time_zone_id", "daily_new_card_limit",
+            "retention_preset", "auto_play_word_audio", "auto_play_example_audio",
+            "appearance", "typed_answer_zh_ja", "auto_play_listening_audio",
+            "typed_answer_listening", "leech_reminders_enabled"
+        ],
+        orderBy: "id"
+    )
+
+    static let tableSpecifications: [PortableBackupTableSpecification] =
+        PortableBackupFormatV3.tableSpecifications.map { specification in
+            specification.recordType == "settings" ? settings : specification
+        }
+
+    static let recordTypes = tableSpecifications.map(\.recordType)
+    static let specificationByRecordType = Dictionary(
+        uniqueKeysWithValues: tableSpecifications.map { ($0.recordType, $0) }
+    )
+}
+
+/// v5: identical record types and order as v4 — the `settings` record gains
+/// the nullable `primary_deck_id` column (每日主牌组). Restoring a v4 or
+/// earlier settings record fills it with NULL.
+enum PortableBackupFormatV5 {
+    static let settings = PortableBackupTableSpecification(
+        tableName: "app_settings",
+        recordType: "settings",
+        columns: PortableBackupFormatV4.settings.columns + ["primary_deck_id"],
+        orderBy: "id"
+    )
+
+    static let tableSpecifications: [PortableBackupTableSpecification] =
+        PortableBackupFormatV4.tableSpecifications.map { specification in
+            specification.recordType == "settings" ? settings : specification
         }
 
     static let recordTypes = tableSpecifications.map(\.recordType)

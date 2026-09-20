@@ -57,6 +57,16 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         }
     }
 
+    public func updatePrimaryDeck(_ deckID: UUID?) async throws -> StudyPlanningSettings {
+        try await pool.write { db in
+            try db.execute(
+                sql: "UPDATE app_settings SET primary_deck_id = ? WHERE id = 1",
+                arguments: [deckID.map(DatabaseValueCodec.encode)]
+            )
+            return try Self.fetchSettings(in: db)
+        }
+    }
+
     public func updateRetentionPreset(
         _ preset: RetentionPreset
     ) async throws -> StudyPlanningSettings {
@@ -162,10 +172,14 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                     """,
                 arguments: [now, studyDayID]
             )
+            // 额度按“词”计（笔记），不按卡：一个词的全部未学方向一起占一个
+            // 名额。已开始（今日有 first-study 日志）的词不占名额——其剩余方向
+            // 免费保留在队列里，直到学完；跨日未学完的词次日重新占一个名额，
+            // 迁移补齐的方向卡也按此节奏自然进入每日额度。
             let usedCount = try Int.fetchOne(
                 db,
                 sql: """
-                    SELECT COUNT(DISTINCT card_key)
+                    SELECT COUNT(DISTINCT note_id)
                     FROM review_logs
                     WHERE study_day_id = ?
                       AND was_first_study = 1
@@ -174,67 +188,72 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                 arguments: [studyDayID]
             ) ?? 0
             let reservationCapacity = max(0, studyDay.newCardLimit - usedCount)
-            var reservations = try Self.fetchUnstudiedReservations(
+            let primaryDeckID = try Self.fetchPrimaryDeckID(in: db)
+
+            // Rebalance: unstudied 'new' reservations re-enter the candidate
+            // pool so every reconcile recomputes the share for the current
+            // candidate set — the primary deck claims slots first, the rest is
+            // dealt round-robin. A deck added after today's plan (or starved
+            // by an earlier allocation) wins back slots from decks holding
+            // surplus unstudied reservations; earliest-admitted cards are
+            // kept first.
+            let candidates = try Self.newCardCandidates(
                 studyDayID: studyDay.id,
                 in: db
             )
-
-            if reservations.count > reservationCapacity {
-                for reservation in reservations.dropFirst(reservationCapacity) {
+            let selection = Self.selectNotes(
+                candidates,
+                capacity: reservationCapacity,
+                primaryDeckID: primaryDeckID
+            )
+            let selected = selection.cards
+            let selectedIDs = Set(selected.map(\.cardID))
+            for (offset, candidate) in selected.enumerated() where !candidate.hasLiveAdmission {
+                if candidate.existingAdmissionMilliseconds != nil {
                     try db.execute(
                         sql: """
-                            UPDATE daily_tasks SET cancelled_at_ms = ?
+                            UPDATE daily_tasks SET cancelled_at_ms = NULL
                             WHERE study_day_id = ? AND card_id = ?
                             """,
                         arguments: [
-                            now,
                             studyDayID,
-                            DatabaseValueCodec.encode(reservation.cardID)
+                            DatabaseValueCodec.encode(candidate.cardID)
+                        ]
+                    )
+                } else {
+                    try db.execute(
+                        sql: """
+                            INSERT INTO daily_tasks(
+                                study_day_id, card_id, category_at_admission, admitted_at_ms
+                            ) VALUES (?, ?, 'new', ?)
+                            """,
+                        arguments: [
+                            studyDayID,
+                            DatabaseValueCodec.encode(candidate.cardID),
+                            now + Int64(offset)
                         ]
                     )
                 }
-                reservations = Array(reservations.prefix(reservationCapacity))
             }
-
-            let openSlots = max(0, reservationCapacity - reservations.count)
-            if openSlots > 0 {
-                let selected = try Self.selectNewCards(
-                    count: openSlots,
-                    studyDayID: studyDay.id,
-                    in: db
+            for candidate in candidates
+            where candidate.hasLiveAdmission && !selectedIDs.contains(candidate.cardID) {
+                try db.execute(
+                    sql: """
+                        UPDATE daily_tasks SET cancelled_at_ms = ?
+                        WHERE study_day_id = ? AND card_id = ?
+                        """,
+                    arguments: [
+                        now,
+                        studyDayID,
+                        DatabaseValueCodec.encode(candidate.cardID)
+                    ]
                 )
-                for (offset, candidate) in selected.enumerated() {
-                    if candidate.existingAdmissionMilliseconds != nil {
-                        try db.execute(
-                            sql: """
-                                UPDATE daily_tasks SET cancelled_at_ms = NULL
-                                WHERE study_day_id = ? AND card_id = ?
-                                """,
-                            arguments: [
-                                studyDayID,
-                                DatabaseValueCodec.encode(candidate.cardID)
-                            ]
-                        )
-                    } else {
-                        try db.execute(
-                            sql: """
-                                INSERT INTO daily_tasks(
-                                    study_day_id, card_id, category_at_admission, admitted_at_ms
-                                ) VALUES (?, ?, 'new', ?)
-                                """,
-                            arguments: [
-                                studyDayID,
-                                DatabaseValueCodec.encode(candidate.cardID),
-                                now + Int64(offset)
-                            ]
-                        )
-                    }
-                }
             }
 
             return DailyNewCardPlan(
                 studyDay: studyDay,
                 usedCount: usedCount,
+                reservedNoteCount: selection.reservedNoteCount,
                 reservations: try Self.fetchUnstudiedReservations(
                     studyDayID: studyDay.id,
                     in: db
@@ -247,7 +266,8 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         guard let row = try Row.fetchOne(
             db,
             sql: """
-                SELECT learning_time_zone_id, daily_new_card_limit, retention_preset
+                SELECT learning_time_zone_id, daily_new_card_limit, retention_preset,
+                       primary_deck_id
                 FROM app_settings WHERE id = 1
                 """
         ) else {
@@ -256,6 +276,7 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         let timeZoneID: String = row["learning_time_zone_id"]
         let limit: Int = row["daily_new_card_limit"]
         let retentionRawValue: Int = row["retention_preset"]
+        let primaryDeckRaw: String? = row["primary_deck_id"]
         guard TimeZone(identifier: timeZoneID) != nil else {
             throw StudyDayPlanningError.invalidTimeZone(timeZoneID)
         }
@@ -268,8 +289,19 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         return StudyPlanningSettings(
             learningTimeZoneID: timeZoneID,
             dailyNewCardLimit: limit,
-            retentionPreset: retentionPreset
+            retentionPreset: retentionPreset,
+            primaryDeckID: primaryDeckRaw.flatMap { UUID(uuidString: $0) }
         )
+    }
+
+    private static func fetchPrimaryDeckID(in db: Database) throws -> UUID? {
+        guard let raw: String = try Row.fetchOne(
+            db,
+            sql: "SELECT primary_deck_id FROM app_settings WHERE id = 1"
+        ).map({ $0["primary_deck_id"] as String? }) ?? nil else {
+            return nil
+        }
+        return UUID(uuidString: raw)
     }
 
     private static func insertStudyDay(_ studyDay: StudyDay, in db: Database) throws {
@@ -376,8 +408,15 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         }
     }
 
-    private static func selectNewCards(
-        count: Int,
+    /// All unstudied new cards eligible for today's quota, including cards
+    /// already holding a live 'new' reservation (`hasLiveAdmission`). The
+    /// quota unit is the NOTE: `noteID` groups a word's direction cards and
+    /// `noteStartedToday` marks notes already counted in `usedCount` — their
+    /// remaining direction cards ride along without consuming another slot.
+    /// Deck order comes first so `deckRank` can break round-robin ties;
+    /// within a deck, previously admitted cards (live or cancelled) precede
+    /// never-queued ones.
+    private static func newCardCandidates(
         studyDayID: UUID,
         in db: Database
     ) throws -> [NewCardCandidate] {
@@ -386,11 +425,20 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
             db,
             sql: """
                 SELECT cards.id AS card_id,
+                       cards.note_id AS note_id,
                        notes.deck_id AS deck_id,
-                       decks.sort_order AS deck_sort_order,
-                       decks.created_at_ms AS deck_created_at_ms,
                        cards.due_at_ms AS card_due_at_ms,
-                       daily_tasks.admitted_at_ms AS existing_admitted_at_ms
+                       daily_tasks.admitted_at_ms AS existing_admitted_at_ms,
+                       CASE WHEN daily_tasks.card_id IS NOT NULL
+                             AND daily_tasks.cancelled_at_ms IS NULL
+                            THEN 1 ELSE 0 END AS has_live_admission,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM review_logs
+                           WHERE review_logs.study_day_id = ?
+                             AND review_logs.note_id = notes.id
+                             AND review_logs.was_first_study = 1
+                             AND review_logs.undone_at_ms IS NULL
+                       ) THEN 1 ELSE 0 END AS note_started_today
                 FROM cards
                 JOIN notes ON notes.id = cards.note_id
                 JOIN decks ON decks.id = notes.deck_id
@@ -399,45 +447,80 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                 WHERE cards.is_enabled = 1
                   AND cards.state = 0
                   AND cards.first_studied_at_ms IS NULL
-                  AND (daily_tasks.card_id IS NULL OR daily_tasks.cancelled_at_ms IS NOT NULL)
+                  AND (daily_tasks.card_id IS NULL
+                       OR daily_tasks.cancelled_at_ms IS NOT NULL
+                       OR daily_tasks.category_at_admission = 'new')
                 ORDER BY decks.sort_order, decks.created_at_ms, decks.id,
                          CASE WHEN daily_tasks.admitted_at_ms IS NULL THEN 1 ELSE 0 END,
-                         daily_tasks.admitted_at_ms, cards.due_at_ms, cards.id
+                         daily_tasks.admitted_at_ms, cards.due_at_ms,
+                         CASE cards.template_kind
+                             WHEN 'vocabulary_ja_zh' THEN 0
+                             WHEN 'vocabulary_zh_ja' THEN 1
+                             WHEN 'vocabulary_listening' THEN 2
+                             ELSE 3 END,
+                         cards.id
                 """,
-            arguments: [studyDayIDValue]
+            arguments: [studyDayIDValue, studyDayIDValue]
         )
-        let candidates = try rows.enumerated().map { index, row in
+        return try rows.enumerated().map { index, row in
             NewCardCandidate(
                 cardID: try DatabaseValueCodec.decodeUUID(row["card_id"]),
+                noteID: try DatabaseValueCodec.decodeUUID(row["note_id"]),
                 deckID: try DatabaseValueCodec.decodeUUID(row["deck_id"]),
                 deckRank: index,
-                existingAdmissionMilliseconds: row["existing_admitted_at_ms"]
+                existingAdmissionMilliseconds: row["existing_admitted_at_ms"],
+                hasLiveAdmission: (row["has_live_admission"] as Int) == 1,
+                noteStartedToday: (row["note_started_today"] as Int) == 1
             )
         }
-        let allocationRows = try Row.fetchAll(
-            db,
-            sql: """
-                SELECT notes.deck_id, COUNT(*) AS allocation_count
-                FROM daily_tasks
-                JOIN cards ON cards.id = daily_tasks.card_id
-                JOIN notes ON notes.id = cards.note_id
-                WHERE daily_tasks.study_day_id = ?
-                  AND daily_tasks.category_at_admission = 'new'
-                  AND daily_tasks.cancelled_at_ms IS NULL
-                GROUP BY notes.deck_id
-                """,
-            arguments: [studyDayIDValue]
-        )
-        var allocationCounts: [UUID: Int] = [:]
-        for row in allocationRows {
-            allocationCounts[try DatabaseValueCodec.decodeUUID(row["deck_id"])] = row["allocation_count"]
-        }
+    }
 
-        var queues = Dictionary(grouping: candidates, by: \NewCardCandidate.deckID)
-        var selected: [NewCardCandidate] = []
-        while selected.count < count {
-            let availableDecks = queues.compactMap { deckID, cards -> (UUID, Int, Int)? in
-                guard let first = cards.first else { return nil }
+    /// Deal `capacity` NOTE picks across decks. Notes already studied today
+    /// keep all their remaining direction cards for free (they consumed their
+    /// slot at first study). When a primary deck is set its unstarted notes
+    /// claim slots first (in candidate order); every leftover slot is dealt
+    /// round-robin — always taking from the deck holding the fewest picks so
+    /// far (earliest `deckRank` wins ties). Selecting a note admits every
+    /// eligible direction card it owns. Live reservations inside `candidates`
+    /// are counted like any other pick, so repeated calls converge to the
+    /// same share of the quota.
+    private static func selectNotes(
+        _ candidates: [NewCardCandidate],
+        capacity: Int,
+        primaryDeckID: UUID?
+    ) -> (cards: [NewCardCandidate], reservedNoteCount: Int) {
+        var freeCards: [NewCardCandidate] = []
+        var noteOrder: [UUID] = []
+        var cardsByNote: [UUID: [NewCardCandidate]] = [:]
+        for candidate in candidates {
+            if candidate.noteStartedToday {
+                freeCards.append(candidate)
+                continue
+            }
+            if cardsByNote[candidate.noteID] == nil {
+                noteOrder.append(candidate.noteID)
+            }
+            cardsByNote[candidate.noteID, default: []].append(candidate)
+        }
+        let notes = noteOrder.compactMap { cardsByNote[$0] }
+        var selectedNotes: [[NewCardCandidate]] = []
+        var remainder: [(deckID: UUID, deckRank: Int, cards: [NewCardCandidate])] =
+            notes.map { cards in
+                (deckID: cards[0].deckID, deckRank: cards[0].deckRank, cards: cards)
+            }
+        if let primaryDeckID {
+            selectedNotes = remainder
+                .filter { $0.deckID == primaryDeckID }
+                .prefix(capacity)
+                .map(\.cards)
+            remainder = remainder.filter { $0.deckID != primaryDeckID }
+        }
+        var queues = Dictionary(grouping: remainder, by: \.deckID)
+        var allocationCounts: [UUID: Int] = [:]
+        while selectedNotes.count < capacity {
+            let availableDecks = queues.compactMap {
+                deckID, entries -> (UUID, Int, Int)? in
+                guard let first = entries.first else { return nil }
                 return (deckID, allocationCounts[deckID, default: 0], first.deckRank)
             }
             guard let nextDeck = availableDecks.min(by: { lhs, rhs in
@@ -447,17 +530,20 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
             var queue = queues[nextDeck], !queue.isEmpty else {
                 break
             }
-            selected.append(queue.removeFirst())
+            selectedNotes.append(queue.removeFirst().cards)
             queues[nextDeck] = queue
             allocationCounts[nextDeck, default: 0] += 1
         }
-        return selected
+        return (freeCards + selectedNotes.flatMap { $0 }, selectedNotes.count)
     }
 }
 
 private struct NewCardCandidate: Sendable {
     let cardID: UUID
+    let noteID: UUID
     let deckID: UUID
     let deckRank: Int
     let existingAdmissionMilliseconds: Int64?
+    let hasLiveAdmission: Bool
+    let noteStartedToday: Bool
 }

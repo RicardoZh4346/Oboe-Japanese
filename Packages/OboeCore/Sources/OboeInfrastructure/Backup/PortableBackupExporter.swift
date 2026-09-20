@@ -128,7 +128,7 @@ public actor PortableBackupExporter {
 
         return try snapshot.read { db in
             var counts: [String: Int] = [:]
-            for specification in PortableBackupFormatV3.tableSpecifications {
+            for specification in PortableBackupFormatV5.tableSpecifications {
                 counts[specification.recordType] = try Int.fetchOne(
                     db,
                     sql: "SELECT COUNT(*) FROM \(specification.tableName)"
@@ -145,13 +145,13 @@ public actor PortableBackupExporter {
                 "encoding": "utf-8",
                 "lineEnding": "lf",
                 "checksumAlgorithm": PortableBackupFormat.checksumAlgorithm,
-                "recordOrder": PortableBackupFormatV3.recordTypes,
+                "recordOrder": PortableBackupFormatV5.recordTypes,
                 "counts": counts,
                 "excludedScopes": PortableBackupFormat.excludedScopes
             ]
             try Self.writeHashedLine(manifest, to: handle, hasher: &hasher)
 
-            for specification in PortableBackupFormatV3.tableSpecifications {
+            for specification in PortableBackupFormatV5.tableSpecifications {
                 let sql = "SELECT \(specification.columns.joined(separator: ", ")) "
                     + "FROM \(specification.tableName) ORDER BY \(specification.orderBy)"
                 let cursor = try Row.fetchCursor(db, sql: sql)

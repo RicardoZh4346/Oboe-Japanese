@@ -406,6 +406,47 @@ final class GRDBReviewSubmissionRepositoryTests: XCTestCase {
         XCTAssertNil(storedAfterDeletion?.undoneAt)
     }
 
+    /// T04/§5.2: suspending a card through the single-card command after it
+    /// was rated keeps the original undo error semantics — the suspended
+    /// card's review cannot be undone (`cardDisabled`), the log stays valid
+    /// and the scheduling state is not rolled back.
+    func testSuspendAfterReviewKeepsOriginalUndoErrorSemantics() async throws {
+        let fixture = try await ReviewSubmissionFixture.make(reviewedAt: reviewedAt)
+        defer { fixture.remove() }
+        let repository = GRDBReviewSubmissionRepository(database: fixture.database)
+        let contentRepository = GRDBContentCardRepository(database: fixture.database)
+        let first = try await makeUseCase(repository: repository)(
+            fixture.request(eventID: UUID(), cardID: fixture.cardID)
+        )
+
+        _ = try await contentRepository.setCardEnabled(
+            cardID: fixture.cardID,
+            isEnabled: false,
+            at: reviewedAt.addingTimeInterval(1)
+        )
+
+        do {
+            _ = try await UndoReview(
+                repository: repository,
+                clock: ReviewSubmissionFixedClock(value: reviewedAt.addingTimeInterval(2))
+            )(
+                UndoReviewRequest(
+                    eventID: first.eventID,
+                    studyDay: StudyDayContext(id: fixture.studyDayID)
+                )
+            )
+            XCTFail("Undoing a suspended card's review must follow the original error semantics")
+        } catch {
+            XCTAssertEqual(error as? UndoReviewError, .cardDisabled)
+        }
+        let stored = try await repository.fetchSubmittedReview(eventID: first.eventID)
+        XCTAssertNil(stored?.undoneAt, "the rejected undo leaves the log valid")
+        let fetchedCard = try await fixture.cardRepository.fetchCard(id: fixture.cardID)
+        let card = try XCTUnwrap(fetchedCard)
+        XCTAssertEqual(card.stateVersion, first.nextState.stateVersion)
+        XCTAssertEqual(card.scheduling, first.nextState.scheduling)
+    }
+
     func testUndoFailureRollsBackRestoredCardAndLogTogether() async throws {
         let fixture = try await ReviewSubmissionFixture.make(reviewedAt: reviewedAt)
         defer { fixture.remove() }

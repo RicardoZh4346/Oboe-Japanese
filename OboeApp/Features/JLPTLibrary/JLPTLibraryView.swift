@@ -2,10 +2,18 @@ import OboeDomain
 import SwiftUI
 
 struct JLPTLibraryView: View {
+    let progressService: JLPTProgressService
     let libraryService: JLPTLibraryService
     let importer: any JLPTImporting
     let deckService: DeckManagementService
     let speechService: any SpeechService
+    /// T25: the dashboard's weak-vocabulary list reuses the adaptive
+    /// detail/actions — same services, same editor destinations.
+    let adaptiveCardService: AdaptiveCardService
+    let contentCardService: ContentCardService
+    let aiRepairService: AIRepairService
+    let noteEditor: (AdaptiveCardItem, @escaping () async -> Void) -> AnyView
+    let repairNoteEditor: (UUID, KnowledgePointKind, @escaping () async -> Void) -> AnyView
 
     @AppStorage("didShowJLPTLibraryNotice") private var didShowNotice = false
     @State private var counts: [JLPTLevel: Int] = [:]
@@ -18,6 +26,25 @@ struct JLPTLibraryView: View {
 
     var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    JLPTDashboardView(
+                        progressService: progressService,
+                        libraryService: libraryService,
+                        importer: importer,
+                        deckService: deckService,
+                        speechService: speechService,
+                        adaptiveCardService: adaptiveCardService,
+                        contentCardService: contentCardService,
+                        aiRepairService: aiRepairService,
+                        noteEditor: noteEditor,
+                        repairNoteEditor: repairNoteEditor
+                    )
+                } label: {
+                    Label("JLPT 学习进度", systemImage: "chart.bar")
+                }
+                .accessibilityIdentifier("jlpt-progress-entry")
+            }
             Section {
                 ForEach(levels, id: \.self) { level in
                     NavigationLink {
@@ -197,7 +224,7 @@ private struct JLPTLevelView: View {
             Button("导入到 JLPT \(level.rawValue) 牌组") { startLevelImport() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("共 \(totalCount) 个词条。将创建或复用 1 个“JLPT \(level.rawValue)”牌组，最多新增 \(totalCount) 个知识点和同数量的“日文 → 中文”卡片。每日新卡限制保持不变；重复词会跳过，缺少中文释义的词不会导入。")
+            Text("共 \(totalCount) 个词条。将创建或复用 1 个“JLPT \(level.rawValue)”牌组，最多新增 \(totalCount) 个知识点，每个词条生成“日文 → 中文 / 中文 → 日文 / 听力 → 中文”三个方向卡片。每日新词限制保持不变；重复词会跳过，缺少中文释义的词不会导入。")
         }
         .safeAreaInset(edge: .bottom) { importStatus }
         .alert("操作结果", isPresented: resultBinding) {
@@ -305,7 +332,7 @@ private extension JLPTLevelView {
                 let result = try await importer.importLevel(
                     level,
                     vocabulary: all,
-                    directions: [.japaneseToChinese]
+                    directions: Set(VocabularyCardDirection.allCases)
                 ) { progress in
                     await MainActor.run { importProgress = progress }
                 }
@@ -353,7 +380,7 @@ private struct JLPTVocabularyRow: View {
     }
 }
 
-private struct JLPTVocabularyDetailView: View {
+struct JLPTVocabularyDetailView: View {
     let vocabularyID: String
     let libraryService: JLPTLibraryService
     let importer: any JLPTImporting
@@ -493,8 +520,6 @@ private struct JLPTSingleImportSheet: View {
     @State private var decks: [DeckSummary] = []
     @State private var selectedDeckID: UUID?
     @State private var meaningZH: String
-    @State private var japaneseToChinese = true
-    @State private var chineseToJapanese = false
     @State private var isImporting = false
     @State private var message: String?
 
@@ -531,11 +556,6 @@ private struct JLPTSingleImportSheet: View {
                     }
                 }
 
-                Section("卡片方向") {
-                    Toggle("日文 → 中文", isOn: $japaneseToChinese)
-                    Toggle("中文 → 日文", isOn: $chineseToJapanese)
-                }
-
                 if let message {
                     Section { Text(message) }
                 }
@@ -560,7 +580,6 @@ private struct JLPTSingleImportSheet: View {
     private var canImport: Bool {
         selectedDeckID != nil
             && !meaningZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (japaneseToChinese || chineseToJapanese)
             && !isImporting
     }
 
@@ -575,16 +594,13 @@ private struct JLPTSingleImportSheet: View {
 
     private func performImport() async {
         guard let selectedDeckID else { return }
-        var directions = Set<VocabularyCardDirection>()
-        if japaneseToChinese { directions.insert(.japaneseToChinese) }
-        if chineseToJapanese { directions.insert(.chineseToJapanese) }
         isImporting = true
         do {
             let result = try await importer.importVocabulary(
                 vocabulary,
                 deckID: selectedDeckID,
                 meaningZH: meaningZH,
-                directions: directions
+                directions: Set(VocabularyCardDirection.allCases)
             )
             isImporting = false
             if result.imported == 1 {

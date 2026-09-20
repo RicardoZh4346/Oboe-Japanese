@@ -47,6 +47,85 @@ final class JapaneseSpeechTests: XCTestCase {
         )
     }
 
+    /// T15/§8: explicit template branches — a listening card's question face
+    /// exposes nothing through the word-audio channel (its prompt audio rides
+    /// `autoPlayListeningAudio` in T18), while the answer face may still speak
+    /// the revealed headword/reading.
+    func testListeningCardExposesNoJapaneseOnQuestionAndSpeaksPrimaryAfterReveal() {
+        let policy = ReviewSpeechPolicy(
+            content: content(
+                template: .vocabularyListening,
+                headword: "聞く",
+                reading: "きく",
+                example: "音楽を聞きます。"
+            )
+        )
+        let preferences = SpeechPreferences(
+            autoPlayWordAudio: true,
+            autoPlayExampleAudio: true
+        )
+
+        XCTAssertFalse(policy.exposesJapaneseOnQuestion)
+        XCTAssertTrue(policy.automaticQuestionTexts(preferences: preferences).isEmpty)
+        XCTAssertTrue(policy.exposesPrimaryOnAnswer)
+        XCTAssertEqual(policy.primaryText, "きく")
+        XCTAssertEqual(
+            policy.automaticAnswerTexts(preferences: preferences),
+            ["きく", "音楽を聞きます。"]
+        )
+    }
+
+    /// T17/§8.2: the listening prompt speaks ONLY the word — non-empty reading
+    /// preferred, headword fallback, never the example sentence — and the
+    /// channel is closed for every other template.
+    func testListeningPromptIsReadingOrHeadwordOnly() {
+        let withReading = ReviewSpeechPolicy(
+            content: content(
+                template: .vocabularyListening,
+                headword: "聞く",
+                reading: "きく",
+                example: "音楽を聞きます。"
+            )
+        )
+        XCTAssertEqual(withReading.listeningPromptText, "きく")
+
+        let withoutReading = ReviewSpeechPolicy(
+            content: content(
+                template: .vocabularyListening,
+                headword: "聞く",
+                reading: nil,
+                example: "音楽を聞きます。"
+            )
+        )
+        XCTAssertEqual(withoutReading.listeningPromptText, "聞く")
+
+        let blankReading = ReviewSpeechPolicy(
+            content: content(
+                template: .vocabularyListening,
+                headword: "聞く",
+                reading: "  ",
+                example: nil
+            )
+        )
+        XCTAssertEqual(blankReading.listeningPromptText, "聞く")
+
+        for template in [
+            CardTemplateKind.vocabularyJapaneseToChinese,
+            .vocabularyChineseToJapanese,
+            .grammarFormToExplanation
+        ] {
+            let policy = ReviewSpeechPolicy(
+                content: content(
+                    template: template,
+                    headword: "聞く",
+                    reading: "きく",
+                    example: "音楽を聞きます。"
+                )
+            )
+            XCTAssertNil(policy.listeningPromptText, "\(template.rawValue) 不得走听力提示音频通道")
+        }
+    }
+
     func testDefaultsDisableAutomaticSpeechAndMissingReadingFallsBackToForm() {
         let policy = ReviewSpeechPolicy(
             content: content(

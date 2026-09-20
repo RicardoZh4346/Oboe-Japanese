@@ -47,6 +47,7 @@ public enum ContentCardError: Error, Equatable, Sendable {
     case cardDirectionRequired
     case deckNotFound
     case knowledgePointNotFound
+    case cardNotFound
     case invalidTemplateForKnowledgePoint
 }
 
@@ -170,6 +171,19 @@ public protocol ContentCardRepository: Sendable {
     func replaceEnabledCardDirections(
         _ replacement: CardDirectionReplacement
     ) async throws -> [CardDirectionState]
+    /// Single-card suspend/resume (design §5.2). Writes only `is_enabled`;
+    /// suspending applies the existing daily_tasks cancellation rule for that
+    /// card alone. Scheduling fields, logs and the note are untouched.
+    func setCardEnabled(
+        cardID: UUID,
+        isEnabled: Bool,
+        at updatedAt: Date
+    ) async throws -> CardDirectionState
+    /// Single-card delete for the repair split flow (design §5.3): removes
+    /// only the target Card row — siblings and the Note survive even when this
+    /// was the last card. `review_logs.card_id` SET NULLs while `card_key`
+    /// history stays orphaned; `daily_tasks` rows cascade away.
+    func deleteCard(cardID: UUID) async throws
 }
 
 public struct ContentCardService: Sendable {
@@ -284,6 +298,26 @@ public struct ContentCardService: Sendable {
         )
     }
 
+    /// Adaptive-detail suspend/resume entry point (T04): a single-card
+    /// command, deliberately NOT routed through `replaceEnabledCardDirections`
+    /// which would rewrite the note's whole direction set (design §5.2).
+    public func setCardEnabled(
+        cardID: UUID,
+        isEnabled: Bool
+    ) async throws -> CardDirectionState {
+        try await repository.setCardEnabled(
+            cardID: cardID,
+            isEnabled: isEnabled,
+            at: now()
+        )
+    }
+
+    /// Repair-split helper (T08 consumes it inside its own transaction via the
+    /// repository's `in db` overload); exposed for direct single-card deletes.
+    public func deleteCard(cardID: UUID) async throws {
+        try await repository.deleteCard(cardID: cardID)
+    }
+
     private func makeTags(_ rawNames: [String]) throws -> [KnowledgeTag] {
         var normalizedNames = Set<String>()
         var tags: [KnowledgeTag] = []
@@ -307,17 +341,20 @@ public struct ContentCardService: Sendable {
 public extension CardTemplateKind {
     var knowledgePointKind: KnowledgePointKind {
         switch self {
-        case .vocabularyJapaneseToChinese, .vocabularyChineseToJapanese:
+        case .vocabularyJapaneseToChinese, .vocabularyChineseToJapanese, .vocabularyListening:
             .vocabulary
         case .grammarFormToExplanation:
             .grammar
         }
     }
 
+    /// Directions offered wherever card directions are picked — the note
+    /// editor's direction management, the repair split toggles and the
+    /// repository's replace-set validation all share this whitelist.
     static func applicable(to kind: KnowledgePointKind) -> [CardTemplateKind] {
         switch kind {
         case .vocabulary:
-            [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese]
+            [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese, .vocabularyListening]
         case .grammar:
             [.grammarFormToExplanation]
         }
@@ -331,6 +368,8 @@ public extension VocabularyCardDirection {
             .vocabularyJapaneseToChinese
         case .chineseToJapanese:
             .vocabularyChineseToJapanese
+        case .listening:
+            .vocabularyListening
         }
     }
 }

@@ -38,3 +38,25 @@ extension ReviewRating {
         }
     }
 }
+
+extension RecallComparison {
+    /// Answer-face feedback copy for typed recall (T13). Honest wording:
+    /// "different" only means the strings differ — synonyms, missing readings
+    /// and unlisted kanji variants exist — so the learner still self-assesses
+    /// with the four rating buttons. Never a correctness verdict.
+    var feedbackText: String {
+        switch self {
+        case .matched: "和标准答案一致。"
+        case .close: "和标准答案接近，请对照差异自评。"
+        case .different: "写法不同，请对照答案自评。"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .matched: OboeTheme.Colors.accent
+        case .close: .orange
+        case .different: .secondary
+        }
+    }
+}

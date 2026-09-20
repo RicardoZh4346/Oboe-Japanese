@@ -83,6 +83,9 @@ public struct JLPTLibraryPage: Equatable, Sendable {
 
 public protocol JLPTLibraryRepository: Sendable {
     func levelCounts() async throws -> [JLPTLevel: Int]
+    /// 只读条目引用（id+level），供进度统计按累计等级取全集。
+    /// 只读词库，不写用户内容（设计 §11.2）。
+    func vocabularyRefs(levels: [JLPTLevel]) async throws -> [JLPTVocabularyRef]
     func vocabulary(
         level: JLPTLevel,
         query: String,

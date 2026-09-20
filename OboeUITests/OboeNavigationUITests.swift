@@ -49,6 +49,218 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     @MainActor
+    func testT24DashboardCumulativeCountsAndCategoryPagination() {
+        let app = openT24Dashboard()
+        XCTAssertTrue(app.staticTexts["共 662 个词"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["jlpt-progress-notAdded"].label.contains("662"))
+        app.buttons["jlpt-progress-target"].tap()
+        app.buttons["N3"].tap()
+        let total = app.staticTexts["jlpt-progress-total"]
+        let n3Count = NSPredicate(format: "label MATCHES %@", "共 3,?078 个词")
+        expectation(for: n3Count, evaluatedWith: total)
+        waitForExpectations(timeout: 10)
+        app.buttons["jlpt-progress-notAdded"].tap()
+        let listTotal = app.staticTexts["jlpt-progress-list-total"]
+        XCTAssertTrue(listTotal.waitForExistence(timeout: 10))
+        XCTAssertEqual(listTotal.label.replacingOccurrences(of: ",", with: ""), "N3 累计 · 3078 个词")
+        XCTAssertTrue(app.staticTexts["あさって"].exists)
+        let more = app.buttons["jlpt-progress-load-more"]
+        for _ in 0..<30 {
+            if more.exists && more.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(more.isHittable)
+        more.tap()
+        for _ in 0..<30 {
+            if more.exists && more.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(app.staticTexts["jlpt-progress-loaded-count"].label.contains("80"))
+        XCTAssertFalse(app.staticTexts["掌握率"].exists)
+    }
+
+    @MainActor
+    func testT24DashboardDarkAccessibilitySizeAndEmptyCategory() {
+        let app = openT24Dashboard(large: true)
+        let stable = app.buttons["jlpt-progress-stable"]
+        for _ in 0..<12 {
+            if stable.exists && stable.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(stable.isHittable)
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "T24-Dashboard-Dark-AX5"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        stable.tap()
+        XCTAssertTrue(app.staticTexts["此分类暂无词汇"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
+    func testT24DashboardRecomputesAfterWholeLevelImport() {
+        let app = openT24Dashboard()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["jlpt-level-N5"].tap()
+        app.buttons["导入全级"].tap()
+        app.buttons["导入到 JLPT N5 牌组"].tap()
+        XCTAssertTrue(app.alerts["操作结果"].waitForExistence(timeout: 60))
+        let result = app.alerts.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "新增 ")).firstMatch.label
+        let imported = Int(result.components(separatedBy: "新增 ").last?
+            .components(separatedBy: "，").first ?? "") ?? 0
+        XCTAssertGreaterThan(imported, 0)
+        app.alerts.buttons["好"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["jlpt-progress-entry"].tap()
+        let learning = app.buttons["jlpt-progress-learning"]
+        XCTAssertTrue(learning.waitForExistence(timeout: 10))
+        XCTAssertTrue(learning.label.contains("\(imported) 个词"))
+        XCTAssertTrue(app.buttons["jlpt-progress-notAdded"].label.contains("\(662 - imported) 个词"))
+        learning.tap()
+        XCTAssertTrue(app.staticTexts["N5 累计 · \(imported) 个词"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["N5 · 学习中 · 未开始"].firstMatch.exists)
+    }
+
+    /// T25: the dashboard's 需要关注 entry opens the weak-vocabulary
+    /// list. The seed binds a builtin note to the real N5 食べる entry
+    /// with two leech directions plus an unassociated manual leech card —
+    /// the word must appear once (dedup by entry), expand to both
+    /// directions, drill into the shared card detail, and move between
+    /// 易错/已暂停 filters exactly like the Adaptive center.
+    @MainActor
+    func testT25WeakVocabularyDedupDirectionsAndSuspendResume() {
+        let app = openT24Dashboard(environment: ["OBOE_UI_TEST_JLPT_WEAK_SEED": "1"])
+
+        // Dashboard entry: ONE word under 易错 although two leech
+        // directions exist — counting unit is the library entry.
+        let entry = app.buttons["jlpt-weak-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        XCTAssertTrue(entry.label.contains("经常遗忘 1 个词"), entry.label)
+        entry.tap()
+
+        // Weak list: dedup proof — two leech cards AND the unassociated
+        // manual leech card still produce exactly one weak word.
+        XCTAssertTrue(app.navigationBars["需要关注"].waitForExistence(timeout: 5))
+        XCTAssertEqual(
+            app.staticTexts["jlpt-weak-total"].label,
+            "N5 累计 · 1 个词",
+            "同词双 leech 只计一词；手动 Note 的 leech 不计入内置进度"
+        )
+        // The headword text and the disclosure button share the identifier —
+        // the button query resolves to the single tappable row.
+        let wordRow = app.buttons[
+            "jlpt-weak-word-openjlpt:N5:df220e3db92cd43c596cbf63d8b3435c49df5e8fb4da32b65014ff9ab3c29bbd"
+        ]
+        XCTAssertTrue(wordRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["N5 · 2 个薄弱方向"].waitForExistence(timeout: 3))
+
+        // Expand → both weak directions link to the shared card detail.
+        // NavigationLink rows surface as cells/links, not buttons — query
+        // by identifier across all element types.
+        let directionLinks = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'jlpt-weak-card-'")
+        )
+        if !directionLinks.firstMatch.exists { wordRow.tap() }
+        XCTAssertTrue(directionLinks.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(directionLinks.count, 2, "展开必须列出两个薄弱方向")
+        XCTAssertTrue(app.staticTexts["日语 → 中文"].exists)
+        XCTAssertTrue(app.staticTexts["中文 → 日语"].exists)
+
+        // Drill into the first direction — same Adaptive detail actions.
+        directionLinks.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
+        let detailList = app.collectionViews.firstMatch
+        let suspend = app.buttons["暂停这张卡"]
+        for _ in 0..<6 where !suspend.isHittable {
+            detailList.swipeUp()
+        }
+        XCTAssertTrue(suspend.waitForExistence(timeout: 3))
+        suspend.tap()
+        XCTAssertTrue(app.staticTexts["重新启用这张卡"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        // One direction still enabled-leech: word stays in 易错, now 1 方向.
+        XCTAssertTrue(app.staticTexts["N5 · 1 个薄弱方向"].waitForExistence(timeout: 5))
+
+        // Suspend the remaining direction → the word leaves 易错 entirely.
+        let remaining = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'jlpt-weak-card-'")
+        ).firstMatch
+        XCTAssertTrue(remaining.waitForExistence(timeout: 3))
+        remaining.tap()
+        XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
+        let suspend2 = app.buttons["暂停这张卡"]
+        for _ in 0..<6 where !suspend2.isHittable {
+            detailList.swipeUp()
+        }
+        XCTAssertTrue(suspend2.waitForExistence(timeout: 3))
+        suspend2.tap()
+        XCTAssertTrue(app.staticTexts["重新启用这张卡"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["jlpt-weak-empty-leech"]
+                .waitForExistence(timeout: 5),
+            "全部 leech 方向暂停后易错筛选必须为空"
+        )
+
+        // 已暂停筛选：同一词带着两个暂停方向出现 —— 与易错中心一致。
+        app.buttons["已暂停 1"].tap()
+        XCTAssertEqual(app.staticTexts["jlpt-weak-total"].label, "N5 累计 · 1 个词")
+        XCTAssertTrue(wordRow.waitForExistence(timeout: 5))
+        let suspendedLinks = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'jlpt-weak-card-'")
+        )
+        // Expansion state survives the filter switch — only tap when the
+        // disclosure is actually collapsed, otherwise the tap collapses it.
+        if !suspendedLinks.firstMatch.exists { wordRow.tap() }
+        XCTAssertTrue(suspendedLinks.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(suspendedLinks.count, 2)
+
+        // Resume one direction → the word returns to 易错 with 1 方向.
+        suspendedLinks.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
+        let resume = app.buttons["重新启用这张卡"]
+        for _ in 0..<6 where !resume.isHittable {
+            detailList.swipeUp()
+        }
+        XCTAssertTrue(resume.waitForExistence(timeout: 3))
+        resume.tap()
+        XCTAssertTrue(app.staticTexts["暂停这张卡"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+
+        app.buttons["易错 1"].tap()
+        XCTAssertEqual(app.staticTexts["jlpt-weak-total"].label, "N5 累计 · 1 个词")
+        XCTAssertTrue(app.staticTexts["N5 · 1 个薄弱方向"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    private func openT24Dashboard(
+        large: Bool = false,
+        environment: [String: String] = [:]
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        if large {
+            app.launchEnvironment["OBOE_UI_TEST_DYNAMIC_TYPE"] = "ax5"
+            app.launchEnvironment["OBOE_UI_TEST_APPEARANCE_DARK"] = "1"
+        }
+        for (key, value) in environment {
+            app.launchEnvironment[key] = value
+        }
+        app.launch()
+        XCTAssertTrue(app.tabBars.buttons["牌组"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["牌组"].tap()
+        app.buttons["jlpt-library-entry"].tap()
+        let acknowledge = app.buttons["我知道了"]
+        if acknowledge.waitForExistence(timeout: 2) { acknowledge.tap() }
+        let progress = app.buttons["jlpt-progress-entry"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 5))
+        progress.tap()
+        XCTAssertTrue(app.staticTexts["jlpt-progress-total"].waitForExistence(timeout: 10))
+        return app
+    }
+
+    @MainActor
     func testP22bColdLaunchPerformance() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
@@ -314,14 +526,13 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(grammarForm.exists)
         grammarForm.tap()
         grammarForm.typeText("V-ta-koto-ga-aru: a deliberately long grammar form for layout verification")
+        dismissKeyboard(in: app)
         let meaning = app.textFields["grammar-meaning-field"]
         revealExistence(meaning, in: app)
         XCTAssertTrue(meaning.exists)
         meaning.tap()
         meaning.typeText("A deliberately long explanation that wraps across several lines on a small screen.")
-        let keyboardDone = app.buttons["add-keyboard-done-button"]
-        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 2))
-        keyboardDone.tap()
+        dismissKeyboard(in: app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
 
         let save = app.buttons["grammar-formal-save-button"]
@@ -665,7 +876,8 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(deck.waitForExistence(timeout: 5))
         deck.tap()
         XCTAssertTrue(app.staticTexts["deck-note-count"].label.contains("2"))
-        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("2"))
+        // 词汇知识点固定生成三个方向卡 + 语法 1 张 = 4。
+        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("4"))
         XCTAssertTrue(app.staticTexts["行く"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["～たことがある"].exists)
     }
@@ -759,6 +971,56 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(emptyCreateButton.waitForExistence(timeout: 5))
     }
 
+    /// 牌组详情页顶部提供「设为主牌组」：当日新卡额度先满足主牌组，
+    /// 切换后立即重算；取消后回到公平轮转分配。
+    @MainActor
+    func testSetAndUnsetPrimaryDeckFromDeckDetail() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        let createButton = app.buttons["deck-create-empty-button"]
+        XCTAssertTrue(createButton.waitForExistence(timeout: 5))
+        createButton.tap()
+        let nameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+        nameField.tap()
+        nameField.typeText("主牌组测试")
+        app.buttons["deck-name-save-button"].tap()
+
+        let deck = app.staticTexts["主牌组测试"]
+        XCTAssertTrue(deck.waitForExistence(timeout: 5))
+        deck.tap()
+        XCTAssertTrue(app.navigationBars["主牌组测试"].waitForExistence(timeout: 3))
+
+        let setPrimary = app.buttons["deck-set-primary"]
+        XCTAssertTrue(setPrimary.waitForExistence(timeout: 3))
+        setPrimary.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["deck-primary-status"].waitForExistence(timeout: 5),
+            "设为主牌组后详情页必须显示当前主牌组状态"
+        )
+        XCTAssertTrue(app.buttons["deck-unset-primary"].exists)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(
+            app.staticTexts["主牌组"].waitForExistence(timeout: 5),
+            "牌组列表必须给主牌组显示徽标"
+        )
+
+        deck.tap()
+        let unsetPrimary = app.buttons["deck-unset-primary"]
+        XCTAssertTrue(unsetPrimary.waitForExistence(timeout: 3))
+        unsetPrimary.tap()
+        XCTAssertTrue(
+            app.buttons["deck-set-primary"].waitForExistence(timeout: 5),
+            "取消主牌组后必须回到可设置状态"
+        )
+    }
+
     @MainActor
     func testVocabularyDraftPersistsAndFormalSaveRequiresDeck() {
         let app = XCUIApplication()
@@ -782,6 +1044,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertEqual(readingField.placeholderValue, "假名")
         headwordField.tap()
         headwordField.typeText("食べる")
+        dismissKeyboard(in: app)
         meaningField.tap()
         meaningField.typeText("吃")
         dismissKeyboard(in: app)
@@ -820,7 +1083,7 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    func testManualVocabularyCreatesTwoCardsPersistsEditsAndRestoresDirection() {
+    func testManualVocabularyCreatesAllDirectionCardsPersistsEditsAndRestoresDirection() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
@@ -838,10 +1101,9 @@ final class OboeNavigationUITests: XCTestCase {
 
         let addTab = app.tabBars.buttons["添加"]
         addTab.tap()
-        let reverseDirection = app.switches["vocabulary-direction-zh-ja"]
-        reveal(reverseDirection, in: app)
-        XCTAssertTrue(reverseDirection.exists)
-        setSwitch(reverseDirection, enabled: true)
+        // 新表单不再提供方向选择：词的全部方向固定创建。
+        XCTAssertFalse(app.switches["vocabulary-direction-zh-ja"].exists)
+        XCTAssertFalse(app.switches["vocabulary-direction-listening"].exists)
 
         let headwordField = app.textFields["vocabulary-headword-field"]
         let meaningField = app.textFields["vocabulary-meaning-field"]
@@ -849,14 +1111,19 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headwordField.waitForExistence(timeout: 5))
         headwordField.tap()
         headwordField.typeText("食べる")
+        dismissKeyboard(in: app)
         meaningField.tap()
         meaningField.typeText("吃")
 
         dismissKeyboard(in: app)
 
+        // 预览固定展示全部三个方向。
+        for direction in ["vocabulary-ja-zh", "vocabulary-zh-ja", "vocabulary-listening"] {
+            let flip = app.buttons["card-preview-flip-\(direction)"]
+            reveal(flip, in: app)
+            XCTAssertTrue(flip.exists, "缺少方向预览 \(direction)")
+        }
         let flipButton = app.buttons["card-preview-flip-vocabulary-ja-zh"]
-        reveal(flipButton, in: app)
-        XCTAssertTrue(flipButton.exists)
         flipButton.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["card-preview-answer-vocabulary-ja-zh"].exists
@@ -877,7 +1144,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(deck.waitForExistence(timeout: 5))
         deck.tap()
         XCTAssertTrue(app.staticTexts["deck-note-count"].label.contains("1"))
-        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("2"))
+        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("3"))
         let knowledgePoint = app.staticTexts["食べる"]
         XCTAssertTrue(knowledgePoint.waitForExistence(timeout: 5))
         knowledgePoint.tap()
@@ -906,6 +1173,73 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     @MainActor
+    func testVocabularyCreatesAllDirectionsAndTogglesInEditor() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        app.buttons["deck-create-empty-button"].tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("T16 验收")
+        app.buttons["deck-name-save-button"].tap()
+        XCTAssertTrue(app.staticTexts["T16 验收"].waitForExistence(timeout: 5))
+
+        // 新建表单不再提供方向选择：默认创建全部三个方向。
+        app.tabBars.buttons["添加"].tap()
+        XCTAssertFalse(app.switches["vocabulary-direction-listening"].exists)
+
+        let headwordField = app.textFields["vocabulary-headword-field"]
+        let meaningField = app.textFields["vocabulary-meaning-field"]
+        reveal(headwordField, in: app)
+        XCTAssertTrue(headwordField.waitForExistence(timeout: 5))
+        headwordField.tap()
+        headwordField.typeText("聞く")
+        dismissKeyboard(in: app)
+        meaningField.tap()
+        meaningField.typeText("听")
+        dismissKeyboard(in: app)
+
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.exists)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+
+        selectDecksTab(in: app)
+        let deck = app.staticTexts["T16 验收"]
+        XCTAssertTrue(deck.waitForExistence(timeout: 5))
+        deck.tap()
+        XCTAssertTrue(app.staticTexts["deck-note-count"].label.contains("1"))
+        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("3"))
+        app.staticTexts["聞く"].tap()
+
+        // 编辑器仍可逐方向管理：三个方向默认全部开启。
+        let listeningToggle = app.switches["card-direction-toggle-vocabulary_listening"]
+        reveal(listeningToggle, in: app)
+        XCTAssertTrue(listeningToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(listeningToggle.value as? String, "1")
+        let jaZhToggle = app.switches["card-direction-toggle-vocabulary_ja_zh"]
+        XCTAssertTrue(jaZhToggle.exists)
+        XCTAssertEqual(jaZhToggle.value as? String, "1")
+
+        // 停用 → 重开走同一方向替换路径，不重复创建。
+        setSwitch(listeningToggle, enabled: false)
+        XCTAssertEqual(listeningToggle.value as? String, "0")
+        XCTAssertEqual(jaZhToggle.value as? String, "1")
+        setSwitch(listeningToggle, enabled: true)
+        XCTAssertEqual(listeningToggle.value as? String, "1")
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.staticTexts["deck-card-count"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("3"))
+    }
+
+    @MainActor
     func testGrammarDraftPersistsWithIsolatedFieldsAndFavoritesEntry() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
@@ -925,6 +1259,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertFalse(app.textFields["vocabulary-reading-field"].exists)
         grammarFormField.tap()
         grammarFormField.typeText("Vたことがある")
+        dismissKeyboard(in: app)
         grammarMeaningField.tap()
         grammarMeaningField.typeText("曾经做过")
         dismissKeyboard(in: app)
@@ -967,6 +1302,7 @@ final class OboeNavigationUITests: XCTestCase {
     func testManualCardCompletesRealTodayReviewAndSurvivesRestart() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -987,6 +1323,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("taberu")
+        dismissKeyboard(in: app)
         meaning.tap()
         meaning.typeText("eat")
         dismissKeyboard(in: app)
@@ -1065,7 +1402,7 @@ final class OboeNavigationUITests: XCTestCase {
             NSPredicate(format: "identifier BEGINSWITH 'deck-today-counts-'")
         ).firstMatch
         XCTAssertTrue(deckTodayCounts.waitForExistence(timeout: 5))
-        XCTAssertTrue(deckTodayCounts.label.contains("今日新卡 1 · 复习 0"))
+        XCTAssertTrue(deckTodayCounts.label.contains("今日新词 1 · 复习 0"))
         app.staticTexts["P11 Flow"].firstMatch.tap()
         let knowledgePoint = app.staticTexts["taberu"]
         XCTAssertTrue(knowledgePoint.waitForExistence(timeout: 5))
@@ -1090,6 +1427,7 @@ final class OboeNavigationUITests: XCTestCase {
     func testReviewAgainWaitsAutoRefreshesWhenDueThenFinishDismisses() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -1110,6 +1448,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("nomu")
+        dismissKeyboard(in: app)
         meaning.tap()
         meaning.typeText("drink")
         dismissKeyboard(in: app)
@@ -1174,6 +1513,7 @@ final class OboeNavigationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_SUBMIT_FAILURES"] = "1"
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -1194,6 +1534,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("yomu")
+        dismissKeyboard(in: app)
         meaning.tap()
         meaning.typeText("read")
         dismissKeyboard(in: app)
@@ -1237,6 +1578,7 @@ final class OboeNavigationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -1257,6 +1599,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("kaku")
+        dismissKeyboard(in: app)
         meaning.tap()
         meaning.typeText("write")
         dismissKeyboard(in: app)
@@ -1292,6 +1635,7 @@ final class OboeNavigationUITests: XCTestCase {
     func testReviewDarkModeKeepsActionsReachable() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
         let settingsTab = app.tabBars.buttons["设置"]
@@ -1322,6 +1666,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(headword.exists)
         headword.tap()
         headword.typeText("miru")
+        dismissKeyboard(in: app)
         meaning.tap()
         meaning.typeText("see")
         dismissKeyboard(in: app)
@@ -1389,9 +1734,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(meaning.exists)
         meaning.tap()
         meaning.typeText("A deliberately long explanation that wraps across several lines.")
-        let keyboardDone = app.buttons["add-keyboard-done-button"]
-        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 2))
-        keyboardDone.tap()
+        dismissKeyboard(in: app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
 
         let save = app.buttons["grammar-formal-save-button"]
@@ -1528,6 +1871,9 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_REVIEW_LOAD_DELAY"] = String(loadDelay)
         app.launchEnvironment["OBOE_UI_TEST_REVIEW_LOAD_FAILURES"] = String(loadFailures)
+        // 词默认全方向；收窄到两个视觉方向，使卡间断言保持确定。
+        app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] =
+            "japaneseToChinese,chineseToJapanese"
         app.launch()
 
         if autoSpeech {
@@ -1556,40 +1902,17 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.tabBars.buttons["添加"].tap()
         XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
-        let reverse = app.switches["vocabulary-direction-zh-ja"]
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<8 {
-            if reverse.exists, reverse.isHittable,
-               reverse.frame.minY > app.navigationBars.firstMatch.frame.maxY,
-               reverse.frame.maxY < app.frame.maxY - 100 {
-                break
-            }
-            let movesDown = reverse.exists && reverse.frame.midY < app.frame.midY
-            form.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(
-                    forDuration: 0.05,
-                    thenDragTo: form.coordinate(
-                        withNormalizedOffset: CGVector(dx: 0.5, dy: movesDown ? 0.7 : 0.3)
-                    )
-                )
-        }
-        XCTAssertTrue(reverse.exists)
-        XCTAssertTrue(reverse.isHittable, "方向开关不可点击：\(reverse.frame)")
-        waitUntilEnabled(reverse)
-        setSwitch(reverse, enabled: true)
         let headword = app.textFields["vocabulary-headword-field"]
         revealExistence(headword, in: app)
         headword.tap()
         headword.typeText("taberu")
-        let keyboardDone = app.buttons["add-keyboard-done-button"]
-        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 2))
-        keyboardDone.tap()
+        dismissKeyboard(in: app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(meaning, in: app)
         meaning.tap()
         meaning.typeText("eat")
-        keyboardDone.tap()
+        dismissKeyboard(in: app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 3))
         let save = app.buttons["vocabulary-formal-save-button"]
         reveal(save, in: app)
@@ -1678,12 +2001,14 @@ final class OboeNavigationUITests: XCTestCase {
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
         guard app.keyboards.firstMatch.exists else { return }
-        let returnKey = app.keyboards.buttons["return"]
-        if returnKey.exists {
-            returnKey.tap()
-        } else {
-            app.keyboards.firstMatch.swipeDown()
+        for name in ["done", "Done", "完成", "return", "换行"] {
+            let key = app.keyboards.buttons[name]
+            if key.exists {
+                key.tap()
+                return
+            }
         }
+        app.keyboards.firstMatch.swipeDown()
     }
 
     @MainActor

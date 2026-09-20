@@ -5,6 +5,14 @@ struct ReviewView: View {
     let service: StudySessionService
     let historyService: StudyHistoryService
     let speechPreferencesService: SpeechPreferencesService
+    let adaptiveCardService: AdaptiveCardService
+    let adaptivePreferencesService: AdaptivePreferencesService
+    /// T07 answer-face AI repair entry — nil hides it entirely.
+    let aiRepairService: AIRepairService?
+    /// T09: the split preview's deck picker source.
+    let deckService: DeckManagementService?
+    /// T07: the repair sheet's manual-edit fallback, keyed by note id + kind.
+    let repairNoteEditor: ((UUID, KnowledgePointKind, @escaping () async -> Void) -> AnyView)?
     let speechService: any SpeechService
     let scope: StudyScope
 
@@ -12,17 +20,31 @@ struct ReviewView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @State private var model: ReviewViewModel
+    /// The card whose repair sheet is open — item-based so the sheet always
+    /// belongs to the card that spawned it.
+    @State private var aiRepairCardID: UUID?
+    @State private var recallInputController = RecallInputController()
 
     init(
         service: StudySessionService,
         historyService: StudyHistoryService,
         speechPreferencesService: SpeechPreferencesService,
+        adaptiveCardService: AdaptiveCardService,
+        adaptivePreferencesService: AdaptivePreferencesService,
+        aiRepairService: AIRepairService? = nil,
+        deckService: DeckManagementService? = nil,
+        repairNoteEditor: ((UUID, KnowledgePointKind, @escaping () async -> Void) -> AnyView)? = nil,
         speechService: any SpeechService,
         scope: StudyScope
     ) {
         self.service = service
         self.historyService = historyService
         self.speechPreferencesService = speechPreferencesService
+        self.adaptiveCardService = adaptiveCardService
+        self.adaptivePreferencesService = adaptivePreferencesService
+        self.aiRepairService = aiRepairService
+        self.deckService = deckService
+        self.repairNoteEditor = repairNoteEditor
         self.speechService = speechService
         self.scope = scope
         _model = State(
@@ -30,6 +52,8 @@ struct ReviewView: View {
                 service: service,
                 historyService: historyService,
                 speechPreferencesService: speechPreferencesService,
+                adaptiveCardService: adaptiveCardService,
+                adaptivePreferencesService: adaptivePreferencesService,
                 speechService: speechService,
                 scope: scope
             )
@@ -79,9 +103,11 @@ struct ReviewView: View {
                 Task { await model.refresh(preservingCurrentCard: true) }
             } else {
                 model.stopSpeech()
+                recallInputController.closeKeyboard()
             }
         }
         .onDisappear {
+            recallInputController.closeKeyboard()
             model.stopSpeech()
             model.stopWaitingRefresh()
         }
@@ -133,12 +159,40 @@ struct ReviewView: View {
                         content: card.content,
                         isAnswerVisible: model.isAnswerVisible,
                         isSpeechAvailable: model.isSpeechAvailable,
+                        leechReminderStatus: model.leechReminderStatus,
                         onPrimarySpeech: model.playPrimarySpeech,
-                        onExampleSpeech: model.playExampleSpeech
+                        onExampleSpeech: model.playExampleSpeech,
+                        onListeningPrompt: model.playListeningPrompt,
+                        listeningPromptStatus: model.listeningPromptStatus,
+                        typedAnswer: model.isTypedRecall ? model.recallAttempt?.rawInput : nil,
+                        typedAnswerComparison: model.recallAttempt?.comparison,
+                        onAIRepair: aiRepairService == nil ? nil : {
+                            aiRepairCardID = card.content.cardID
+                        }
                     )
                     .padding(.horizontal, OboeTheme.pageHorizontalPadding)
                     .padding(.vertical, OboeTheme.Spacing.md)
+                    if model.isTypedRecall, !model.isAnswerVisible {
+                        let isListening = card.content.templateKind == .vocabularyListening
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(isListening ? "请用日语复述听到的内容" : "请用日语回答").font(.headline)
+                            RecallTextInput(
+                                text: model.recallAttempt?.rawInput ?? "",
+                                isEnabled: !model.isLoading && !model.isMutating,
+                                prompt: isListening ? "请用日语复述听到的内容" : "请用日语回答",
+                                controller: recallInputController,
+                                onInput: model.updateRecallInput,
+                                onConfirm: model.revealAnswer
+                            )
+                            if let error = model.recallInputError {
+                                Text(error).font(.footnote).foregroundStyle(.red)
+                            }
+                        }
+                        .padding(.horizontal, OboeTheme.pageHorizontalPadding)
+                        .padding(.bottom)
+                    }
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("review-content-scroll")
 
                 bottomBar(card)
@@ -147,7 +201,7 @@ struct ReviewView: View {
                 reduceMotion ? nil : .easeInOut(duration: 0.18),
                 value: model.isAnswerVisible
             )
-            .id(card.content.cardID)
+            .id(model.presentationID)
             .transition(.opacity)
         }
         .animation(
@@ -155,6 +209,38 @@ struct ReviewView: View {
             value: card.content.cardID
         )
         .background(OboeTheme.Colors.pageBackground)
+        .sheet(
+            isPresented: Binding(
+                get: { aiRepairCardID != nil },
+                set: { shown in if !shown { aiRepairCardID = nil } }
+            )
+        ) {
+            // Returning from repair keeps studying — refresh the same card
+            // so an in-sheet manual edit is reflected without advancing.
+            Task { await model.refresh(preservingCurrentCard: true) }
+        } content: {
+            if let aiRepairService, let aiRepairCardID {
+                NavigationStack {
+                    AIRepairView(
+                        service: aiRepairService,
+                        cardID: aiRepairCardID,
+                        deckService: deckService,
+                        noteEditor: repairNoteEditor,
+                        onChanged: {
+                            await model.refresh(preservingCurrentCard: true)
+                        },
+                        onCommitted: {
+                            // The card's content changed under the user's
+                            // eyes — reload it and re-present the question
+                            // face so no stale input or revealed answer
+                            // survives the edit.
+                            await model.refresh()
+                        }
+                    )
+                }
+                .presentationDetents([.large])
+            }
+        }
     }
 
     private func bottomBar(_ card: LoadedReviewCard) -> some View {
@@ -167,6 +253,18 @@ struct ReviewView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("review-speech-unavailable")
+            }
+            if let notice = model.listeningSkipNotice {
+                Label(notice, systemImage: "headphones")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("review-listening-skip-notice")
+            }
+            if model.mustPlayListeningPromptFirst {
+                Text("请先播放音频，再查看答案")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("review-listening-play-first-hint")
             }
             if model.isAnswerVisible {
                 if let message = model.submissionErrorMessage {
@@ -198,11 +296,20 @@ struct ReviewView: View {
                     }
                     .font(.footnote)
                 }
+            } else if model.isTypedRecall {
+                Button("确认回答") { recallInputController.confirm() }
+                    .buttonStyle(.oboePrimary)
+                    .disabled(!model.canConfirmRecall || model.mustPlayListeningPromptFirst)
+                    .accessibilityIdentifier("review-confirm-input-button")
+                Button("收起键盘") { recallInputController.closeKeyboard() }
+                    .font(.footnote)
+                    .accessibilityIdentifier("review-dismiss-keyboard-button")
             } else {
                 Button("显示答案") {
                     model.revealAnswer()
                 }
                 .buttonStyle(.oboePrimary)
+                .disabled(model.mustPlayListeningPromptFirst)
                 .accessibilityIdentifier("review-show-answer-button")
             }
         }
@@ -216,7 +323,7 @@ struct ReviewView: View {
             HStack {
                 if let summary = model.scopeSummary {
                     Text(
-                        "剩余 \(summary.remainingCount) · 新卡 \(summary.newCount) · 已完成 \(summary.completedCount)"
+                        "剩余 \(summary.remainingCount) · 新词 \(summary.newCount) · 已完成 \(summary.completedCount)"
                     )
                     .accessibilityIdentifier("review-progress-summary")
                 } else {
@@ -242,11 +349,47 @@ struct ReviewView: View {
     @ViewBuilder
     private func completionState(_ plan: TodayPlan) -> some View {
         let later = model.scopedLaterItems(in: plan)
-        if let next = later.first?.dueAt {
+        if !model.skippedListeningIDs.isEmpty {
+            listeningSkippedState(plan: plan, nextDue: later.first?.dueAt)
+        } else if let next = later.first?.dueAt {
             waitingState(plan: plan, nextDue: next, laterCount: later.count)
         } else {
             finishedState(plan: plan)
         }
+    }
+
+    /// T18 (设计 §8.3): every now-candidate listening card failed to play —
+    /// show the real remaining count and an explicit re-check, never the
+    /// "all done" state. Skipped cards stay due; nothing was rated.
+    private func listeningSkippedState(plan: TodayPlan, nextDue: Date?) -> some View {
+        VStack(spacing: 0) {
+            progressHeader(plan: plan)
+            Spacer()
+            VStack(spacing: OboeTheme.Spacing.md) {
+                Image(systemName: "headphones")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("剩余 \(model.scopedSkippedListeningCount) 张听力卡暂无法播放")
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                if let nextDue {
+                    Text("\(StudyTimeText.until(nextDue))后还有更多卡片到期。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Button("重试音频卡") {
+                    model.retrySkippedListeningCards()
+                }
+                .buttonStyle(.oboePrimary)
+                .accessibilityIdentifier("review-listening-retry-button")
+            }
+            .padding(.horizontal, OboeTheme.pageHorizontalPadding)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("review-listening-skipped-state")
+            Spacer()
+        }
+        .background(OboeTheme.Colors.pageBackground)
     }
 
     private func waitingState(plan: TodayPlan, nextDue: Date, laterCount: Int) -> some View {

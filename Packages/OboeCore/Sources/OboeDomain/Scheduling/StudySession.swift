@@ -14,6 +14,7 @@ public struct ReviewCardContent: Equatable, Sendable {
     public let exampleJapanese: String?
     public let exampleTranslationZH: String?
     public let notes: String?
+    public let contentVersion: Int
 
     public init(
         cardID: UUID,
@@ -28,7 +29,8 @@ public struct ReviewCardContent: Equatable, Sendable {
         connection: String?,
         exampleJapanese: String?,
         exampleTranslationZH: String?,
-        notes: String?
+        notes: String?,
+        contentVersion: Int = 1
     ) {
         self.cardID = cardID
         self.noteID = noteID
@@ -43,6 +45,7 @@ public struct ReviewCardContent: Equatable, Sendable {
         self.exampleJapanese = exampleJapanese
         self.exampleTranslationZH = exampleTranslationZH
         self.notes = notes
+        self.contentVersion = contentVersion
     }
 }
 
@@ -157,6 +160,19 @@ public struct StudySessionService: Sendable {
             preset,
             defaultTimeZoneID: defaultTimeZoneID
         )
+    }
+
+    /// 切换主牌组并重算当日计划：额度先给主牌组，剩余轮转其他牌组。
+    public func setPrimaryDeck(
+        _ deckID: UUID?,
+        defaultTimeZoneID: String
+    ) async throws -> TodayPlan {
+        let plan = try await settingsManager.setPrimaryDeck(
+            deckID,
+            at: clock.now(),
+            defaultTimeZoneID: defaultTimeZoneID
+        )
+        return try await queueRepository.buildQueue(for: plan.studyDay, at: clock.now())
     }
 
     public func loadReviewCard(cardID: UUID) async throws -> LoadedReviewCard {

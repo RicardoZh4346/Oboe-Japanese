@@ -15,7 +15,7 @@ public struct GRDBReviewCardContentRepository: ReviewCardContentRepository, Send
                 db,
                 sql: """
                     SELECT cards.id AS card_id, cards.note_id, cards.template_kind,
-                           notes.deck_id, notes.headword, notes.reading, notes.meaning_zh,
+                           notes.content_version, notes.deck_id, notes.headword, notes.reading, notes.meaning_zh,
                            notes.part_of_speech, notes.usage, notes.connection, notes.notes,
                            examples.japanese AS example_japanese,
                            examples.translation_zh AS example_translation_zh
@@ -50,7 +50,8 @@ public struct GRDBReviewCardContentRepository: ReviewCardContentRepository, Send
                 connection: row["connection"],
                 exampleJapanese: row["example_japanese"],
                 exampleTranslationZH: row["example_translation_zh"],
-                notes: row["notes"]
+                notes: row["notes"],
+                contentVersion: row["content_version"]
             )
         }
     }

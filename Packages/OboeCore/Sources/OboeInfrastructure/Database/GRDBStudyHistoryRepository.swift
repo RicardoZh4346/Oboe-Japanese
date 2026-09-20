@@ -16,7 +16,7 @@ public struct GRDBStudyHistoryRepository: StudyHistoryRepository, Sendable {
                 db,
                 sql: """
                     SELECT COUNT(*) AS answer_count,
-                           COUNT(DISTINCT CASE WHEN was_first_study = 1 THEN card_key END)
+                           COUNT(DISTINCT CASE WHEN was_first_study = 1 THEN note_id END)
                                AS new_learned_count,
                            COALESCE(SUM(CASE WHEN was_first_study = 0 THEN 1 ELSE 0 END), 0)
                                AS review_answer_count,
@@ -33,8 +33,9 @@ public struct GRDBStudyHistoryRepository: StudyHistoryRepository, Sendable {
                 db,
                 sql: """
                     SELECT notes.deck_id,
-                           SUM(CASE WHEN daily_tasks.category_at_admission = 'new'
-                               THEN 1 ELSE 0 END) AS new_count,
+                           COUNT(DISTINCT CASE
+                               WHEN daily_tasks.category_at_admission = 'new'
+                               THEN notes.id END) AS new_count,
                            SUM(CASE WHEN daily_tasks.category_at_admission != 'new'
                                THEN 1 ELSE 0 END) AS review_count
                     FROM daily_tasks

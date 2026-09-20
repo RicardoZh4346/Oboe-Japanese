@@ -6,11 +6,18 @@ struct GrammarRequiredSection: View {
 
     var body: some View {
         Section("必填") {
-            TextField("语法形式", text: $form.grammarForm)
-                .textInputAutocapitalization(.never)
-                .accessibilityIdentifier("grammar-form-field")
-            TextField("中文含义", text: $form.meaningZH)
-                .accessibilityIdentifier("grammar-meaning-field")
+            LanguageHintTextField(
+                placeholder: "语法形式",
+                text: $form.grammarForm,
+                hint: .japanese,
+                identifier: "grammar-form-field"
+            )
+            LanguageHintTextField(
+                placeholder: "中文含义",
+                text: $form.meaningZH,
+                hint: .chinesePinyin,
+                identifier: "grammar-meaning-field"
+            )
         }
     }
 }
@@ -23,12 +30,18 @@ struct GrammarAdditionalFieldsSection: View {
     var body: some View {
         Section {
             DisclosureGroup("更多字段（可选）", isExpanded: $isExpanded) {
-                TextField("使用说明", text: $form.usage, axis: .vertical)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("grammar-usage-field")
-                TextField("接续方式", text: $form.connection, axis: .vertical)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("grammar-connection-field")
+                LanguageHintEditor(
+                    placeholder: "使用说明",
+                    text: $form.usage,
+                    hint: .chinesePinyin,
+                    identifier: "grammar-usage-field"
+                )
+                LanguageHintEditor(
+                    placeholder: "接续方式",
+                    text: $form.connection,
+                    hint: .japanese,
+                    identifier: "grammar-connection-field"
+                )
                 Picker("JLPT", selection: $form.jlpt) {
                     Text("未设置").tag(nil as JLPTLevel?)
                     ForEach(JLPTLevel.allCases, id: \.self) { level in
@@ -36,13 +49,18 @@ struct GrammarAdditionalFieldsSection: View {
                     }
                 }
                 .accessibilityIdentifier("grammar-jlpt-picker")
-                TextField("日语例句", text: $form.exampleJapanese, axis: .vertical)
-                    .textInputAutocapitalization(.never)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("grammar-example-field")
-                TextField("例句翻译", text: $form.exampleTranslationZH, axis: .vertical)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("grammar-example-translation-field")
+                LanguageHintEditor(
+                    placeholder: "日语例句",
+                    text: $form.exampleJapanese,
+                    hint: .japanese,
+                    identifier: "grammar-example-field"
+                )
+                LanguageHintEditor(
+                    placeholder: "例句翻译",
+                    text: $form.exampleTranslationZH,
+                    hint: .chinesePinyin,
+                    identifier: "grammar-example-translation-field"
+                )
                 TextField("标签（逗号或换行分隔）", text: $tagsText)
                     .accessibilityIdentifier("grammar-new-tags-field")
                 TextEditor(text: $form.notes)
@@ -61,8 +79,18 @@ struct GrammarFormSections: View {
     var body: some View {
         GrammarRequiredSection(form: $form)
         Section("语法信息") {
-            TextField("使用说明", text: $form.usage, axis: .vertical)
-            TextField("接续方式", text: $form.connection, axis: .vertical)
+            LanguageHintEditor(
+                placeholder: "使用说明",
+                text: $form.usage,
+                hint: .chinesePinyin,
+                identifier: ""
+            )
+            LanguageHintEditor(
+                placeholder: "接续方式",
+                text: $form.connection,
+                hint: .japanese,
+                identifier: ""
+            )
             Picker("JLPT", selection: $form.jlpt) {
                 Text("未设置").tag(nil as JLPTLevel?)
                 ForEach(JLPTLevel.allCases, id: \.self) { level in
@@ -71,8 +99,18 @@ struct GrammarFormSections: View {
             }
         }
         Section("例句") {
-            TextField("日语例句", text: $form.exampleJapanese, axis: .vertical)
-            TextField("例句翻译", text: $form.exampleTranslationZH, axis: .vertical)
+            LanguageHintEditor(
+                placeholder: "日语例句",
+                text: $form.exampleJapanese,
+                hint: .japanese,
+                identifier: ""
+            )
+            LanguageHintEditor(
+                placeholder: "例句翻译",
+                text: $form.exampleTranslationZH,
+                hint: .chinesePinyin,
+                identifier: ""
+            )
         }
         Section("注意事项") {
             TextEditor(text: $form.notes)
@@ -115,28 +153,22 @@ struct GrammarPreview: View {
 
 struct GrammarCardPreviews: View {
     let form: GrammarFormData
-    let isEnabled: Bool
 
     var body: some View {
         if let content = try? form.validatedContent() {
-            if isEnabled {
-                CardFacePreview(
-                    title: "语法形式 → 解释",
-                    front: [content.grammarForm],
-                    back: [
-                        content.meaningZH,
-                        content.connection,
-                        content.usage,
-                        content.example?.japanese,
-                        content.example?.translationZH,
-                        content.notes
-                    ].compactMap { $0 },
-                    identifier: "grammar-form-explanation"
-                )
-            } else {
-                Text("选择方向后显示卡片预览。")
-                    .foregroundStyle(.secondary)
-            }
+            CardFacePreview(
+                title: "语法形式 → 解释",
+                front: [content.grammarForm],
+                back: [
+                    content.meaningZH,
+                    content.connection,
+                    content.usage,
+                    content.example?.japanese,
+                    content.example?.translationZH,
+                    content.notes
+                ].compactMap { $0 },
+                identifier: "grammar-form-explanation"
+            )
         } else {
             Text("填写必填内容后显示卡片预览。")
                 .foregroundStyle(.secondary)

@@ -112,7 +112,12 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
         )
     }
 
-    private static func insertVocabulary(
+    /// In-transaction note+example+tags+cards insert — shared with the AI
+    /// split commit (设计 §6.5) so a repair split and a sentence-analysis
+    /// batch can never diverge on how a new note is born: `origin` comes
+    /// from the commit, `source_ref` stays NULL (schema CHECK), cards land
+    /// in New state through the configured-profile flow.
+    static func insertVocabulary(
         _ commit: VocabularyContentCommit,
         in db: Database
     ) throws {
@@ -169,7 +174,7 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
         }
     }
 
-    private static func insertGrammar(
+    static func insertGrammar(
         _ commit: GrammarContentCommit,
         in db: Database
     ) throws {
@@ -224,7 +229,7 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
         )
     }
 
-    private static func requireDeck(_ deckID: UUID, in db: Database) throws {
+    static func requireDeck(_ deckID: UUID, in db: Database) throws {
         guard try Bool.fetchOne(
             db,
             sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",

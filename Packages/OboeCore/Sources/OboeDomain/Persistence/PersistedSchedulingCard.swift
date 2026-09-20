@@ -3,7 +3,19 @@ import Foundation
 public enum CardTemplateKind: String, CaseIterable, Codable, Hashable, Sendable {
     case vocabularyJapaneseToChinese = "vocabulary_ja_zh"
     case vocabularyChineseToJapanese = "vocabulary_zh_ja"
+    case vocabularyListening = "vocabulary_listening"
     case grammarFormToExplanation = "grammar_form_explanation"
+
+    /// 同一 Note 的方向卡在队列里的固定顺序：日→中、中→日、听力
+    /// （从易到难——新词先认形再回忆最后辨音）。非方向模板返回 0。
+    public var directionQueueRank: Int {
+        switch self {
+        case .vocabularyJapaneseToChinese: 0
+        case .vocabularyChineseToJapanese: 1
+        case .vocabularyListening: 2
+        case .grammarFormToExplanation: 0
+        }
+    }
 }
 
 public struct PersistedSchedulingCard: Codable, Equatable, Sendable {

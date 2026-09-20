@@ -16,10 +16,7 @@ final class PortableBackupV3RestorationTests: XCTestCase {
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await seedInboxSource(source, seed: seed)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(appVersion: "test", at: fixture.exportedAt)
+        let backup = try await exportV3Backup(from: source, fixture: fixture)
 
         let preparer = PortableBackupRestorationPreparer(
             currentDatabase: current,
@@ -136,10 +133,7 @@ final class PortableBackupV3RestorationTests: XCTestCase {
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await seedInboxSource(source, seed: seed)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(appVersion: "test", at: fixture.exportedAt)
+        let backup = try await exportV3Backup(from: source, fixture: fixture)
         let preparer = PortableBackupRestorationPreparer(
             currentDatabase: current,
             workingDirectoryURL: fixture.preparationsURL,
@@ -201,10 +195,7 @@ final class PortableBackupV3RestorationTests: XCTestCase {
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await seedInboxSource(source, seed: seed)
         try await seedCurrentDatabase(current)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(appVersion: "test", at: fixture.exportedAt)
+        let backup = try await exportV3Backup(from: source, fixture: fixture)
         let preparer = PortableBackupRestorationPreparer(
             currentDatabase: current,
             workingDirectoryURL: fixture.preparationsURL,
@@ -264,10 +255,7 @@ final class PortableBackupV3RestorationTests: XCTestCase {
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await seedInboxSource(source, seed: seed)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(appVersion: "test", at: fixture.exportedAt)
+        let backup = try await exportV3Backup(from: source, fixture: fixture)
 
         // No attachment store registered → every well-formed reference clears.
         let clearingPreparer = PortableBackupRestorationPreparer(
@@ -315,10 +303,7 @@ final class PortableBackupV3RestorationTests: XCTestCase {
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await seedInboxSource(source, seed: seed)
         try await seedCurrentDatabase(current)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(appVersion: "test", at: fixture.exportedAt)
+        let backup = try await exportV3Backup(from: source, fixture: fixture)
 
         let legacyURL = fixture.rootURL.appendingPathComponent("legacy-v2.oboe-backup")
         try rewriteBackup(backup.url, to: legacyURL) { objects in
@@ -349,6 +334,30 @@ final class PortableBackupV3RestorationTests: XCTestCase {
 }
 
 private extension PortableBackupV3RestorationTests {
+    /// Produces a genuine v3-format file: exports with the current (v4)
+    /// exporter, then strips the fields a real v0.3 export never had. Restore
+    /// coverage for the v3 source contract stays honest as the format evolves.
+    func exportV3Backup(
+        from database: OboeDatabase,
+        fixture: Fixture
+    ) async throws -> PortableBackupExport {
+        let backup = try await PortableBackupExporter(
+            database: database,
+            workingDirectoryURL: fixture.exportsURL
+        ).export(appVersion: "test", at: fixture.exportedAt)
+        let legacyURL = fixture.rootURL.appendingPathComponent(
+            "v3-\(backup.url.lastPathComponent)"
+        )
+        try rewriteBackup(backup.url, to: legacyURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 3)
+        }
+        return PortableBackupExport(
+            url: legacyURL,
+            exportedAt: backup.exportedAt,
+            recordCounts: backup.recordCounts
+        )
+    }
+
     struct Fixture {
         let rootURL: URL
         let sourceDatabaseURL: URL

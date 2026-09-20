@@ -31,7 +31,7 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(parsed.records.last?["recordType"] as? String, "footer")
         let manifest = try XCTUnwrap(parsed.records.first)
         XCTAssertEqual(manifest["format"] as? String, "oboe-portable-backup")
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 3)
+        XCTAssertEqual(manifest["formatVersion"] as? Int, PortableBackupFormat.currentVersion)
         XCTAssertEqual(manifest["appVersion"] as? String, "0.1.0-test")
         XCTAssertEqual(manifest["encoding"] as? String, "utf-8")
         XCTAssertEqual(manifest["lineEnding"] as? String, "lf")

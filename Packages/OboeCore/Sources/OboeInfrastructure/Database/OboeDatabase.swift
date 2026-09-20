@@ -53,7 +53,12 @@ public enum OboeDatabaseSchema {
         "v4_ai_configuration_privacy",
         "v5_ai_response_capability",
         "v6_builtin_jlpt_source",
-        "v7_inbox_capture"
+        "v7_inbox_capture",
+        "v8_adaptive_preferences",
+        "v9_listening_template",
+        "v10_ai_repair_drafts",
+        "v11_primary_deck",
+        "v12_fill_vocabulary_directions"
     ]
 
     public static let tableNames: Set<String> = [
@@ -77,44 +82,71 @@ public enum OboeDatabaseSchema {
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
+        makeMigrator(applying: migrationIdentifiers)
+    }
+
+    /// Registering a strict prefix of the identifier list lets tests stage a
+    /// database at an older schema version before exercising the upgrade path.
+    static func makeMigrator(applying identifiers: [String]) -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         // Deliberately keep eraseDatabaseOnSchemaChange at its safe false default.
-        migrator.registerMigration(migrationIdentifiers[0]) { db in
-            try createContentSchema(db)
-        }
-        migrator.registerMigration(migrationIdentifiers[1]) { db in
-            try createSchedulingAndAppStateSchema(db)
-        }
-        migrator.registerMigration(migrationIdentifiers[2]) { db in
-            try createSearchIndexMaintenance(db)
-        }
-        migrator.registerMigration(migrationIdentifiers[3]) { db in
-            try db.execute(sql: """
-                ALTER TABLE app_settings
-                ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 0
-                CHECK (ai_enabled IN (0, 1));
+        for identifier in identifiers {
+            switch identifier {
+            case "v1_content":
+                migrator.registerMigration(identifier, migrate: createContentSchema)
+            case "v2_scheduling_and_app_state":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: createSchedulingAndAppStateSchema
+                )
+            case "v3_search_index_maintenance":
+                migrator.registerMigration(identifier, migrate: createSearchIndexMaintenance)
+            case "v4_ai_configuration_privacy":
+                migrator.registerMigration(identifier) { db in
+                    try db.execute(sql: """
+                        ALTER TABLE app_settings
+                        ADD COLUMN ai_enabled INTEGER NOT NULL DEFAULT 0
+                        CHECK (ai_enabled IN (0, 1));
 
-                ALTER TABLE app_settings
-                ADD COLUMN ai_service_name TEXT;
+                        ALTER TABLE app_settings
+                        ADD COLUMN ai_service_name TEXT;
 
-                ALTER TABLE app_settings
-                ADD COLUMN ai_credential_id TEXT;
-                """)
-        }
-        migrator.registerMigration(migrationIdentifiers[4]) { db in
-            try db.execute(sql: """
-                ALTER TABLE app_settings
-                ADD COLUMN ai_response_format_mode TEXT NOT NULL DEFAULT 'json_object'
-                CHECK (ai_response_format_mode IN (
-                    'json_schema', 'json_object', 'prompted_json'
-                ));
-                """)
-        }
-        migrator.registerMigration(migrationIdentifiers[5]) { db in
-            try rebuildNotesForBuiltinJLPT(db)
-        }
-        migrator.registerMigration(migrationIdentifiers[6]) { db in
-            try createInboxCaptureSchema(db)
+                        ALTER TABLE app_settings
+                        ADD COLUMN ai_credential_id TEXT;
+                        """)
+                }
+            case "v5_ai_response_capability":
+                migrator.registerMigration(identifier) { db in
+                    try db.execute(sql: """
+                        ALTER TABLE app_settings
+                        ADD COLUMN ai_response_format_mode TEXT NOT NULL DEFAULT 'json_object'
+                        CHECK (ai_response_format_mode IN (
+                            'json_schema', 'json_object', 'prompted_json'
+                        ));
+                        """)
+                }
+            case "v6_builtin_jlpt_source":
+                migrator.registerMigration(identifier, migrate: rebuildNotesForBuiltinJLPT)
+            case "v7_inbox_capture":
+                migrator.registerMigration(identifier, migrate: createInboxCaptureSchema)
+            case "v8_adaptive_preferences":
+                migrator.registerMigration(identifier, migrate: createAdaptivePreferences)
+            case "v9_listening_template":
+                migrator.registerMigration(identifier, migrate: rebuildCardsForListeningTemplate)
+            case "v10_ai_repair_drafts":
+                migrator.registerMigration(identifier, migrate: rebuildDraftsForAIRepair)
+            case "v11_primary_deck":
+                migrator.registerMigration(identifier) { db in
+                    try db.execute(sql: """
+                        ALTER TABLE app_settings
+                        ADD COLUMN primary_deck_id TEXT;
+                        """)
+                }
+            case "v12_fill_vocabulary_directions":
+                migrator.registerMigration(identifier, migrate: fillVocabularyDirections)
+            default:
+                preconditionFailure("Unknown migration identifier \(identifier)")
+            }
         }
         return migrator
     }
@@ -162,6 +194,177 @@ public enum OboeDatabaseSchema {
                 WHERE origin = 'builtin_jlpt' AND source_ref IS NOT NULL;
             """)
         try createSearchIndexMaintenance(db)
+    }
+
+    /// v0.4 settings (需求 §16): typed-recall toggles, listening autoplay and
+    /// leech reminders — deliberately separate from the speech auto-play
+    /// columns. Plus the partial index Adaptive queries scan: every assessment
+    /// reads a card's valid (non-undone) review samples in reviewed_at order.
+    private static func createAdaptivePreferences(_ db: Database) throws {
+        try db.execute(sql: """
+            ALTER TABLE app_settings
+            ADD COLUMN typed_answer_zh_ja INTEGER NOT NULL DEFAULT 0
+            CHECK (typed_answer_zh_ja IN (0, 1));
+
+            ALTER TABLE app_settings
+            ADD COLUMN auto_play_listening_audio INTEGER NOT NULL DEFAULT 1
+            CHECK (auto_play_listening_audio IN (0, 1));
+
+            ALTER TABLE app_settings
+            ADD COLUMN typed_answer_listening INTEGER NOT NULL DEFAULT 0
+            CHECK (typed_answer_listening IN (0, 1));
+
+            ALTER TABLE app_settings
+            ADD COLUMN leech_reminders_enabled INTEGER NOT NULL DEFAULT 1
+            CHECK (leech_reminders_enabled IN (0, 1));
+
+            CREATE INDEX review_logs_on_card_key_valid_reviewed_at
+                ON review_logs(card_key, reviewed_at_ms DESC)
+                WHERE undone_at_ms IS NULL;
+            """)
+    }
+
+    /// Canonical rebuild widening the template CHECK for `vocabulary_listening`.
+    /// The migrator runs with deferred foreign-key checks (GRDB default), so
+    /// referencing tables (daily_tasks, review_logs) keep resolving by name —
+    /// the same mechanism the v6 notes rebuild already relies on.
+    private static func rebuildCardsForListeningTemplate(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE cards_v9 (
+                id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                template_kind TEXT NOT NULL CHECK (template_kind IN (
+                    'vocabulary_ja_zh',
+                    'vocabulary_zh_ja',
+                    'vocabulary_listening',
+                    'grammar_form_explanation'
+                )),
+                is_enabled INTEGER NOT NULL DEFAULT 1 CHECK (is_enabled IN (0, 1)),
+                state INTEGER NOT NULL CHECK (state BETWEEN 0 AND 3),
+                due_at_ms INTEGER NOT NULL,
+                last_review_at_ms INTEGER,
+                stability REAL NOT NULL CHECK (stability >= 0),
+                difficulty REAL NOT NULL CHECK (difficulty >= 0 AND difficulty <= 10),
+                reps INTEGER NOT NULL CHECK (reps >= 0),
+                lapses INTEGER NOT NULL CHECK (lapses >= 0),
+                scheduled_days REAL NOT NULL CHECK (scheduled_days >= 0),
+                elapsed_days REAL NOT NULL CHECK (elapsed_days >= 0),
+                learning_step INTEGER NOT NULL CHECK (learning_step >= 0),
+                first_studied_at_ms INTEGER,
+                state_version INTEGER NOT NULL DEFAULT 0 CHECK (state_version >= 0),
+                algorithm_version TEXT NOT NULL CHECK (length(algorithm_version) > 0),
+                profile_id TEXT NOT NULL REFERENCES scheduler_profiles(id) ON DELETE RESTRICT,
+                UNIQUE (note_id, template_kind)
+            );
+
+            INSERT INTO cards_v9(
+                id, note_id, template_kind, is_enabled, state, due_at_ms,
+                last_review_at_ms, stability, difficulty, reps, lapses,
+                scheduled_days, elapsed_days, learning_step, first_studied_at_ms,
+                state_version, algorithm_version, profile_id
+            )
+            SELECT id, note_id, template_kind, is_enabled, state, due_at_ms,
+                   last_review_at_ms, stability, difficulty, reps, lapses,
+                   scheduled_days, elapsed_days, learning_step, first_studied_at_ms,
+                   state_version, algorithm_version, profile_id
+            FROM cards;
+
+            DROP TABLE cards;
+            ALTER TABLE cards_v9 RENAME TO cards;
+            CREATE INDEX cards_on_enabled_state_due ON cards(is_enabled, state, due_at_ms);
+            CREATE INDEX cards_on_profile_id ON cards(profile_id);
+            """)
+    }
+
+    /// Canonical rebuild widening the draft-kind CHECK for `ai_repair`.
+    /// `inbox_processing_contexts.draft_id` keeps resolving by table name under
+    /// deferred foreign-key checks.
+    private static func rebuildDraftsForAIRepair(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE drafts_v10 (
+                id TEXT PRIMARY KEY NOT NULL CHECK (length(id) = 36),
+                draft_kind TEXT NOT NULL CHECK (draft_kind IN (
+                    'vocabulary', 'grammar', 'sentence_analysis', 'ai_repair'
+                )),
+                payload_version INTEGER NOT NULL CHECK (payload_version >= 1),
+                payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+                provider_id TEXT,
+                model_id TEXT,
+                prompt_version TEXT,
+                updated_at_ms INTEGER NOT NULL
+            );
+
+            INSERT INTO drafts_v10(
+                id, draft_kind, payload_version, payload_json,
+                provider_id, model_id, prompt_version, updated_at_ms
+            )
+            SELECT id, draft_kind, payload_version, payload_json,
+                   provider_id, model_id, prompt_version, updated_at_ms
+            FROM drafts;
+
+            DROP TABLE drafts;
+            ALTER TABLE drafts_v10 RENAME TO drafts;
+            """)
+    }
+
+    /// v12（每日新卡额度改为按词计）：新建卡不再有方向选择，词汇固定三方向。
+    /// 为所有词汇笔记补齐缺失的方向卡（New 状态进入候选池，按词额度逐日
+    /// 消化）；已存在但被停用的卡保持停用——is_enabled=0 同时承载方向暂停
+    /// 语义（含易错暂停），迁移不得擅自恢复。
+    /// 备份恢复在导入后重跑同一逻辑，保证旧备份里的部分方向词条也被补齐。
+    static func fillVocabularyDirections(_ db: Database) throws {
+        let now = Int64(Date().timeIntervalSince1970 * 1_000)
+        let vocabularyTemplates = [
+            "vocabulary_ja_zh", "vocabulary_zh_ja", "vocabulary_listening"
+        ]
+        let noteIDs = try String.fetchAll(
+            db,
+            sql: "SELECT id FROM notes WHERE kind = 'vocabulary'"
+        )
+        for noteID in noteIDs {
+            let existingKinds = Set(
+                try String.fetchAll(
+                    db,
+                    sql: "SELECT template_kind FROM cards WHERE note_id = ?",
+                    arguments: [noteID]
+                )
+            )
+            let missingKinds = vocabularyTemplates.filter { !existingKinds.contains($0) }
+            guard !missingKinds.isEmpty else { continue }
+            guard let profileID = try String.fetchOne(
+                db,
+                sql: """
+                    SELECT COALESCE(
+                        (SELECT profile_id FROM cards WHERE note_id = ? LIMIT 1),
+                        (SELECT id FROM scheduler_profiles
+                         ORDER BY created_at_ms DESC LIMIT 1)
+                    )
+                    """,
+                arguments: [noteID]
+            ) else {
+                continue
+            }
+            for kind in missingKinds {
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, state_version,
+                            algorithm_version, profile_id
+                        ) VALUES (?, ?, ?, 1, 0, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(UUID()),
+                        noteID,
+                        kind,
+                        now,
+                        SwiftFSRSReviewScheduler.algorithmVersion,
+                        profileID
+                    ]
+                )
+            }
+        }
     }
 
     private static func createContentSchema(_ db: Database) throws {

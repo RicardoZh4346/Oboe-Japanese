@@ -53,7 +53,11 @@ final class GRDBTodayQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(plan.summary.remainingCount, 6)
     }
 
-    func testSiblingCardsAreSoftlySeparatedAndQueueSurvivesReopen() async throws {
+    /// T21: the queue no longer soft-separates siblings — that moved to
+    /// display-time `SiblingSelectionPolicy`. `availableNow` is the raw
+    /// eligibility order (category priority, then due time), stable across
+    /// database reopen.
+    func testSiblingCardsKeepRawQueueOrderAndQueueSurvivesReopen() async throws {
         let fixture = try await TodayQueueFixture.make()
         defer { fixture.remove() }
         let deckID = try await fixture.addDeck()
@@ -81,7 +85,9 @@ final class GRDBTodayQueueRepositoryTests: XCTestCase {
         ).setDailyNewCardLimit(0, at: now, defaultTimeZoneID: "Asia/Shanghai")
         let firstPlan = try await fixture.build(at: now)
 
-        XCTAssertEqual(firstPlan.availableNow.map(\.cardID), [firstSibling, other, secondSibling])
+        // Raw due order — display-time separation belongs to the session
+        // policy, not the queue.
+        XCTAssertEqual(firstPlan.availableNow.map(\.cardID), [firstSibling, secondSibling, other])
 
         try fixture.database.close()
         let reopened = try OboeDatabase(path: fixture.databaseURL.path)
@@ -96,6 +102,82 @@ final class GRDBTodayQueueRepositoryTests: XCTestCase {
         XCTAssertEqual(reopenedPlan.availableNow.map(\.cardID), firstPlan.availableNow.map(\.cardID))
         XCTAssertEqual(reopenedPlan.summary, firstPlan.summary)
         try reopened.close()
+    }
+
+    /// 同一词的方向卡在 `now` 队列固定按 日→中、中→日、听力 排序
+    /// （从易到难），与插入顺序、UUID 和同词内的 dueAt 先后无关。
+    func testSameNoteDirectionsOrderEasyToHard() async throws {
+        let fixture = try await TodayQueueFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck()
+        let now = queueLocalDate(2026, 9, 10, 12, 0)
+        let note = try await fixture.addNote(deckID: deckID)
+        // 故意反序插入：听力先到、日→中最后。
+        let listening = try await fixture.addCard(
+            noteID: note, template: .vocabularyListening, state: .new, dueAt: now
+        )
+        let chineseToJapanese = try await fixture.addCard(
+            noteID: note, template: .vocabularyChineseToJapanese,
+            state: .new, dueAt: now
+        )
+        let japaneseToChinese = try await fixture.addCard(
+            noteID: note, template: .vocabularyJapaneseToChinese,
+            state: .new, dueAt: now
+        )
+        // 另一个词同样入队，验证排序只约束同词内的相对顺序。
+        let otherNote = try await fixture.addNote(deckID: deckID)
+        _ = try await fixture.addCard(
+            noteID: otherNote, template: .vocabularyJapaneseToChinese,
+            state: .new, dueAt: now
+        )
+        _ = try await PrepareStudyDay(
+            repository: GRDBStudyDayPlanningRepository(database: fixture.database)
+        ).setDailyNewCardLimit(2, at: now, defaultTimeZoneID: "Asia/Shanghai")
+
+        let plan = try await fixture.build(at: now)
+
+        XCTAssertEqual(
+            plan.availableNow.filter { $0.noteID == note }.map(\.cardID),
+            [japaneseToChinese, chineseToJapanese, listening],
+            "同词方向固定 日→中 → 中→日 → 听力，与插入顺序和 UUID 无关"
+        )
+        XCTAssertEqual(plan.availableNow.count, 4, "两个词各一个额度，全部方向入队")
+    }
+
+    /// T21: `availableLater` is pure due-time order — sibling notes are NOT
+    /// swapped there, so `nextAvailableAt` is always the earliest dueAt.
+    func testLaterItemsKeepPureDueOrderEvenAcrossSiblingNotes() async throws {
+        let fixture = try await TodayQueueFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck()
+        let now = queueLocalDate(2026, 9, 10, 12, 0)
+        let sharedNote = try await fixture.addNote(deckID: deckID)
+        let firstSibling = try await fixture.addCard(
+            noteID: sharedNote,
+            template: .vocabularyJapaneseToChinese,
+            state: .learning,
+            dueAt: now.addingTimeInterval(600)
+        )
+        let secondSibling = try await fixture.addCard(
+            noteID: sharedNote,
+            template: .vocabularyChineseToJapanese,
+            state: .learning,
+            dueAt: now.addingTimeInterval(300)
+        )
+        _ = try await PrepareStudyDay(
+            repository: GRDBStudyDayPlanningRepository(database: fixture.database)
+        ).setDailyNewCardLimit(0, at: now, defaultTimeZoneID: "Asia/Shanghai")
+
+        let plan = try await fixture.build(at: now)
+
+        XCTAssertEqual(
+            plan.availableLater.map(\.cardID), [secondSibling, firstSibling],
+            "later 列表保持纯 dueAt 顺序，不做兄弟交换"
+        )
+        XCTAssertEqual(
+            plan.nextAvailableAt, now.addingTimeInterval(300),
+            "下一次唤醒必须是最早到期时间"
+        )
     }
 
     func testOnlyLaterItemsMeansCurrentPauseButNotDayCompletion() async throws {

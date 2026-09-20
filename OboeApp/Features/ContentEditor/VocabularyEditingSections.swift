@@ -6,11 +6,18 @@ struct VocabularyRequiredSection: View {
 
     var body: some View {
         Section("必填") {
-            TextField("日语词形", text: $form.headword)
-                .textInputAutocapitalization(.never)
-                .accessibilityIdentifier("vocabulary-headword-field")
-            TextField("中文释义", text: $form.meaningZH)
-                .accessibilityIdentifier("vocabulary-meaning-field")
+            LanguageHintTextField(
+                placeholder: "日语词形",
+                text: $form.headword,
+                hint: .japanese,
+                identifier: "vocabulary-headword-field"
+            )
+            LanguageHintTextField(
+                placeholder: "中文释义",
+                text: $form.meaningZH,
+                hint: .chinesePinyin,
+                identifier: "vocabulary-meaning-field"
+            )
         }
     }
 }
@@ -23,11 +30,18 @@ struct VocabularyAdditionalFieldsSection: View {
     var body: some View {
         Section {
             DisclosureGroup("更多字段（可选）", isExpanded: $isExpanded) {
-                TextField("假名", text: $form.reading)
-                    .textInputAutocapitalization(.never)
-                    .accessibilityIdentifier("vocabulary-reading-field")
-                TextField("词性", text: $form.partOfSpeech)
-                    .accessibilityIdentifier("vocabulary-part-of-speech-field")
+                LanguageHintTextField(
+                    placeholder: "假名",
+                    text: $form.reading,
+                    hint: .japanese,
+                    identifier: "vocabulary-reading-field"
+                )
+                LanguageHintTextField(
+                    placeholder: "词性",
+                    text: $form.partOfSpeech,
+                    hint: .chinesePinyin,
+                    identifier: "vocabulary-part-of-speech-field"
+                )
                 Picker("JLPT", selection: $form.jlpt) {
                     Text("未设置").tag(nil as JLPTLevel?)
                     ForEach(JLPTLevel.allCases, id: \.self) { level in
@@ -35,13 +49,18 @@ struct VocabularyAdditionalFieldsSection: View {
                     }
                 }
                 .accessibilityIdentifier("vocabulary-jlpt-picker")
-                TextField("日语例句", text: $form.exampleJapanese, axis: .vertical)
-                    .textInputAutocapitalization(.never)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("vocabulary-example-field")
-                TextField("例句翻译", text: $form.exampleTranslationZH, axis: .vertical)
-                    .lineLimit(2...5)
-                    .accessibilityIdentifier("vocabulary-example-translation-field")
+                LanguageHintEditor(
+                    placeholder: "日语例句",
+                    text: $form.exampleJapanese,
+                    hint: .japanese,
+                    identifier: "vocabulary-example-field"
+                )
+                LanguageHintEditor(
+                    placeholder: "例句翻译",
+                    text: $form.exampleTranslationZH,
+                    hint: .chinesePinyin,
+                    identifier: "vocabulary-example-translation-field"
+                )
                 TextField("标签（逗号或换行分隔）", text: $tagsText)
                     .accessibilityIdentifier("vocabulary-new-tags-field")
                 TextEditor(text: $form.notes)
@@ -60,8 +79,18 @@ struct VocabularyFormSections: View {
     var body: some View {
         VocabularyRequiredSection(form: $form)
         Section("词条信息") {
-            TextField("假名", text: $form.reading)
-            TextField("词性", text: $form.partOfSpeech)
+            LanguageHintTextField(
+                placeholder: "假名",
+                text: $form.reading,
+                hint: .japanese,
+                identifier: ""
+            )
+            LanguageHintTextField(
+                placeholder: "词性",
+                text: $form.partOfSpeech,
+                hint: .chinesePinyin,
+                identifier: ""
+            )
             Picker("JLPT", selection: $form.jlpt) {
                 Text("未设置").tag(nil as JLPTLevel?)
                 ForEach(JLPTLevel.allCases, id: \.self) { level in
@@ -70,8 +99,18 @@ struct VocabularyFormSections: View {
             }
         }
         Section("例句") {
-            TextField("日语例句", text: $form.exampleJapanese, axis: .vertical)
-            TextField("例句翻译", text: $form.exampleTranslationZH, axis: .vertical)
+            LanguageHintEditor(
+                placeholder: "日语例句",
+                text: $form.exampleJapanese,
+                hint: .japanese,
+                identifier: ""
+            )
+            LanguageHintEditor(
+                placeholder: "例句翻译",
+                text: $form.exampleTranslationZH,
+                hint: .chinesePinyin,
+                identifier: ""
+            )
         }
         Section("备注") {
             TextEditor(text: $form.notes)
@@ -111,41 +150,44 @@ struct VocabularyPreview: View {
 
 struct VocabularyCardPreviews: View {
     let form: VocabularyFormData
-    let japaneseToChinese: Bool
-    let chineseToJapanese: Bool
 
     var body: some View {
         if let content = try? form.validatedContent() {
-            if japaneseToChinese {
-                CardFacePreview(
-                    title: "日语 → 中文",
-                    front: [content.headword],
-                    back: [
-                        content.reading,
-                        content.meaningZH,
-                        content.partOfSpeech,
-                        content.example?.japanese,
-                        content.example?.translationZH
-                    ].compactMap { $0 },
-                    identifier: "vocabulary-ja-zh"
-                )
-            }
-            if chineseToJapanese {
-                CardFacePreview(
-                    title: "中文 → 日语",
-                    front: [content.meaningZH, content.partOfSpeech].compactMap { $0 },
-                    back: [
-                        content.headword,
-                        content.reading,
-                        content.example?.japanese
-                    ].compactMap { $0 },
-                    identifier: "vocabulary-zh-ja"
-                )
-            }
-            if !japaneseToChinese && !chineseToJapanese {
-                Text("选择方向后显示卡片预览。")
-                    .foregroundStyle(.secondary)
-            }
+            CardFacePreview(
+                title: "日语 → 中文",
+                front: [content.headword],
+                back: [
+                    content.reading,
+                    content.meaningZH,
+                    content.partOfSpeech,
+                    content.example?.japanese,
+                    content.example?.translationZH
+                ].compactMap { $0 },
+                identifier: "vocabulary-ja-zh"
+            )
+            CardFacePreview(
+                title: "中文 → 日语",
+                front: [content.meaningZH, content.partOfSpeech].compactMap { $0 },
+                back: [
+                    content.headword,
+                    content.reading,
+                    content.example?.japanese
+                ].compactMap { $0 },
+                identifier: "vocabulary-zh-ja"
+            )
+            // The question face is an audio prompt — never the text.
+            CardFacePreview(
+                title: "听力 → 中文",
+                front: ["🔊 播放单词音频"],
+                back: [
+                    content.headword,
+                    content.reading,
+                    content.meaningZH,
+                    content.partOfSpeech,
+                    content.example?.japanese
+                ].compactMap { $0 },
+                identifier: "vocabulary-listening"
+            )
         } else {
             Text("填写必填内容后显示卡片预览。")
                 .foregroundStyle(.secondary)

@@ -22,7 +22,8 @@ final class GRDBSentenceAnalysisCardRepositoryTests: XCTestCase {
         let saved = try await service.commit(deckID: deckID, drafts: drafts)
 
         XCTAssertEqual(saved.noteIDs.count, 2)
-        XCTAssertEqual(saved.cardCount, 2)
+        // 词汇固定创建全部三方向 + 语法一张卡。
+        XCTAssertEqual(saved.cardCount, VocabularyCardDirection.allCases.count + 1)
         let rows = try await database.pool.read { db in
             try Row.fetchAll(
                 db,

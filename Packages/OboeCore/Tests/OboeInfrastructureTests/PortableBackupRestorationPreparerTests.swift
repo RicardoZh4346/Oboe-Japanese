@@ -29,12 +29,13 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let prepared = try await preparer.prepare(fileURL: legacyBackupURL)
 
         XCTAssertEqual(prepared.sourceFormatVersion, 1)
-        XCTAssertEqual(prepared.preparedFormatVersion, 3)
+        XCTAssertEqual(prepared.preparedFormatVersion, PortableBackupFormat.currentVersion)
         XCTAssertEqual(prepared.sourceAppVersion, "0.1.0-test")
         XCTAssertEqual(prepared.exportedAt, fixture.exportedAt)
         XCTAssertEqual(prepared.backup.deckCount, 1)
         XCTAssertEqual(prepared.backup.noteCount, 1)
-        XCTAssertEqual(prepared.backup.cardCount, 1)
+        // v12：恢复时词汇笔记补齐缺失方向——备份 1 张卡，恢复后为 3 张。
+        XCTAssertEqual(prepared.backup.cardCount, 3)
         XCTAssertEqual(prepared.backup.reviewCount, 1)
         XCTAssertEqual(prepared.backup.draftCount, 1)
         XCTAssertEqual(prepared.current.deckCount, 1)
@@ -104,7 +105,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let (current, backupURL) = try await makeValidBackup(in: fixture)
         var futureText = try String(contentsOf: backupURL, encoding: .utf8)
         futureText = futureText.replacingOccurrences(
-            of: #""formatVersion":3"#,
+            of: #""formatVersion":5"#,
             with: #""formatVersion":99"#
         )
         let futureURL = fixture.rootURL.appendingPathComponent("future.oboe-backup")
@@ -121,11 +122,11 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             XCTAssertEqual(error, .futureFormatVersion(99))
         }
 
-        // A genuine v3 export is the current format — fully restorable.
-        let v3Preparation = try await normalPreparer.prepare(fileURL: backupURL)
-        XCTAssertEqual(v3Preparation.sourceFormatVersion, 3)
-        XCTAssertEqual(v3Preparation.preparedFormatVersion, 3)
-        try await normalPreparer.discard(v3Preparation)
+        // A genuine export of the current format is fully restorable.
+        let currentPreparation = try await normalPreparer.prepare(fileURL: backupURL)
+        XCTAssertEqual(currentPreparation.sourceFormatVersion, PortableBackupFormat.currentVersion)
+        XCTAssertEqual(currentPreparation.preparedFormatVersion, PortableBackupFormat.currentVersion)
+        try await normalPreparer.discard(currentPreparation)
 
         // Field/record validation happens after the version gate, so exercise
         // the limits against a restorable v2 file.
@@ -249,7 +250,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
             workingDirectoryURL: fixture.preparationsURL
         )
         let prepared = try await preparer.prepare(fileURL: backupURL)
-        XCTAssertEqual(prepared.sourceFormatVersion, 3)
+        XCTAssertEqual(prepared.sourceFormatVersion, PortableBackupFormat.currentVersion)
         XCTAssertTrue(prepared.restoresInboxData)
         try current.close()
         let lifecycle = OboeDatabaseLifecycle(
@@ -278,7 +279,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         }
         XCTAssertEqual(counts.0, 1)
         XCTAssertEqual(counts.1, 1)
-        XCTAssertEqual(counts.2, 1)
+        XCTAssertEqual(counts.2, 3, "恢复补齐缺失方向卡：词汇笔记三方向齐全")
         XCTAssertEqual(counts.3, 1)
         XCTAssertEqual(counts.4, 1)
         XCTAssertEqual(counts.5, 1)

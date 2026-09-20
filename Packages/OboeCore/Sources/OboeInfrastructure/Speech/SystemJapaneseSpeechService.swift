@@ -4,11 +4,20 @@ import OboeDomain
 
 @MainActor
 public final class SystemJapaneseSpeechService: NSObject, SpeechService {
+    /// A live playback request together with its public ID and event sink.
+    /// Cleared when the request reaches a terminal event so `stop()` never
+    /// reports `.cancelled` for an already-finished playback.
+    private struct ActiveRequest {
+        let request: SpeechPlaybackRequest
+        let requestID: UUID
+        let onEvent: SpeechEventHandler
+    }
+
     private let voiceProvider: () -> AVSpeechSynthesisVoice?
     private let playback: JapaneseSpeechPlaybackQueue
     private var cachedVoice: AVSpeechSynthesisVoice?
     private var hasResolvedVoice = false
-    private var currentRequest: SpeechPlaybackRequest?
+    private var currentRequest: ActiveRequest?
     private var observers: [NSObjectProtocol] = []
 
     public override convenience init() {
@@ -28,7 +37,7 @@ public final class SystemJapaneseSpeechService: NSObject, SpeechService {
     }
 
     deinit {
-        currentRequest?.cancel()
+        currentRequest?.request.cancel()
         playback.stop()
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
@@ -40,35 +49,64 @@ public final class SystemJapaneseSpeechService: NSObject, SpeechService {
         return .available(voiceName: voice.name)
     }
 
-    public func speak(_ texts: [String], onError: @escaping SpeechFailureHandler) {
+    @discardableResult
+    public func speakWithEvents(
+        _ texts: [String],
+        onEvent: @escaping SpeechEventHandler
+    ) -> UUID {
+        let requestID = UUID()
         let speakableTexts = texts
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         guard !speakableTexts.isEmpty else {
-            onError(.noSpeakableText)
-            return
+            onEvent(.failed(requestID: requestID, error: .noSpeakableText))
+            return requestID
         }
         guard let voice = resolvedVoice() else {
-            onError(.voiceUnavailable)
-            return
+            onEvent(.failed(requestID: requestID, error: .voiceUnavailable))
+            return requestID
         }
 
-        currentRequest?.cancel()
+        cancelActiveRequest()
         let request = SpeechPlaybackRequest()
-        currentRequest = request
-        playback.speak(speakableTexts, voiceIdentifier: voice.identifier, request: request) {
-            [weak self] error in
+        currentRequest = ActiveRequest(request: request, requestID: requestID, onEvent: onEvent)
+        playback.speak(
+            speakableTexts,
+            voiceIdentifier: voice.identifier,
+            request: request
+        ) { [weak self] queueEvent in
             Task { @MainActor in
-                guard let self, self.currentRequest === request, !request.isCancelled else { return }
-                onError(error)
+                guard let self, let active = self.currentRequest,
+                      active.request === request, !request.isCancelled else { return }
+                switch queueEvent {
+                case .started:
+                    onEvent(.started(requestID: requestID))
+                case .completed:
+                    self.currentRequest = nil
+                    onEvent(.completed(requestID: requestID))
+                case let .failed(error):
+                    self.currentRequest = nil
+                    onEvent(.failed(requestID: requestID, error: error))
+                }
             }
         }
+        return requestID
     }
 
     public func stop() {
-        currentRequest?.cancel()
-        currentRequest = nil
+        cancelActiveRequest()
         playback.stop()
+    }
+
+    /// Cancels the in-flight request (if any) and reports `.cancelled` on its
+    /// own event sink — superseding requests, interruptions and page exits all
+    /// funnel through here so a cancelled playback is never mistaken for a
+    /// failure or a completion.
+    private func cancelActiveRequest() {
+        guard let active = currentRequest else { return }
+        currentRequest = nil
+        active.request.cancel()
+        active.onEvent(.cancelled(requestID: active.requestID))
     }
 
     private func resolvedVoice() -> AVSpeechSynthesisVoice? {
@@ -174,8 +212,22 @@ final class SpeechUtteranceTracker: @unchecked Sendable {
     }
 }
 
+/// Queue-side playback lifecycle forwarded to the service. `started` means
+/// the backend accepted the utterances (engine began), `completed` means
+/// every utterance of this request finished.
+enum SpeechQueueEvent: Sendable {
+    case started
+    case completed
+    case failed(JapaneseSpeechError)
+}
+
 protocol JapaneseSpeechPlaybackBackend: AnyObject {
-    func speak(_ texts: [String], voiceIdentifier: String, request: SpeechPlaybackRequest) throws
+    func speak(
+        _ texts: [String],
+        voiceIdentifier: String,
+        request: SpeechPlaybackRequest,
+        onFinish: @escaping @Sendable () -> Void
+    ) throws
     func stop()
 }
 
@@ -192,7 +244,7 @@ private final class JapaneseSpeechPlaybackQueue: @unchecked Sendable {
         _ texts: [String],
         voiceIdentifier: String,
         request: SpeechPlaybackRequest,
-        onError: @escaping @Sendable (JapaneseSpeechError) -> Void
+        onEvent: @escaping @Sendable (SpeechQueueEvent) -> Void
     ) {
         queue.async {
             guard !request.isCancelled else { return }
@@ -200,11 +252,25 @@ private final class JapaneseSpeechPlaybackQueue: @unchecked Sendable {
                 if self.backend == nil {
                     self.backend = self.factory(self.queue)
                 }
-                try self.backend?.speak(texts, voiceIdentifier: voiceIdentifier, request: request)
+                try self.backend?.speak(
+                    texts,
+                    voiceIdentifier: voiceIdentifier,
+                    request: request
+                ) {
+                    // Always re-hop so `completed` can never precede
+                    // `started`, even if a backend finishes synchronously.
+                    self.queue.async {
+                        guard !request.isCancelled else { return }
+                        onEvent(.completed)
+                    }
+                }
+                if !request.isCancelled {
+                    onEvent(.started)
+                }
             } catch {
                 self.backend?.stop()
                 if !request.isCancelled {
-                    onError(error as? JapaneseSpeechError ?? .audioSessionUnavailable)
+                    onEvent(.failed(error as? JapaneseSpeechError ?? .audioSessionUnavailable))
                 }
             }
         }
@@ -222,16 +288,26 @@ private final class SystemSpeechPlaybackBackend: NSObject, JapaneseSpeechPlaybac
     private var voice: AVSpeechSynthesisVoice?
     private var isAudioSessionActive = false
     private let activeUtterances = SpeechUtteranceTracker()
+    /// T18: fires once every utterance of the current request finishes.
+    /// Cleared on stop/replacement so a cancelled request never reports
+    /// completion.
+    private var finishHandler: (@Sendable () -> Void)?
 
     init(queue: DispatchQueue) {
         self.queue = queue
         super.init()
     }
 
-    func speak(_ texts: [String], voiceIdentifier: String, request: SpeechPlaybackRequest) throws {
+    func speak(
+        _ texts: [String],
+        voiceIdentifier: String,
+        request: SpeechPlaybackRequest,
+        onFinish: @escaping @Sendable () -> Void
+    ) throws {
         dispatchPrecondition(condition: .onQueue(queue))
         guard !request.isCancelled else { return }
         stopUtterances()
+        finishHandler = nil
         if synthesizer == nil {
             synthesizer = AVSpeechSynthesizer()
             synthesizer?.delegate = self
@@ -250,6 +326,12 @@ private final class SystemSpeechPlaybackBackend: NSObject, JapaneseSpeechPlaybac
             isAudioSessionActive = true
         }
         #endif
+        finishHandler = onFinish
+        guard !texts.isEmpty else {
+            onFinish()
+            finishHandler = nil
+            return
+        }
         for text in texts {
             guard !request.isCancelled else {
                 stop()
@@ -265,6 +347,7 @@ private final class SystemSpeechPlaybackBackend: NSObject, JapaneseSpeechPlaybac
 
     func stop() {
         dispatchPrecondition(condition: .onQueue(queue))
+        finishHandler = nil
         stopUtterances()
         deactivateAudioSession()
     }
@@ -294,6 +377,9 @@ private final class SystemSpeechPlaybackBackend: NSObject, JapaneseSpeechPlaybac
         queue.async { [weak self] in
             guard let self, self.activeUtterances.finish(completion) else { return }
             self.deactivateAudioSession()
+            let onFinish = self.finishHandler
+            self.finishHandler = nil
+            onFinish?()
         }
     }
 

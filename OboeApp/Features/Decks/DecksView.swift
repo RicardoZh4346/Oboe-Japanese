@@ -13,8 +13,13 @@ struct DecksView: View {
     private let contentCardService: ContentCardService
     private let historyService: StudyHistoryService
     private let speechService: any SpeechService
+    private let jlptProgressService: JLPTProgressService
     private let jlptLibraryService: JLPTLibraryService
     private let jlptImporter: any JLPTImporting
+    /// T25: the JLPT weak-vocabulary list drills into the shared adaptive
+    /// card detail — same services as the Today-tab Adaptive center.
+    private let adaptiveCardService: AdaptiveCardService
+    private let aiRepairService: AIRepairService
 
     init(
         service: DeckManagementService,
@@ -26,8 +31,11 @@ struct DecksView: View {
         studyService: StudySessionService,
         historyService: StudyHistoryService,
         speechService: any SpeechService,
+        jlptProgressService: JLPTProgressService,
         jlptLibraryService: JLPTLibraryService,
-        jlptImporter: any JLPTImporting
+        jlptImporter: any JLPTImporting,
+        adaptiveCardService: AdaptiveCardService,
+        aiRepairService: AIRepairService
     ) {
         deckService = service
         self.vocabularyService = vocabularyService
@@ -37,8 +45,11 @@ struct DecksView: View {
         self.contentCardService = contentCardService
         self.historyService = historyService
         self.speechService = speechService
+        self.jlptProgressService = jlptProgressService
         self.jlptLibraryService = jlptLibraryService
         self.jlptImporter = jlptImporter
+        self.adaptiveCardService = adaptiveCardService
+        self.aiRepairService = aiRepairService
         _model = State(
             initialValue: DecksViewModel(
                 service: service,
@@ -54,10 +65,28 @@ struct DecksView: View {
                 Section {
                     NavigationLink {
                         JLPTLibraryView(
+                            progressService: jlptProgressService,
                             libraryService: jlptLibraryService,
                             importer: jlptImporter,
                             deckService: deckService,
-                            speechService: speechService
+                            speechService: speechService,
+                            adaptiveCardService: adaptiveCardService,
+                            contentCardService: contentCardService,
+                            aiRepairService: aiRepairService,
+                            noteEditor: { item, onUpdated in
+                                AnyView(noteEditorDestination(
+                                    noteID: item.noteID,
+                                    kind: item.templateKind.knowledgePointKind,
+                                    onUpdated: onUpdated
+                                ))
+                            },
+                            repairNoteEditor: { noteID, kind, onUpdated in
+                                AnyView(noteEditorDestination(
+                                    noteID: noteID,
+                                    kind: kind,
+                                    onUpdated: onUpdated
+                                ))
+                            }
                         )
                     } label: {
                         Label("JLPT 标准词汇库", systemImage: "books.vertical")
@@ -80,7 +109,11 @@ struct DecksView: View {
                     } else {
                         ForEach(model.decks) { deck in
                             NavigationLink(value: deck.id) {
-                                DeckRow(deck: deck, today: model.todayTasks(for: deck.id))
+                                DeckRow(
+                                    deck: deck,
+                                    today: model.todayTasks(for: deck.id),
+                                    isPrimary: model.primaryDeckID == deck.id
+                                )
                             }
                             .accessibilityIdentifier("deck-row-\(deck.id.uuidString)")
                         }
@@ -173,6 +206,41 @@ struct DecksView: View {
             }
         }
     }
+
+    /// T25: the weak-vocabulary card detail's edit/修卡 fallback reuses the
+    /// existing note detail/editors — same services and validation as the
+    /// Today-tab wiring, keyed by note id + kind.
+    @ViewBuilder
+    private func noteEditorDestination(
+        noteID: UUID,
+        kind: KnowledgePointKind,
+        onUpdated: @escaping () async -> Void
+    ) -> some View {
+        switch kind {
+        case .vocabulary:
+            VocabularyDetailView(
+                noteID: noteID,
+                service: vocabularyService,
+                knowledgeService: knowledgePointService,
+                deckService: deckService,
+                contentCardService: contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
+        case .grammar:
+            GrammarDetailView(
+                noteID: noteID,
+                service: grammarService,
+                knowledgeService: knowledgePointService,
+                deckService: deckService,
+                contentCardService: contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
+        }
+    }
 }
 
 @MainActor
@@ -184,6 +252,7 @@ private final class DecksViewModel {
 
     var decks: [DeckSummary] = []
     var todayStatistics: TodayReviewStatistics?
+    var primaryDeckID: UUID?
     var isLoading = true
     var errorMessage: String?
 
@@ -291,11 +360,29 @@ private final class DecksViewModel {
             ?? DeckTodayTaskCount(deckID: deckID, newCount: 0, reviewCount: 0)
     }
 
+    /// 切换主牌组会立即重算当日新卡分配：额度先满足主牌组，剩余轮转其他牌组。
+    func setPrimaryDeck(_ deckID: UUID?) async {
+        do {
+            _ = try await studyService.setPrimaryDeck(
+                deckID,
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            primaryDeckID = deckID
+            await refreshTodayStatistics()
+        } catch {
+            errorMessage = Self.message(for: error)
+        }
+    }
+
     private func refreshTodayStatistics() async {
         do {
             let plan = try await studyService.buildTodayPlan(
                 defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
             )
+            let settings = try await studyService.loadLearningSettings(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            )
+            primaryDeckID = settings.primaryDeckID
             todayStatistics = try await historyService.fetchTodayStatistics(
                 studyDayID: plan.studyDay.id
             )
@@ -323,18 +410,32 @@ private final class DecksViewModel {
 private struct DeckRow: View {
     let deck: DeckSummary
     let today: DeckTodayTaskCount
+    let isPrimary: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(deck.name)
-                .font(.headline)
+            HStack(spacing: 6) {
+                Text(deck.name)
+                    .font(.headline)
+                if isPrimary {
+                    Text("主牌组")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(OboeTheme.Colors.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            OboeTheme.Colors.accent.opacity(0.12),
+                            in: Capsule()
+                        )
+                }
+            }
             HStack(spacing: 16) {
                 Label("\(deck.noteCount) 个知识点", systemImage: "text.book.closed")
                 Label("\(deck.cardCount) 张卡片", systemImage: "rectangle.on.rectangle")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-            Text("今日新卡 \(today.newCount) · 复习 \(today.reviewCount)")
+            Text("今日新词 \(today.newCount) · 复习 \(today.reviewCount)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("deck-today-counts-\(deck.id.uuidString)")
@@ -410,6 +511,47 @@ private struct DeckDetailView: View {
         Group {
             if let deck {
                 List {
+                    Section {
+                        if model.primaryDeckID == deck.id {
+                            Label("当前主牌组", systemImage: "star.fill")
+                                .foregroundStyle(OboeTheme.Colors.accent)
+                                .accessibilityIdentifier("deck-primary-status")
+                            Button("取消主牌组") {
+                                Task { await model.setPrimaryDeck(nil) }
+                            }
+                            .accessibilityIdentifier("deck-unset-primary")
+                        } else {
+                            Button("设为主牌组") {
+                                Task { await model.setPrimaryDeck(deck.id) }
+                            }
+                            .accessibilityIdentifier("deck-set-primary")
+                        }
+                    } header: {
+                        Text("今日主牌组")
+                    } footer: {
+                        Text("每日新词额度优先分配给主牌组，剩余额度再分配给其他牌组。一个词的全部方向占一个名额。切换后立即重算今日新词。")
+                    }
+
+                    Section {
+                        Button("重命名") {
+                            isPresentingRename = true
+                        }
+                        .accessibilityIdentifier("deck-rename-button")
+
+                        Button("删除牌组", role: .destructive) {
+                            if deck.isEmpty {
+                                isConfirmingDelete = true
+                            } else {
+                                isChoosingNonEmptyDeletion = true
+                            }
+                        }
+                        .accessibilityIdentifier("deck-delete-button")
+                    } footer: {
+                        if !deck.isEmpty {
+                            Text("删除前可把全部知识点和卡片移动到其他牌组，或明确选择连同内容删除。评分历史仍保留原牌组标识。")
+                        }
+                    }
+
                     Section("概览") {
                         LabeledContent("知识点") {
                             Text("\(deck.noteCount)")
@@ -452,31 +594,12 @@ private struct DeckDetailView: View {
 
                     Section("今日") {
                         let counts = model.todayTasks(for: deck.id)
-                        LabeledContent("分配新卡", value: "\(counts.newCount)")
+                        LabeledContent("分配新词", value: "\(counts.newCount)")
                             .accessibilityIdentifier("deck-detail-today-new-count")
                         LabeledContent("复习任务", value: "\(counts.reviewCount)")
                             .accessibilityIdentifier("deck-detail-today-review-count")
                     }
 
-                    Section {
-                        Button("重命名") {
-                            isPresentingRename = true
-                        }
-                        .accessibilityIdentifier("deck-rename-button")
-
-                        Button("删除牌组", role: .destructive) {
-                            if deck.isEmpty {
-                                isConfirmingDelete = true
-                            } else {
-                                isChoosingNonEmptyDeletion = true
-                            }
-                        }
-                        .accessibilityIdentifier("deck-delete-button")
-                    } footer: {
-                        if !deck.isEmpty {
-                            Text("删除前可把全部知识点和卡片移动到其他牌组，或明确选择连同内容删除。评分历史仍保留原牌组标识。")
-                        }
-                    }
                 }
                 .navigationTitle(deck.name)
                 .navigationBarTitleDisplayMode(.inline)

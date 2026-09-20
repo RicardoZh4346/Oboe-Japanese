@@ -230,25 +230,21 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             }
 
             let noteID = DatabaseValueCodec.encode(replacement.noteID)
-            switch replacement.kind {
-            case .vocabulary:
-                try db.execute(
-                    sql: """
-                        UPDATE cards SET is_enabled = 0
-                        WHERE note_id = ?
-                          AND template_kind IN ('vocabulary_ja_zh', 'vocabulary_zh_ja')
-                        """,
-                    arguments: [noteID]
-                )
-            case .grammar:
-                try db.execute(
-                    sql: """
-                        UPDATE cards SET is_enabled = 0
-                        WHERE note_id = ? AND template_kind = 'grammar_form_explanation'
-                        """,
-                    arguments: [noteID]
-                )
-            }
+            // Disable every direction card of this note kind. The template
+            // list derives from the kind↔template mapping so a template the
+            // current whitelist doesn't offer (or a future one) can never
+            // linger enabled after a direction-set replacement.
+            let kindTemplateValues = CardTemplateKind.allCases
+                .filter { $0.knowledgePointKind == replacement.kind }
+                .map(\.rawValue)
+            let placeholders = kindTemplateValues.map { _ in "?" }.joined(separator: ",")
+            try db.execute(
+                sql: """
+                    UPDATE cards SET is_enabled = 0
+                    WHERE note_id = ? AND template_kind IN (\(placeholders))
+                    """,
+                arguments: StatementArguments([noteID] + kindTemplateValues)
+            )
 
             if !replacement.enabledCards.isEmpty {
                 let profileID = try GRDBSchedulerProfileStore.ensureConfiguredProfile(
@@ -267,18 +263,105 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                 }
             }
 
+            try Self.cancelPendingTasksForDisabledCards(noteID: replacement.noteID, at: timestamp, in: db)
+            return try Self.fetchCardDirections(noteID: replacement.noteID, in: db)
+        }
+    }
+
+    public func setCardEnabled(
+        cardID: UUID,
+        isEnabled: Bool,
+        at updatedAt: Date
+    ) async throws -> CardDirectionState {
+        try await pool.write { db in
+            try Self.setCardEnabled(
+                cardID: cardID,
+                isEnabled: isEnabled,
+                timestampMilliseconds: DatabaseValueCodec.encode(updatedAt),
+                in: db
+            )
+        }
+    }
+
+    public func deleteCard(cardID: UUID) async throws {
+        try await pool.write { db in
+            try Self.deleteCard(cardID: cardID, in: db)
+        }
+    }
+
+    /// Single-card suspend/resume (design §5.2). Callable inside a larger
+    /// transaction — the repair commit uses it for the "suspend original"
+    /// disposition so the choice shares the operation's atomicity (§6.5).
+    /// Only `is_enabled` changes: due/stability/difficulty/reps/lapses/
+    /// stateVersion, the note and every review log survive untouched.
+    static func setCardEnabled(
+        cardID: UUID,
+        isEnabled: Bool,
+        timestampMilliseconds: Int64,
+        in db: Database
+    ) throws -> CardDirectionState {
+        guard let row = try Row.fetchOne(
+            db,
+            sql: "SELECT template_kind FROM cards WHERE id = ?",
+            arguments: [DatabaseValueCodec.encode(cardID)]
+        ) else {
+            throw ContentCardError.cardNotFound
+        }
+        let templateValue: String = row["template_kind"]
+        guard let template = CardTemplateKind(rawValue: templateValue) else {
+            throw DatabaseValueCodecError.invalidCardTemplate(templateValue)
+        }
+        try db.execute(
+            sql: "UPDATE cards SET is_enabled = ? WHERE id = ?",
+            arguments: [isEnabled, DatabaseValueCodec.encode(cardID)]
+        )
+        if !isEnabled {
+            // Same rule replaceEnabledCardDirections applies: pending tasks
+            // for the suspended card are cancelled once (COALESCE keeps the
+            // first timestamp). Re-enabling never un-cancels — the next
+            // study-day preparation decides re-admission (§5.2).
             try db.execute(
                 sql: """
                     UPDATE daily_tasks
                     SET cancelled_at_ms = COALESCE(cancelled_at_ms, ?)
-                    WHERE card_id IN (
-                        SELECT id FROM cards WHERE note_id = ? AND is_enabled = 0
-                    )
+                    WHERE card_id = ? AND cancelled_at_ms IS NULL
                     """,
-                arguments: [timestamp, noteID]
+                arguments: [timestampMilliseconds, DatabaseValueCodec.encode(cardID)]
             )
-            return try Self.fetchCardDirections(noteID: replacement.noteID, in: db)
         }
+        return CardDirectionState(cardID: cardID, templateKind: template, isEnabled: isEnabled)
+    }
+
+    /// Single-card delete (design §5.3): only the target Card row goes —
+    /// never the note-level `deleteKnowledgePoint`. `review_logs.card_id`
+    /// SET NULLs so `card_key` history stays orphaned (a rebuilt direction
+    /// gets a fresh Card.id and must not reattach it), `daily_tasks` rows
+    /// cascade, and the Note survives even with zero cards left.
+    static func deleteCard(cardID: UUID, in db: Database) throws {
+        try db.execute(
+            sql: "DELETE FROM cards WHERE id = ?",
+            arguments: [DatabaseValueCodec.encode(cardID)]
+        )
+        guard db.changesCount == 1 else {
+            throw ContentCardError.cardNotFound
+        }
+    }
+
+    private static func cancelPendingTasksForDisabledCards(
+        noteID: UUID,
+        at timestamp: Int64,
+        in db: Database
+    ) throws {
+        try db.execute(
+            sql: """
+                UPDATE daily_tasks
+                SET cancelled_at_ms = COALESCE(cancelled_at_ms, ?)
+                WHERE card_id IN (
+                    SELECT id FROM cards WHERE note_id = ? AND is_enabled = 0
+                )
+                """,
+            arguments: [timestamp, noteID]
+        )
     }
 
     /// Receipt replay: identical operationID + identical content digest returns
@@ -461,7 +544,10 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         )
     }
 
-    private static func fetchCardDirections(
+    /// In-transaction direction read — the split commit (设计 §6.5) uses it
+    /// to verify the preview's direction snapshot inside the same
+    /// transaction that writes the new cards.
+    static func fetchCardDirections(
         noteID: UUID,
         in db: Database
     ) throws -> [CardDirectionState] {

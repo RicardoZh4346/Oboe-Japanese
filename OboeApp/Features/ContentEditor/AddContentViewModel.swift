@@ -78,8 +78,8 @@ final class AddContentViewModel {
     var grammarStatusMessage: String?
     var vocabularyTagsText = ""
     var grammarTagsText = ""
-    var vocabularyJapaneseToChinese = true
-    var vocabularyChineseToJapanese = false
+    /// 建卡不再有方向选择（v0.4 按词计额度）：词汇固定三方向、语法固定单
+    /// 方向，全部默认开启；既有单词的方向管理仍在笔记详情页。
     var grammarFormToExplanation = true
     var vocabularyAIInput = ""
     var vocabularyAIContext = ""
@@ -226,11 +226,16 @@ final class AddContentViewModel {
         }
     }
 
+    /// 词汇固定创建全部三个方向。UI 测试可用
+    /// `OBOE_UI_TEST_VOCABULARY_DIRECTIONS`（逗号分隔的 rawValue）收窄方向集，
+    /// 以便只需少量卡片的复习机制测试保持确定性。
     var vocabularyDirections: Set<VocabularyCardDirection> {
-        var directions = Set<VocabularyCardDirection>()
-        if vocabularyJapaneseToChinese { directions.insert(.japaneseToChinese) }
-        if vocabularyChineseToJapanese { directions.insert(.chineseToJapanese) }
-        return directions
+        if let raw = ProcessInfo.processInfo.environment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] {
+            let parsed = raw.split(separator: ",")
+                .compactMap { VocabularyCardDirection(rawValue: String($0)) }
+            if !parsed.isEmpty { return Set(parsed) }
+        }
+        return Set(VocabularyCardDirection.allCases)
     }
 
     var canCommit: Bool {
@@ -238,12 +243,10 @@ final class AddContentViewModel {
         switch kind {
         case .vocabulary:
             return vocabularyDeckID != nil
-                && !vocabularyDirections.isEmpty
                 && (try? vocabularyForm.validatedContent()) != nil
                 && tagsAreValid(vocabularyTagsText)
         case .grammar:
             return grammarDeckID != nil
-                && grammarFormToExplanation
                 && (try? grammarForm.validatedContent()) != nil
                 && tagsAreValid(grammarTagsText)
         case .sentenceAnalysis:
@@ -458,28 +461,6 @@ final class AddContentViewModel {
                 sentenceCardDrafts[index] = updated
             }
         )
-    }
-
-    func sentenceCardDirectionEnabled(
-        itemID: UUID,
-        direction: VocabularyCardDirection
-    ) -> Bool {
-        sentenceCardDrafts.first(where: { $0.id == itemID })?
-            .vocabularyDirections.contains(direction) ?? false
-    }
-
-    func setSentenceCardDirection(
-        itemID: UUID,
-        direction: VocabularyCardDirection,
-        enabled: Bool
-    ) {
-        guard let index = sentenceCardDrafts.firstIndex(where: { $0.id == itemID }) else { return }
-        if enabled {
-            sentenceCardDrafts[index].vocabularyDirections.insert(direction)
-        } else {
-            sentenceCardDrafts[index].vocabularyDirections.remove(direction)
-        }
-        persistCaptureResume()
     }
 
     func setSentenceCardSelection(itemID: UUID, selected: Bool) {
@@ -789,13 +770,7 @@ final class AddContentViewModel {
 
     var commitAvailabilityMessage: String {
         if decks.isEmpty { return "请先在牌组页创建目标牌组。" }
-        if kind == .vocabulary, vocabularyDirections.isEmpty {
-            return "至少选择一个单词卡片方向。"
-        }
-        if kind == .grammar, !grammarFormToExplanation {
-            return "至少选择语法形式 → 解释方向。"
-        }
-        return "确认后会原子保存正文、例句、标签和卡片；卡片暂不提供评分或下次复习时间。"
+        return "确认后会原子保存正文、例句、标签和卡片（词汇固定生成全部三个方向）；卡片暂不提供评分或下次复习时间。"
     }
 
     func load() async {
@@ -840,9 +815,8 @@ final class AddContentViewModel {
     private func restoreCaptureSession(_ session: CaptureEditorSession) async throws {
         let context = session.context
         if let payload = session.payload {
-            vocabularyJapaneseToChinese = payload.vocabularyDirections.contains(.japaneseToChinese)
-            vocabularyChineseToJapanese = payload.vocabularyDirections.contains(.chineseToJapanese)
-            grammarFormToExplanation = payload.grammarFormToExplanation
+            // 方向不再可选：忽略旧草稿载荷中的方向子集，固定全部方向。
+            grammarFormToExplanation = true
             if let deckID = payload.targetDeckID,
                decks.contains(where: { $0.id == deckID }) {
                 applyCaptureDeckSelection(deckID)
@@ -1102,8 +1076,6 @@ final class AddContentViewModel {
                 vocabularyDraftID = nil
                 vocabularyForm = VocabularyFormData()
                 vocabularyTagsText = ""
-                vocabularyJapaneseToChinese = true
-                vocabularyChineseToJapanese = false
                 vocabularyStatusMessage = "已正式保存，生成 \(result.cardCount) 张卡片"
             case .grammar:
                 result = try await contentCardService.commitGrammar(

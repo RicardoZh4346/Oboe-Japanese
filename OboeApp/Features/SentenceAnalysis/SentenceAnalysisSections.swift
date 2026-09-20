@@ -259,42 +259,9 @@ struct SentenceAnalysisSections: View {
                                     model.sentenceCardDraftDidChange(itemID: draft.id)
                                 }
                             TextField("词性（可选）", text: draftBinding.partOfSpeech)
-                            Toggle(
-                                "日语 → 中文",
-                                isOn: Binding(
-                                    get: {
-                                        model.sentenceCardDirectionEnabled(
-                                            itemID: draft.id,
-                                            direction: .japaneseToChinese
-                                        )
-                                    },
-                                    set: { enabled in
-                                        model.setSentenceCardDirection(
-                                            itemID: draft.id,
-                                            direction: .japaneseToChinese,
-                                            enabled: enabled
-                                        )
-                                    }
-                                )
-                            )
-                            Toggle(
-                                "中文 → 日语",
-                                isOn: Binding(
-                                    get: {
-                                        model.sentenceCardDirectionEnabled(
-                                            itemID: draft.id,
-                                            direction: .chineseToJapanese
-                                        )
-                                    },
-                                    set: { enabled in
-                                        model.setSentenceCardDirection(
-                                            itemID: draft.id,
-                                            direction: .chineseToJapanese,
-                                            enabled: enabled
-                                        )
-                                    }
-                                )
-                            )
+                            Text("将创建全部三个方向的卡片")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         } else {
                             TextField("用法（可选）", text: draftBinding.usage, axis: .vertical)
                                 .lineLimit(2...4)

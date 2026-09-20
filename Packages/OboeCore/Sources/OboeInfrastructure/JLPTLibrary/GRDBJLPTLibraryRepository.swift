@@ -34,6 +34,29 @@ public final class GRDBJLPTLibraryRepository: JLPTLibraryRepository, @unchecked 
         }
     }
 
+    public func vocabularyRefs(levels: [JLPTLevel]) async throws -> [JLPTVocabularyRef] {
+        guard !levels.isEmpty else { return [] }
+        let placeholders = levels.map { _ in "?" }.joined(separator: ",")
+        return try await database.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, level FROM vocab
+                    WHERE level IN (\(placeholders))
+                    ORDER BY level DESC, sort_order, id
+                    """,
+                arguments: StatementArguments(levels.map(\.rawValue))
+            )
+            return try rows.map { row in
+                let rawLevel: String = row["level"]
+                guard let level = JLPTLevel(rawValue: rawLevel) else {
+                    throw JLPTLibraryDatabaseError.invalidLevel(rawLevel)
+                }
+                return JLPTVocabularyRef(id: row["id"], level: level)
+            }
+        }
+    }
+
     public func vocabulary(
         level: JLPTLevel,
         query: String,

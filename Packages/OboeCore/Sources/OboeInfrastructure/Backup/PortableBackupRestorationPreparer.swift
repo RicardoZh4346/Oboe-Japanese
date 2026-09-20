@@ -226,6 +226,10 @@ public actor PortableBackupRestorationPreparer {
                     in: db,
                     resourceExists: inboxImageResourceExists
                 )
+                try Self.finalizeImportedDraftData(in: db)
+                // v12：旧备份可能只含部分方向卡——恢复的库已越过迁移点，
+                // 这里重跑同一补齐逻辑，保证词汇词条三方向齐全。
+                try OboeDatabaseSchema.fillVocabularyDirections(db)
                 return manifest
             }
             try Task.checkCancellation()
@@ -423,6 +427,8 @@ private extension PortableBackupRestorationPreparer {
         case 1: sourceSpecifications = PortableBackupFormatV1.tableSpecifications
         case 2: sourceSpecifications = PortableBackupFormatV2.tableSpecifications
         case 3: sourceSpecifications = PortableBackupFormatV3.tableSpecifications
+        case 4: sourceSpecifications = PortableBackupFormatV4.tableSpecifications
+        case 5: sourceSpecifications = PortableBackupFormatV5.tableSpecifications
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(
                 manifest.sourceFormatVersion
@@ -474,7 +480,7 @@ private extension PortableBackupRestorationPreparer {
             }
 
             guard let sourceSpecification = sourceSpecificationByType[recordType],
-                  let currentSpecification = PortableBackupFormatV3.specificationByRecordType[recordType],
+                  let currentSpecification = PortableBackupFormatV5.specificationByRecordType[recordType],
                   let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
                 throw PortableBackupPreparationError.unexpectedRecordType(
                     line: lineNumber,
@@ -535,12 +541,12 @@ private extension PortableBackupRestorationPreparer {
     ) throws -> ParsedManifest {
         // A higher-than-current format is rejected on version alone — its field
         // contract is unknown by definition. At or below currentVersion the key
-        // set must match the declared version exactly (v3 adds excludedScopes).
+        // set must match the declared version exactly (v3+ adds excludedScopes).
         if let peeked = object["formatVersion"] as? Int,
            peeked > PortableBackupFormat.currentVersion {
             throw PortableBackupPreparationError.futureFormatVersion(peeked)
         }
-        let expectedKeys = object["formatVersion"] as? Int == 3
+        let expectedKeys = (object["formatVersion"] as? Int ?? 0) >= 3
             ? manifestKeysV3
             : manifestKeys
         guard Set(object.keys) == expectedKeys else {
@@ -588,6 +594,8 @@ private extension PortableBackupRestorationPreparer {
         case 1: expectedRecordTypes = PortableBackupFormatV1.recordTypes
         case 2: expectedRecordTypes = PortableBackupFormatV2.recordTypes
         case 3: expectedRecordTypes = PortableBackupFormatV3.recordTypes
+        case 4: expectedRecordTypes = PortableBackupFormatV4.recordTypes
+        case 5: expectedRecordTypes = PortableBackupFormatV5.recordTypes
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(version)
         }
@@ -652,11 +660,23 @@ private extension PortableBackupRestorationPreparer {
         sourceVersion: Int
     ) throws -> [String: Any] {
         try validateMigrationPath(from: sourceVersion)
-        guard sourceVersion == 1, object["recordType"] as? String == "note" else {
-            return object
-        }
         var migrated = object
-        migrated["source_ref"] = NSNull()
+        if sourceVersion == 1, migrated["recordType"] as? String == "note" {
+            migrated["source_ref"] = NSNull()
+        }
+        if sourceVersion < 5, migrated["recordType"] as? String == "settings" {
+            migrated["primary_deck_id"] = NSNull()
+        }
+        if sourceVersion < 4, migrated["recordType"] as? String == "settings" {
+            // v1–v3 backups predate the Adaptive toggles: fill the v0.4
+            // defaults (OFF/ON/OFF/ON) so the row satisfies the current
+            // settings contract.
+            let defaults = AdaptivePreferences.defaults
+            migrated["typed_answer_zh_ja"] = defaults.typedAnswerChineseToJapanese ? 1 : 0
+            migrated["auto_play_listening_audio"] = defaults.autoPlayListeningAudio ? 1 : 0
+            migrated["typed_answer_listening"] = defaults.typedAnswerListening ? 1 : 0
+            migrated["leech_reminders_enabled"] = defaults.leechRemindersEnabled ? 1 : 0
+        }
         return migrated
     }
 
@@ -706,7 +726,7 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        for specification in PortableBackupFormatV3.tableSpecifications {
+        for specification in PortableBackupFormatV5.tableSpecifications {
             let rows = try Row.fetchAll(
                 db,
                 sql: "PRAGMA table_info(\(specification.tableName))"
@@ -846,6 +866,8 @@ private extension PortableBackupRestorationPreparer {
         try validateTimeZones(in: db)
         try validateScheduling(in: db)
         try validateInboxData(in: db)
+        try validateDraftData(in: db)
+        try validateCardTemplates(in: db)
         return try summarizeDatabase(db)
     }
 
@@ -888,6 +910,120 @@ private extension PortableBackupRestorationPreparer {
                 let operationID: String = row["operation_id"]
                 throw PortableBackupPreparationError.databaseValidation(
                     "提交回执 \(operationID) 的摘要格式无效。"
+                )
+            }
+        }
+    }
+
+    /// ai_repair drafts carry a strict v1 envelope (设计 §10.2): every
+    /// envelope must decode and satisfy phase/receipt consistency or the whole
+    /// backup is rejected. Then, for uncommitted drafts only, the target
+    /// Note/Card pair must still resolve — a committed receipt is allowed to
+    /// reference objects the user deleted afterwards, so those are skipped.
+    /// An unresolvable target degrades the draft to `adoptionBlocked` inside
+    /// the import transaction rather than failing the restore.
+    static func finalizeImportedDraftData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, payload_version, payload_json
+                FROM drafts WHERE draft_kind = ?
+                """,
+            arguments: [AIRepairDraftFormat.draftKind]
+        )
+        for row in rows {
+            let draftID: String = row["id"]
+            let payloadVersion: Int = row["payload_version"]
+            guard payloadVersion == AIRepairDraftFormat.currentPayloadVersion else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "修卡草稿 \(draftID) 的 payload 版本 \(payloadVersion) 未知。"
+                )
+            }
+            let payloadJSON: String = row["payload_json"]
+            let envelope: AIRepairDraftEnvelope
+            do {
+                envelope = try AIRepairDraftCodec.decode(payloadJSON)
+            } catch {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "修卡草稿 \(draftID) 的封套无法解码或语义无效。"
+                )
+            }
+            guard envelope.phase != .committed, !envelope.adoptionBlocked else {
+                continue
+            }
+            let targetExists = try Bool.fetchOne(
+                db,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1 FROM cards
+                        JOIN notes ON notes.id = cards.note_id
+                        WHERE cards.id = ? AND notes.id = ?
+                    )
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(envelope.targetCardID),
+                    DatabaseValueCodec.encode(envelope.targetNoteID)
+                ]
+            ) ?? false
+            guard !targetExists else { continue }
+            var blocked = envelope
+            blocked.adoptionBlocked = true
+            try db.execute(
+                sql: "UPDATE drafts SET payload_json = ? WHERE id = ?",
+                arguments: [try AIRepairDraftCodec.encode(blocked), draftID]
+            )
+        }
+    }
+
+    /// The template↔kind invariant (设计 §10.2): grammar cards only exist on
+    /// grammar notes and every vocabulary template — including
+    /// `vocabulary_listening` — only on vocabulary notes. Raw enum values are
+    /// already fenced by the table CHECKs at insert; this catches pairs the
+    /// CHECKs cannot see.
+    static func validateCardTemplates(in db: Database) throws {
+        let mismatched = try Row.fetchOne(
+            db,
+            sql: """
+                SELECT cards.id AS card_id
+                FROM cards
+                JOIN notes ON notes.id = cards.note_id
+                WHERE (cards.template_kind = 'grammar_form_explanation')
+                      != (notes.kind = 'grammar')
+                LIMIT 1
+                """
+        )
+        if let mismatched {
+            let cardID: String = mismatched["card_id"]
+            throw PortableBackupPreparationError.databaseValidation(
+                "卡片 \(cardID) 的模板与 Note 类型不一致。"
+            )
+        }
+    }
+
+    /// Post-import semantic check re-run on the prepared copy: every ai_repair
+    /// draft must still decode against the v1 contract (finalizeImportedDraftData
+    /// already rewrote unresolvable targets inside the transaction).
+    static func validateDraftData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, payload_version, payload_json
+                FROM drafts WHERE draft_kind = ?
+                """,
+            arguments: [AIRepairDraftFormat.draftKind]
+        )
+        for row in rows {
+            let draftID: String = row["id"]
+            let payloadVersion: Int = row["payload_version"]
+            guard payloadVersion == AIRepairDraftFormat.currentPayloadVersion else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "修卡草稿 \(draftID) 的 payload 版本 \(payloadVersion) 未知。"
+                )
+            }
+            let payloadJSON: String = row["payload_json"]
+            guard (try? AIRepairDraftCodec.decode(payloadJSON)) != nil else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "修卡草稿 \(draftID) 的封套无法解码或语义无效。"
                 )
             }
         }
@@ -1068,7 +1204,7 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        for specification in PortableBackupFormatV3.tableSpecifications {
+        for specification in PortableBackupFormatV5.tableSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(specification.tableName)"

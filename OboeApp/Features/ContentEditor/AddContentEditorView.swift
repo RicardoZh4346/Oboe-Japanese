@@ -142,22 +142,6 @@ struct AddContentEditorView: View {
                 targetDeckSection
                 duplicateWarningSection
 
-                Section {
-                    if model.kind == .vocabulary {
-                        Toggle("日语 → 中文", isOn: $model.vocabularyJapaneseToChinese)
-                            .accessibilityIdentifier("vocabulary-direction-ja-zh")
-                        Toggle("中文 → 日语", isOn: $model.vocabularyChineseToJapanese)
-                            .accessibilityIdentifier("vocabulary-direction-zh-ja")
-                    } else {
-                        Toggle("语法形式 → 解释", isOn: $model.grammarFormToExplanation)
-                            .accessibilityIdentifier("grammar-direction-form-explanation")
-                    }
-                } header: {
-                    Text("卡片方向")
-                } footer: {
-                    Text("正式保存至少选择一个方向；每个方向拥有独立的复习进度。")
-                }
-
                 if model.kind == .vocabulary {
                     VocabularyRequiredSection(form: $model.vocabularyForm)
                     VocabularyAdditionalFieldsSection(
@@ -184,16 +168,9 @@ struct AddContentEditorView: View {
 
                 Section("卡片预览") {
                     if model.kind == .vocabulary {
-                        VocabularyCardPreviews(
-                            form: model.vocabularyForm,
-                            japaneseToChinese: model.vocabularyJapaneseToChinese,
-                            chineseToJapanese: model.vocabularyChineseToJapanese
-                        )
+                        VocabularyCardPreviews(form: model.vocabularyForm)
                     } else {
-                        GrammarCardPreviews(
-                            form: model.grammarForm,
-                            isEnabled: model.grammarFormToExplanation
-                        )
+                        GrammarCardPreviews(form: model.grammarForm)
                     }
                 }
 
@@ -298,13 +275,6 @@ struct AddContentEditorView: View {
                 }
                 .disabled(model.isLoading || model.isSaving)
                 .accessibilityIdentifier(model.kind.saveDraftIdentifier)
-            }
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("完成") {
-                    dismissKeyboard()
-                }
-                .accessibilityIdentifier("add-keyboard-done-button")
             }
         }
         .overlay {
@@ -446,34 +416,36 @@ struct AddContentEditorView: View {
         }
     }
 
-    private func dismissKeyboard() {
-        isSentenceAnalysisInputFocused = false
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-    }
-
     @ViewBuilder
     private var aiGenerationSection: some View {
         @Bindable var model = model
         Section {
             if model.kind == .vocabulary {
-                TextField("要生成的日语单词或短语", text: $model.vocabularyAIInput)
-                    .textInputAutocapitalization(.never)
-                    .accessibilityIdentifier("ai-card-vocabulary-input")
-                TextField("补充语境（可选）", text: $model.vocabularyAIContext, axis: .vertical)
-                    .lineLimit(2...4)
-                    .accessibilityIdentifier("ai-card-vocabulary-context")
+                LanguageHintTextField(
+                    placeholder: "要生成的日语单词或短语",
+                    text: $model.vocabularyAIInput,
+                    hint: .japanese,
+                    identifier: "ai-card-vocabulary-input"
+                )
+                LanguageHintEditor(
+                    placeholder: "补充语境（可选）",
+                    text: $model.vocabularyAIContext,
+                    hint: .chinesePinyin,
+                    identifier: "ai-card-vocabulary-context"
+                )
             } else {
-                TextField("要生成的日语语法形式", text: $model.grammarAIInput)
-                    .textInputAutocapitalization(.never)
-                    .accessibilityIdentifier("ai-card-grammar-input")
-                TextField("补充语境（可选）", text: $model.grammarAIContext, axis: .vertical)
-                    .lineLimit(2...4)
-                    .accessibilityIdentifier("ai-card-grammar-context")
+                LanguageHintTextField(
+                    placeholder: "要生成的日语语法形式",
+                    text: $model.grammarAIInput,
+                    hint: .japanese,
+                    identifier: "ai-card-grammar-input"
+                )
+                LanguageHintEditor(
+                    placeholder: "补充语境（可选）",
+                    text: $model.grammarAIContext,
+                    hint: .chinesePinyin,
+                    identifier: "ai-card-grammar-context"
+                )
             }
 
             if model.isGenerating {

@@ -4,15 +4,19 @@ public struct StudyPlanningSettings: Codable, Equatable, Sendable {
     public let learningTimeZoneID: String
     public let dailyNewCardLimit: Int
     public let retentionPreset: RetentionPreset
+    /// 主牌组：每日新卡额度先分配给该牌组，剩余额度再分配给其他牌组。
+    public let primaryDeckID: UUID?
 
     public init(
         learningTimeZoneID: String,
         dailyNewCardLimit: Int,
-        retentionPreset: RetentionPreset = .standard
+        retentionPreset: RetentionPreset = .standard,
+        primaryDeckID: UUID? = nil
     ) {
         self.learningTimeZoneID = learningTimeZoneID
         self.dailyNewCardLimit = dailyNewCardLimit
         self.retentionPreset = retentionPreset
+        self.primaryDeckID = primaryDeckID
     }
 }
 
@@ -68,23 +72,29 @@ public struct NewCardReservation: Codable, Equatable, Sendable {
 
 public struct DailyNewCardPlan: Codable, Equatable, Sendable {
     public let studyDay: StudyDay
+    /// 今日已首学的“词”数（按 note 去重）——一个词的任意方向首学即占一个名额。
     public let usedCount: Int
+    /// 占用名额的预约词数（不含已开始词的免费续学方向）。
+    public let reservedNoteCount: Int
+    /// 逐卡的预约队列项——一个词的全部未学方向一起收录，故数量可能超过名额。
     public let reservations: [NewCardReservation]
 
     public init(
         studyDay: StudyDay,
         usedCount: Int,
+        reservedNoteCount: Int,
         reservations: [NewCardReservation]
     ) {
         self.studyDay = studyDay
         self.usedCount = usedCount
+        self.reservedNoteCount = reservedNoteCount
         self.reservations = reservations
     }
 
     public var reservedCount: Int { reservations.count }
 
     public var availableCount: Int {
-        max(0, studyDay.newCardLimit - usedCount - reservedCount)
+        max(0, studyDay.newCardLimit - usedCount - reservedNoteCount)
     }
 }
 
@@ -175,6 +185,7 @@ public protocol StudyDayPlanningRepository: Sendable {
     func updateDailyNewCardLimit(_ limit: Int) async throws -> StudyPlanningSettings
     func updateLearningTimeZoneID(_ timeZoneID: String) async throws -> StudyPlanningSettings
     func updateRetentionPreset(_ preset: RetentionPreset) async throws -> StudyPlanningSettings
+    func updatePrimaryDeck(_ deckID: UUID?) async throws -> StudyPlanningSettings
     func fetchStudyDay(containing instant: Date) async throws -> StudyDay?
     func fetchLatestStudyDay(endingAtOrBefore instant: Date) async throws -> StudyDay?
     func persistAndReconcileNewCards(_ studyDay: StudyDay, at instant: Date) async throws -> DailyNewCardPlan
@@ -266,6 +277,19 @@ public struct PrepareStudyDay: Sendable {
     ) async throws -> StudyPlanningSettings {
         _ = try await repository.loadOrCreateSettings(defaultTimeZoneID: defaultTimeZoneID)
         return try await repository.updateRetentionPreset(preset)
+    }
+
+    /// 切换主牌组后立即重算当日计划：额度先满足新主牌组，剩余再轮转其他
+    /// 牌组；既有未学预约按新份额让位/保留，已学额度不回退。
+    @discardableResult
+    public func setPrimaryDeck(
+        _ deckID: UUID?,
+        at instant: Date,
+        defaultTimeZoneID: String
+    ) async throws -> DailyNewCardPlan {
+        _ = try await repository.loadOrCreateSettings(defaultTimeZoneID: defaultTimeZoneID)
+        _ = try await repository.updatePrimaryDeck(deckID)
+        return try await self(at: instant, defaultTimeZoneID: defaultTimeZoneID)
     }
 }
 
