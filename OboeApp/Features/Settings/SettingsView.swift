@@ -578,10 +578,16 @@ struct SettingsView: View {
                 .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
                 .accessibilityIdentifier("ai-base-url-field")
         } else {
-            LabeledContent("服务地址", value: AIConfigurationDraft.deepSeekDefault.baseURL)
+            LabeledContent("服务地址", value: aiDraft.baseURL)
         }
 
-        TextField("模型 ID", text: $aiDraft.modelID)
+        TextField(
+            "模型 ID",
+            text: Binding(
+                get: { aiDraft.modelID ?? "" },
+                set: { aiDraft.modelID = $0.isEmpty ? nil : $0 }
+            )
+        )
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled()
             .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
@@ -804,18 +810,16 @@ struct SettingsView: View {
 
     private func updateAIPreset(from previous: AIServiceKind, to current: AIServiceKind) {
         guard previous != current else { return }
-        switch current {
-        case .deepSeek:
-            aiDraft.serviceName = AIConfigurationDraft.deepSeekDefault.serviceName
-            aiDraft.baseURL = AIConfigurationDraft.deepSeekDefault.baseURL
-            aiDraft.modelID = AIConfigurationDraft.deepSeekDefault.modelID
-            aiDraft.responseFormatMode = .jsonObject
-        case .custom:
+        if let preset = AIProviderPresetRegistry.preset(for: current) {
+            aiDraft.serviceName = preset.displayName
+            aiDraft.baseURL = preset.baseURL
+            aiDraft.responseFormatMode = preset.responseFormatMode
+        } else {
             aiDraft.serviceName = ""
             aiDraft.baseURL = "https://"
-            aiDraft.modelID = ""
             aiDraft.responseFormatMode = .jsonObject
         }
+        aiDraft.modelID = nil
         apiKeyInput = ""
     }
 

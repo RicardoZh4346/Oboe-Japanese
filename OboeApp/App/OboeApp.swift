@@ -203,6 +203,7 @@ final class AppDependencies {
                let aiConfigurationService {
                 var draft = AIConfigurationDraft.deepSeekDefault
                 draft.isEnabled = true
+                draft.modelID = "ui-test-model"
                 _ = try? await aiConfigurationService.save(
                     draft,
                     apiKey: "ui-test-key",
@@ -773,7 +774,7 @@ private actor UITestAICredentialStore: AICredentialStore {
 
 private struct UITestAIConnectionClient: AIConnectionClient {
     func testConnection(
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> AIConnectionTestResult {
         AIConnectionTestResult(
@@ -787,7 +788,7 @@ private struct UITestAIConnectionClient: AIConnectionClient {
 private struct UITestAICardGenerationClient: AICardGenerationClient {
     func generate(
         input: AICardGenerationInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         try await Task.sleep(for: .seconds(5))
@@ -806,7 +807,7 @@ private struct UITestAICardGenerationClient: AICardGenerationClient {
 private struct UITestAIRepairClient: AIRepairClient {
     func analyze(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AI_REPAIR_FAIL"] != nil {
@@ -820,7 +821,7 @@ private struct UITestAIRepairClient: AIRepairClient {
 private struct UITestSentenceAnalysisClient: SentenceAnalysisClient {
     func analyze(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         try await Task.sleep(for: .seconds(1))
