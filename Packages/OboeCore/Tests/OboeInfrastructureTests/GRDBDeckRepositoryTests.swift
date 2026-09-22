@@ -135,6 +135,7 @@ private func insertNote(id: UUID, deckID: UUID, in db: Database) throws {
             """,
         arguments: [DatabaseValueCodec.encode(id), DatabaseValueCodec.encode(deckID)]
     )
+    try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
 }
 
 private func insertProfile(id: UUID, in db: Database) throws {

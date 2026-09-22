@@ -140,7 +140,8 @@ struct RootTabView: View {
                     sentenceAnalysisService: sentenceAnalysisService,
                     sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                     historyService: studyHistoryService,
-                    speechService: speechService
+                    speechService: speechService,
+                    studyService: studySessionService
                 ),
                 inboxImageStore: dependencies.inboxImageStore,
                 drainSharedCaptures: { await dependencies.drainSharedCaptures() },
@@ -166,10 +167,14 @@ struct RootTabView: View {
                 contentCardService: contentCardService,
                 studyService: studySessionService,
                 historyService: studyHistoryService,
+                speechPreferencesService: speechPreferencesService,
+                adaptivePreferencesService: adaptivePreferencesService,
                 speechService: speechService,
                 jlptProgressService: jlptProgressService,
                 jlptLibraryService: jlptLibraryService,
                 jlptImporter: jlptImporter,
+                jlptEnrichmentStatus: dependencies.jlptEnrichmentStatus,
+                scheduleJLPTEnrichment: { dependencies.scheduleJLPTEnrichment() },
                 adaptiveCardService: adaptiveCardService,
                 aiRepairService: aiRepairService
             )
@@ -189,6 +194,7 @@ struct RootTabView: View {
                 sentenceAnalysisService: sentenceAnalysisService,
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                 historyService: studyHistoryService,
+                studyService: studySessionService,
                 speechService: speechService,
                 inboxService: inboxService,
                 inboxImageStore: dependencies.inboxImageStore,

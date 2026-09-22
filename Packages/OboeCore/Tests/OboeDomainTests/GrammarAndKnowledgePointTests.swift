@@ -150,6 +150,15 @@ private actor KnowledgePointRepositorySpy: KnowledgePointRepository {
     private var tags: Tags?
 
     func fetchKnowledgePointSummaries(deckID: UUID) async throws -> [KnowledgePointSummary] { [] }
+    func fetchDeckMembership(noteID: UUID) async throws -> NoteDeckMembership? { nil }
+    func replaceDeckMembership(
+        noteID: UUID,
+        deckIDs: Set<UUID>,
+        homeDeckID: UUID,
+        at date: Date
+    ) async throws -> NoteDeckMembership {
+        try NoteDeckMembership(homeDeckID: homeDeckID, deckIDs: deckIDs)
+    }
     func fetchFavoriteSummaries() async throws -> [KnowledgePointSummary] { [] }
     func fetchDuplicateSummaries(
         kind: KnowledgePointKind,

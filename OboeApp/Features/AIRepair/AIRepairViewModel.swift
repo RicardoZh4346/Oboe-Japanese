@@ -272,6 +272,7 @@ final class AIRepairViewModel {
         at index: Int,
         edited: Bool,
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         directions: [[CardTemplateKind]],
         disposition: AIRepairOriginalCardDisposition
     ) async -> Bool {
@@ -285,6 +286,7 @@ final class AIRepairViewModel {
                 suggestionIndex: index,
                 adoptingEditedCandidate: edited,
                 deckID: deckID,
+                deckIDs: deckIDs,
                 directions: directions,
                 originalCardDisposition: disposition
             )

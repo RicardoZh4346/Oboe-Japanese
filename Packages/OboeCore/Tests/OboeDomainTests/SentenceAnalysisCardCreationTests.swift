@@ -61,6 +61,56 @@ final class SentenceAnalysisCardCreationTests: XCTestCase {
         XCTAssertEqual(itemKinds, [.vocabulary, .grammar])
     }
 
+    /// T07: 批量建卡的成员集合透传——batch 与每个 commit 携带同一
+    /// deckIDs（home ∈ members），仓库据此写全部 `note_decks` 行。
+    func testCommitPropagatesMembershipDeckIDsToEveryItem() async throws {
+        let repository = RecordingSentenceAnalysisCardRepository()
+        let service = SentenceAnalysisCardCreationService(repository: repository)
+        let result = makeSentenceAnalysisResult()
+        let drafts = try service.makeDrafts(
+            from: result,
+            selectedItemIDs: Set(result.items[1...2].map(\.id))
+        )
+        let home = UUID()
+        let member = UUID()
+
+        _ = try await service.commit(
+            deckID: home,
+            deckIDs: [home, member],
+            drafts: drafts
+        )
+
+        let batch = await repository.lastBatch()
+        XCTAssertEqual(batch?.deckIDs, [home, member])
+        for item in batch?.items ?? [] {
+            switch item {
+            case let .vocabulary(commit):
+                XCTAssertEqual(commit.deckID, home)
+                XCTAssertEqual(commit.deckIDs, [home, member])
+            case let .grammar(commit):
+                XCTAssertEqual(commit.deckID, home)
+                XCTAssertEqual(commit.deckIDs, [home, member])
+            }
+        }
+    }
+
+    /// deckIDs 缺省时保持单牌组语义：成员集合恰为 {home}。
+    func testCommitWithoutDeckIDsKeepsSingleMembership() async throws {
+        let repository = RecordingSentenceAnalysisCardRepository()
+        let service = SentenceAnalysisCardCreationService(repository: repository)
+        let result = makeSentenceAnalysisResult()
+        let drafts = try service.makeDrafts(
+            from: result,
+            selectedItemIDs: [result.items[1].id]
+        )
+        let home = UUID()
+
+        _ = try await service.commit(deckID: home, drafts: drafts)
+
+        let batch = await repository.lastBatch()
+        XCTAssertEqual(batch?.deckIDs, [home])
+    }
+
     func testSelectionAndDirectionGuardsAreEnforcedBeforePersistence() async throws {
         let repository = RecordingSentenceAnalysisCardRepository()
         let service = SentenceAnalysisCardCreationService(repository: repository)
@@ -105,6 +155,10 @@ private actor RecordingSentenceAnalysisCardRepository: SentenceAnalysisCardRepos
         commits.count
     }
 
+    func lastBatch() -> SentenceAnalysisCardBatchCommit? {
+        commits.last
+    }
+
     func lastItemKinds() -> [KnowledgePointKind] {
         (commits.last?.items ?? []).map { item in
             switch item {
@@ -118,8 +172,8 @@ private actor RecordingSentenceAnalysisCardRepository: SentenceAnalysisCardRepos
 private func makeSentenceAnalysisResult() -> SentenceAnalysisResult {
     let sentence = "日本に行ったことがありますか。"
     return SentenceAnalysisResult(
-        promptVersion: SentenceAnalysisPromptV1.promptVersion,
-        schemaVersion: SentenceAnalysisPromptV1.schemaVersion,
+        promptVersion: SentenceAnalysisPromptV2.promptVersion,
+        schemaVersion: SentenceAnalysisPromptV2.schemaVersion,
         sentence: sentence,
         translationZH: "你去过日本吗？",
         explanationZH: "询问是否有去日本的经历。",

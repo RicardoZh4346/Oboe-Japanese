@@ -428,6 +428,7 @@ private extension OboeInboxSchemaTests {
                 """,
             arguments: [DatabaseValueCodec.encode(id), DatabaseValueCodec.encode(deckID)]
         )
+        try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
     }
 
     func insertDraft(in db: Database, id: String) throws {

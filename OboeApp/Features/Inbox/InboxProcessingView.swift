@@ -14,6 +14,8 @@ struct InboxProcessingServices {
     let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     let historyService: StudyHistoryService
     let speechService: any SpeechService
+    /// 读取主牌组设置，用于多牌组选择的默认归属。可选：缺省时回退首个牌组。
+    let studyService: StudySessionService?
 }
 
 /// Pushed from the inbox detail view. Ensures a processing context exists,
@@ -55,6 +57,7 @@ struct InboxProcessingView: View {
                     sentenceAnalysisCardCreationService: services.sentenceAnalysisCardCreationService,
                     historyService: services.historyService,
                     speechService: services.speechService,
+                    studyService: services.studyService,
                     captureSession: session,
                     title: "处理收集"
                 )

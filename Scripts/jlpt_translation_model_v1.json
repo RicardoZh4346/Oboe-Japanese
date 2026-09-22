@@ -1,0 +1,73 @@
+{
+  "formatVersion": 1,
+  "model": {
+    "repository": "Helsinki-NLP/opus-mt-en-zh",
+    "revision": "408d9bc410a388e1d9aef112a2daba955b945255",
+    "license": "Apache-2.0",
+    "sourceURL": "https://huggingface.co/Helsinki-NLP/opus-mt-en-zh/tree/408d9bc410a388e1d9aef112a2daba955b945255",
+    "targetToken": ">>cmn_Hans<<",
+    "files": {
+      "pytorch_model.bin": {
+        "bytes": 312087009,
+        "sha256": "69a1d6ec829cee349360b3b677ac0aa99a7d88822d1a6578370029efffdca3f5"
+      },
+      "config.json": {
+        "bytes": 1403,
+        "sha256": "bcae8ed74fed77fb51c58462b62397fee6b1a1a34aece79183a0dd02ad329e71"
+      },
+      "source.spm": {
+        "bytes": 806435,
+        "sha256": "5775ddc9e3ff2fae91554da56468ad35ff56edaba870fea74447bc7234bfdaa8"
+      },
+      "target.spm": {
+        "bytes": 804600,
+        "sha256": "81dc94efa84e4025ef38d25d5d07429fe41e3eb29d44003f1db6fe98487b0052"
+      },
+      "vocab.json": {
+        "bytes": 1617791,
+        "sha256": "f1832ca38f7aa158b9a944ff583e4901e6b37d9d4ad9241f03838e636e9cfb03"
+      },
+      "tokenizer_config.json": {
+        "bytes": 44,
+        "sha256": "5df181fba586b7cb37d429c13c4f96cb43fb11de7bb6489733d9eded32418179"
+      },
+      "generation_config.json": {
+        "bytes": 293,
+        "sha256": "837839ed0534a27084f9b980fc33f47729052dd89cb26cca7ac830765ed30e49"
+      }
+    }
+  },
+  "runtime": {
+    "python": "3.9",
+    "torch": "2.2.2",
+    "transformers": "4.41.2",
+    "sentencepiece": "0.2.0",
+    "opencc-python-reimplemented": "0.1.7"
+  },
+  "tatoebaSupplement": {
+    "snapshot": "2026-09-19",
+    "license": "CC-BY-2.0-FR",
+    "attribution": "Tatoeba contributors; English sentences and direct English-to-Mandarin translation links",
+    "files": {
+      "eng_sentences.tsv.bz2": {
+        "bytes": 24878903,
+        "sha256": "69a8ff3de808313a75c5305f4f7b3f4c9d3460c1bd9fdf0f375da247c2d02489",
+        "downloadURL": "https://downloads.tatoeba.org/exports/per_language/eng/eng_sentences.tsv.bz2"
+      },
+      "eng-cmn_links.tsv.bz2": {
+        "bytes": 481603,
+        "sha256": "0db7cc93b3af2644de9b06283a637b8e666b583028177e2ac9ef3ca067fa46c5",
+        "downloadURL": "https://downloads.tatoeba.org/exports/per_language/eng/eng-cmn_links.tsv.bz2"
+      }
+    }
+  },
+  "generation": {
+    "device": "cpu",
+    "doSample": false,
+    "numBeams": 4,
+    "maxInputTokens": 256,
+    "maxNewTokens": 128,
+    "openCCConfig": "t2s",
+    "stripTrailingEnglishClause": true
+  }
+}

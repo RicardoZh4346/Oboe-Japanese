@@ -23,7 +23,11 @@ public enum TodayQueueAvailability: String, Codable, Equatable, Sendable {
 public struct TodayQueueItem: Codable, Equatable, Sendable {
     public let cardID: UUID
     public let noteID: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；始终包含 `deckID`。牌组 scope 用
+    /// `deckIDs.contains(scopeID)` 判断（设计 §4.6）。
+    public let deckIDs: Set<UUID>
     public let templateKind: CardTemplateKind
     public let category: TodayQueueCategory
     public let availability: TodayQueueAvailability
@@ -38,11 +42,13 @@ public struct TodayQueueItem: Codable, Equatable, Sendable {
         category: TodayQueueCategory,
         availability: TodayQueueAvailability,
         dueAt: Date,
-        admittedAt: Date
+        admittedAt: Date,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.cardID = cardID
         self.noteID = noteID
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.templateKind = templateKind
         self.category = category
         self.availability = availability

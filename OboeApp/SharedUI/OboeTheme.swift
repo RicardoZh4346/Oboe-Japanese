@@ -5,6 +5,9 @@ enum OboeTheme {
         static let accent = Color("OboeBlue")
         static let cardBackground = Color("OboeCardBackground")
         static let pageBackground = Color(.systemGroupedBackground)
+        /// 卡片上的次级说明文本：比 `.secondary` 略深，白卡上稳定
+        /// 满足对比度审计（系统 secondary 在小字号抗锯齿下处于临界值）。
+        static let secondaryOnCard = Color(.label).opacity(0.68)
     }
 
     enum Radius {

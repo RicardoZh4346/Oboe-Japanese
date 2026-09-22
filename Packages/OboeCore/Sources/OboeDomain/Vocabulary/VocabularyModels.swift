@@ -17,6 +17,8 @@ public struct VocabularyFormData: Codable, Equatable, Sendable {
     public var exampleJapanese: String
     public var exampleTranslationZH: String
     public var notes: String
+    /// 东京式音调核位置；nil 表示未设置。UI 展示为“音调”。
+    public var pitchAccent: PitchAccent?
 
     public init(
         headword: String = "",
@@ -26,7 +28,8 @@ public struct VocabularyFormData: Codable, Equatable, Sendable {
         jlpt: JLPTLevel? = nil,
         exampleJapanese: String = "",
         exampleTranslationZH: String = "",
-        notes: String = ""
+        notes: String = "",
+        pitchAccent: PitchAccent? = nil
     ) {
         self.headword = headword
         self.reading = reading
@@ -36,6 +39,7 @@ public struct VocabularyFormData: Codable, Equatable, Sendable {
         self.exampleJapanese = exampleJapanese
         self.exampleTranslationZH = exampleTranslationZH
         self.notes = notes
+        self.pitchAccent = pitchAccent
     }
 
     public func validatedContent() throws -> ValidatedVocabularyContent {
@@ -55,6 +59,16 @@ public struct VocabularyFormData: Codable, Equatable, Sendable {
             throw VocabularyValidationError.exampleJapaneseRequired
         }
 
+        let readingValue = reading.trimmed.nilIfEmpty
+        if let pitchAccent {
+            guard readingValue != nil else {
+                throw VocabularyValidationError.pitchAccentRequiresReading
+            }
+            guard pitchAccent.isConsistent(withReading: readingValue) else {
+                throw VocabularyValidationError.pitchAccentExceedsMora
+            }
+        }
+
         let example: VocabularyExampleContent?
         if exampleJapanese.isEmpty {
             example = nil
@@ -67,12 +81,13 @@ public struct VocabularyFormData: Codable, Equatable, Sendable {
 
         return ValidatedVocabularyContent(
             headword: headword,
-            reading: reading.trimmed.nilIfEmpty,
+            reading: readingValue,
             meaningZH: meaningZH,
             partOfSpeech: partOfSpeech.trimmed.nilIfEmpty,
             jlpt: jlpt,
             example: example,
-            notes: notes.trimmed.nilIfEmpty
+            notes: notes.trimmed.nilIfEmpty,
+            pitchAccent: pitchAccent
         )
     }
 }
@@ -82,6 +97,8 @@ public enum VocabularyValidationError: Error, Equatable, Sendable {
     case meaningRequired
     case exampleJapaneseRequired
     case cardDirectionRequired
+    case pitchAccentRequiresReading
+    case pitchAccentExceedsMora
 }
 
 public struct VocabularyExampleContent: Codable, Equatable, Sendable {
@@ -102,6 +119,7 @@ public struct ValidatedVocabularyContent: Codable, Equatable, Sendable {
     public let jlpt: JLPTLevel?
     public let example: VocabularyExampleContent?
     public let notes: String?
+    public let pitchAccent: PitchAccent?
 
     public init(
         headword: String,
@@ -110,7 +128,8 @@ public struct ValidatedVocabularyContent: Codable, Equatable, Sendable {
         partOfSpeech: String?,
         jlpt: JLPTLevel?,
         example: VocabularyExampleContent?,
-        notes: String?
+        notes: String?,
+        pitchAccent: PitchAccent? = nil
     ) {
         self.headword = headword
         self.reading = reading
@@ -119,6 +138,7 @@ public struct ValidatedVocabularyContent: Codable, Equatable, Sendable {
         self.jlpt = jlpt
         self.example = example
         self.notes = notes
+        self.pitchAccent = pitchAccent
     }
 }
 
@@ -138,13 +158,17 @@ public struct VocabularyExample: Codable, Equatable, Identifiable, Sendable {
 
 public struct VocabularyNote: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let headword: String
     public let reading: String?
     public let meaningZH: String
     public let partOfSpeech: String?
     public let jlpt: JLPTLevel?
     public let notes: String?
+    public let pitchAccent: PitchAccent?
     public let contentVersion: Int
     public let createdAt: Date
     public let updatedAt: Date
@@ -162,20 +186,44 @@ public struct VocabularyNote: Codable, Equatable, Identifiable, Sendable {
         contentVersion: Int,
         createdAt: Date,
         updatedAt: Date,
-        examples: [VocabularyExample]
+        examples: [VocabularyExample],
+        pitchAccent: PitchAccent? = nil,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.headword = headword
         self.reading = reading
         self.meaningZH = meaningZH
         self.partOfSpeech = partOfSpeech
         self.jlpt = jlpt
         self.notes = notes
+        self.pitchAccent = pitchAccent
         self.contentVersion = contentVersion
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.examples = examples
+    }
+
+    /// 兼容旧 JSON：缺失 `deckIDs` 键时以 home deck 为唯一成员。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        deckID = try container.decode(UUID.self, forKey: .deckID)
+        deckIDs = (try container.decodeIfPresent(Set<UUID>.self, forKey: .deckIDs) ?? [deckID])
+            .union([deckID])
+        headword = try container.decode(String.self, forKey: .headword)
+        reading = try container.decodeIfPresent(String.self, forKey: .reading)
+        meaningZH = try container.decode(String.self, forKey: .meaningZH)
+        partOfSpeech = try container.decodeIfPresent(String.self, forKey: .partOfSpeech)
+        jlpt = try container.decodeIfPresent(JLPTLevel.self, forKey: .jlpt)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        pitchAccent = try container.decodeIfPresent(PitchAccent.self, forKey: .pitchAccent)
+        contentVersion = try container.decode(Int.self, forKey: .contentVersion)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        examples = try container.decode([VocabularyExample].self, forKey: .examples)
     }
 
     public var formData: VocabularyFormData {
@@ -188,21 +236,32 @@ public struct VocabularyNote: Codable, Equatable, Identifiable, Sendable {
             jlpt: jlpt,
             exampleJapanese: firstExample?.japanese ?? "",
             exampleTranslationZH: firstExample?.translationZH ?? "",
-            notes: notes ?? ""
+            notes: notes ?? "",
+            pitchAccent: pitchAccent
         )
     }
 }
 
 public struct VocabularyNoteSummary: Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    public let deckIDs: Set<UUID>
     public let headword: String
     public let reading: String?
     public let meaningZH: String
 
-    public init(id: UUID, deckID: UUID, headword: String, reading: String?, meaningZH: String) {
+    public init(
+        id: UUID,
+        deckID: UUID,
+        headword: String,
+        reading: String?,
+        meaningZH: String,
+        deckIDs: Set<UUID>? = nil
+    ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.headword = headword
         self.reading = reading
         self.meaningZH = meaningZH
@@ -211,13 +270,24 @@ public struct VocabularyNoteSummary: Equatable, Identifiable, Sendable {
 
 public struct VocabularyDraft: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；v0.5 起对应 payload 的 `homeDeckID`，旧 payload 的
+    /// `deckID` 解码时自动迁移到这里并同时成为唯一 `deckIDs` 元素。
     public let deckID: UUID?
+    /// 草稿提交后 Note 应归属的全部牌组；始终包含 `deckID`（若非空）。
+    public let deckIDs: Set<UUID>
     public let formData: VocabularyFormData
     public let updatedAt: Date
 
-    public init(id: UUID, deckID: UUID?, formData: VocabularyFormData, updatedAt: Date) {
+    public init(
+        id: UUID,
+        deckID: UUID?,
+        deckIDs: Set<UUID>? = nil,
+        formData: VocabularyFormData,
+        updatedAt: Date
+    ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? []).union(deckID.map { [$0] } ?? [])
         self.formData = formData
         self.updatedAt = updatedAt
     }
@@ -299,11 +369,13 @@ public struct VocabularyService: Sendable {
     public func saveDraft(
         id: UUID?,
         deckID: UUID?,
+        deckIDs: Set<UUID>? = nil,
         formData: VocabularyFormData
     ) async throws -> VocabularyDraft {
         let draft = VocabularyDraft(
             id: id ?? makeID(),
             deckID: deckID,
+            deckIDs: deckIDs,
             formData: formData,
             updatedAt: now()
         )

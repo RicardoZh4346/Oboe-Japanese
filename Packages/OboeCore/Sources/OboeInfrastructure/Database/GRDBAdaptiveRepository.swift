@@ -130,7 +130,14 @@ public struct GRDBAdaptiveRepository: AdaptiveRepository, Sendable {
             """
         var arguments: [any DatabaseValueConvertible] = []
         if let deckID = scope.deckID {
-            sql += "\nWHERE notes.deck_id = ?"
+            // 牌组过滤走 `note_decks` 成员关系（设计 §4.4）。
+            sql += """
+
+                WHERE EXISTS (
+                    SELECT 1 FROM note_decks nd
+                    WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                )
+                """
             arguments.append(DatabaseValueCodec.encode(deckID))
         }
         sql += "\nORDER BY cards.id"

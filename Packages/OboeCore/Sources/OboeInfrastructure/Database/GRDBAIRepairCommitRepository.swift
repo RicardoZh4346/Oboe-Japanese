@@ -32,7 +32,7 @@ public struct GRDBAIRepairCommitRepository: AIRepairCommitStore, Sendable {
                     expectedContentVersion: envelope.expectedContentVersion,
                     assignments: """
                         headword = ?, reading = ?, meaning_zh = ?,
-                        part_of_speech = ?, jlpt = ?, notes = ?
+                        part_of_speech = ?, jlpt = ?, notes = ?, pitch_accent = ?
                         """,
                     values: [
                         content.headword,
@@ -40,7 +40,8 @@ public struct GRDBAIRepairCommitRepository: AIRepairCommitStore, Sendable {
                         content.meaningZH,
                         content.partOfSpeech,
                         content.jlpt?.rawValue,
-                        content.notes
+                        content.notes,
+                        content.pitchAccent?.rawValue
                     ],
                     kind: "vocabulary",
                     updatedAtMilliseconds: updatedAtMilliseconds,
@@ -157,10 +158,12 @@ public struct GRDBAIRepairCommitRepository: AIRepairCommitStore, Sendable {
                 guard !commit.cards.isEmpty else {
                     throw AIRepairCommitError.invalidSplitPlan("新笔记至少需要一个学习方向。")
                 }
-                try GRDBSentenceAnalysisCardRepository.requireDeck(
-                    commit.deckID,
-                    in: db
-                )
+                for memberDeckID in commit.deckIDs.union([commit.deckID]) {
+                    try GRDBSentenceAnalysisCardRepository.requireDeck(
+                        memberDeckID,
+                        in: db
+                    )
+                }
                 switch commit.content {
                 case let .vocabulary(content):
                     try GRDBSentenceAnalysisCardRepository.insertVocabulary(
@@ -176,7 +179,8 @@ public struct GRDBAIRepairCommitRepository: AIRepairCommitStore, Sendable {
                             createdAt: commit.createdAt,
                             origin: .ai,
                             sourceRef: nil,
-                            sourceText: nil
+                            sourceText: nil,
+                            deckIDs: commit.deckIDs
                         ),
                         in: db
                     )
@@ -198,7 +202,8 @@ public struct GRDBAIRepairCommitRepository: AIRepairCommitStore, Sendable {
                             schedulerProfileID: commit.schedulerProfileID,
                             createdAt: commit.createdAt,
                             origin: .ai,
-                            sourceText: nil
+                            sourceText: nil,
+                            deckIDs: commit.deckIDs
                         ),
                         in: db
                     )

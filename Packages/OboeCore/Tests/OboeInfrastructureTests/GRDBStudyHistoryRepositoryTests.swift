@@ -251,6 +251,7 @@ private final class StudyHistoryFixture: @unchecked Sendable {
                     """,
                 arguments: [DatabaseValueCodec.encode(noteID), DatabaseValueCodec.encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO scheduler_profiles(
@@ -377,6 +378,7 @@ private final class StudyHistoryFixture: @unchecked Sendable {
                     """,
                 arguments: [DatabaseValueCodec.encode(noteID), DatabaseValueCodec.encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO cards(

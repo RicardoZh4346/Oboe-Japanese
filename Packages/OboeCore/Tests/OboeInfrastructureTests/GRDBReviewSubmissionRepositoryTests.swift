@@ -583,6 +583,7 @@ private final class ReviewSubmissionFixture: @unchecked Sendable {
                     reviewedAtMilliseconds
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO scheduler_profiles(

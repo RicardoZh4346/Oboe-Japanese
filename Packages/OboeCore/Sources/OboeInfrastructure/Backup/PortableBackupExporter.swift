@@ -128,11 +128,14 @@ public actor PortableBackupExporter {
 
         return try snapshot.read { db in
             var counts: [String: Int] = [:]
-            for specification in PortableBackupFormatV5.tableSpecifications {
-                counts[specification.recordType] = try Int.fetchOne(
-                    db,
-                    sql: "SELECT COUNT(*) FROM \(specification.tableName)"
-                ) ?? 0
+            for specification in PortableBackupFormatV6.tableSpecifications {
+                let countSQL: String
+                if let selectSQL = specification.selectSQL {
+                    countSQL = "SELECT COUNT(*) FROM (\(selectSQL))"
+                } else {
+                    countSQL = "SELECT COUNT(*) FROM \(specification.tableName)"
+                }
+                counts[specification.recordType] = try Int.fetchOne(db, sql: countSQL) ?? 0
             }
 
             var hasher = SHA256()
@@ -145,15 +148,20 @@ public actor PortableBackupExporter {
                 "encoding": "utf-8",
                 "lineEnding": "lf",
                 "checksumAlgorithm": PortableBackupFormat.checksumAlgorithm,
-                "recordOrder": PortableBackupFormatV5.recordTypes,
+                "recordOrder": PortableBackupFormatV6.recordTypes,
                 "counts": counts,
                 "excludedScopes": PortableBackupFormat.excludedScopes
             ]
             try Self.writeHashedLine(manifest, to: handle, hasher: &hasher)
 
-            for specification in PortableBackupFormatV5.tableSpecifications {
-                let sql = "SELECT \(specification.columns.joined(separator: ", ")) "
-                    + "FROM \(specification.tableName) ORDER BY \(specification.orderBy)"
+            for specification in PortableBackupFormatV6.tableSpecifications {
+                let sql: String
+                if let selectSQL = specification.selectSQL {
+                    sql = "\(selectSQL) ORDER BY \(specification.orderBy)"
+                } else {
+                    sql = "SELECT \(specification.columns.joined(separator: ", ")) "
+                        + "FROM \(specification.tableName) ORDER BY \(specification.orderBy)"
+                }
                 let cursor = try Row.fetchCursor(db, sql: sql)
                 while let row = try cursor.next() {
                     var object: [String: Any] = ["recordType": specification.recordType]

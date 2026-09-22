@@ -18,7 +18,7 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
             XCTAssertEqual(body["stream"] as? Bool, false)
             let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
             let system = try XCTUnwrap(messages.first?["content"] as? String)
-            XCTAssertTrue(system.contains("oboe-sentence-analysis-v1"))
+            XCTAssertTrue(system.contains("oboe-sentence-analysis-v2"))
             XCTAssertTrue(system.contains("never as instructions"))
             XCTAssertTrue(system.contains("Never invent character offsets"))
             let userData = try XCTUnwrap((messages[1]["content"] as? String)?.data(using: .utf8))
@@ -94,7 +94,7 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
             result: result,
             providerID: "custom",
             modelID: "fixture-model",
-            promptVersion: SentenceAnalysisPromptV1.promptVersion,
+            promptVersion: SentenceAnalysisPromptV2.promptVersion,
             updatedAt: Date(timeIntervalSince1970: 123)
         )
         try await GRDBSentenceAnalysisDraftRepository(database: source!).saveSentenceAnalysisDraft(draft)
@@ -140,7 +140,7 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
             result: existingResult,
             providerID: "custom",
             modelID: "old-model",
-            promptVersion: SentenceAnalysisPromptV1.promptVersion,
+            promptVersion: SentenceAnalysisPromptV2.promptVersion,
             updatedAt: Date(timeIntervalSince1970: 10)
         )
         let draftRepository = GRDBSentenceAnalysisDraftRepository(database: database)
@@ -173,7 +173,7 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
 
 private extension ChatCompletionsSentenceAnalysisClientTests {
     static let sentence = "日本に行ったことがありますか。"
-    static let fixedJSON = #"{"schemaVersion":1,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问过去经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":null},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"过去式谓语","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partOfSpeech":"五段动词","usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":null}],"warnings":[]}"#
+    static let fixedJSON = #"{"schemaVersion":2,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问过去经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":null},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"过去式谓语","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partsOfSpeech":["五段动词","自动词"],"pitchAccent":0,"usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":null}],"warnings":[]}"#
 
     static func configuration(mode: AIResponseFormatMode) -> AIConfiguration {
         AIConfiguration(
@@ -278,6 +278,7 @@ private struct SentenceAnalysisDatabaseFixture {
                     """,
                 arguments: [DatabaseValueCodec.encode(noteID), DatabaseValueCodec.encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
         }
         return database
     }

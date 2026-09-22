@@ -665,11 +665,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
         app.launch()
 
-        let deckRow = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS %@", "错开牌组"))
-            .firstMatch
-        XCTAssertTrue(deckRow.waitForExistence(timeout: 8))
-        deckRow.tap()
+        enterScopedReview(deckNamed: "错开牌组", in: app)
 
         // A-ja2zh first (queue order), then the sibling A-zh2ja yields to B.
         XCTAssertTrue(app.staticTexts["読む"].waitForExistence(timeout: 8))
@@ -704,11 +700,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
         app.launch()
 
-        let deckRow = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS %@", "错开牌组"))
-            .firstMatch
-        XCTAssertTrue(deckRow.waitForExistence(timeout: 8))
-        deckRow.tap()
+        enterScopedReview(deckNamed: "错开牌组", in: app)
 
         XCTAssertTrue(app.staticTexts["読む"].waitForExistence(timeout: 8))
         showReviewAnswer(in: app)
@@ -739,11 +731,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "fail"
         app.launch()
 
-        let deckRow = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS %@", "错开牌组"))
-            .firstMatch
-        XCTAssertTrue(deckRow.waitForExistence(timeout: 8))
-        deckRow.tap()
+        enterScopedReview(deckNamed: "错开牌组", in: app)
         // The listening face is transient — it presents, the stub fails
         // playback asynchronously, and the card is session-skipped within
         // a beat, faster than XCUI's polling catches the play button.
@@ -1447,15 +1435,22 @@ final class OboeAdaptiveUITests: XCTestCase {
         // 方向默认沿用原笔记快照（受影响的两个方向全开）。
         XCTAssertEqual(firstJaZh.value as? String, "1", "方向必须默认沿用原笔记快照")
 
-        // 牌组选择：种子数据只有一个牌组，默认指向原笔记牌组。
-        let deckRow = app.staticTexts["新卡所属牌组"].firstMatch
+        // 牌组选择：T09 起为多成员选择行（ai-repair-split-deck），
+        // 种子只有一个牌组，摘要直接显示归属牌组名。iOS 26 中 Section 级
+        // 标识符会传播覆盖行内元素自身标识符，按 label 查询该按钮。
+        let deckRow = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH '牌组、'")
+        ).firstMatch
         reveal(deckRow, in: app)
         XCTAssertTrue(deckRow.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["自适应测试"].exists)
+        XCTAssertTrue(deckRow.label.contains("自适应测试"))
 
         // 原卡处置必选：三个选项都在、推荐只是标签、未选前采用禁用。
+        // 同理 disposition-* 行标识符被所属 Section 覆盖，按 label 查询。
         XCTAssertTrue(app.staticTexts["原卡处置（必选）"].exists)
-        let pauseOption = app.buttons["ai-repair-disposition-pause"].firstMatch
+        let pauseOption = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH '暂停原卡'")
+        ).firstMatch
         let pauseLabel = app.staticTexts["暂停原卡（推荐）"].firstMatch
         reveal(pauseLabel, in: app)
         XCTAssertTrue(pauseLabel.waitForExistence(timeout: 3))
@@ -1730,6 +1725,25 @@ final class OboeAdaptiveUITests: XCTestCase {
         }
         XCTAssertTrue(button.isHittable, "显示答案按钮不可达")
         button.tap()
+    }
+
+    /// T15：首页逐牌组入口移除后，scoped 会话经 牌组 tab → 牌组详情 →
+    /// 「学习此牌组」进入（设计 §4.7 预留的恢复位置）。
+    @MainActor
+    private func enterScopedReview(deckNamed name: String, in app: XCUIApplication) {
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+
+        let deckRow = app.buttons
+            .matching(NSPredicate(format: "label CONTAINS %@", name))
+            .firstMatch
+        XCTAssertTrue(deckRow.waitForExistence(timeout: 8))
+        deckRow.tap()
+
+        let studyButton = app.buttons["deck-study-button"]
+        XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
+        studyButton.tap()
     }
 
     @MainActor

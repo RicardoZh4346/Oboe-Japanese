@@ -5,12 +5,21 @@ public struct BuiltinJLPTExample: Equatable, Identifiable, Sendable {
     public let japanese: String
     public let english: String?
     public let sortOrder: Int
+    /// 词库 schema v2 的中文翻译；v1 库读出 nil。
+    public let translationZH: String?
 
-    public init(id: String, japanese: String, english: String?, sortOrder: Int) {
+    public init(
+        id: String,
+        japanese: String,
+        english: String?,
+        sortOrder: Int,
+        translationZH: String? = nil
+    ) {
         self.id = id
         self.japanese = japanese
         self.english = english
         self.sortOrder = sortOrder
+        self.translationZH = translationZH
     }
 }
 
@@ -24,6 +33,10 @@ public struct BuiltinJLPTVocabulary: Equatable, Identifiable, Sendable {
     public let partOfSpeech: String?
     public let frequencyRank: Int?
     public let dataFlags: Int
+    /// 词库 schema v2 的音调与来源溯源；v1 库读出 nil。
+    public let pitchAccent: PitchAccent?
+    public let pitchSource: String?
+    public let pitchSourceRef: String?
     public let examples: [BuiltinJLPTExample]
 
     public init(
@@ -36,7 +49,10 @@ public struct BuiltinJLPTVocabulary: Equatable, Identifiable, Sendable {
         partOfSpeech: String?,
         frequencyRank: Int?,
         dataFlags: Int,
-        examples: [BuiltinJLPTExample] = []
+        examples: [BuiltinJLPTExample] = [],
+        pitchAccent: PitchAccent? = nil,
+        pitchSource: String? = nil,
+        pitchSourceRef: String? = nil
     ) {
         self.id = id
         self.level = level
@@ -47,6 +63,9 @@ public struct BuiltinJLPTVocabulary: Equatable, Identifiable, Sendable {
         self.partOfSpeech = partOfSpeech
         self.frequencyRank = frequencyRank
         self.dataFlags = dataFlags
+        self.pitchAccent = pitchAccent
+        self.pitchSource = pitchSource
+        self.pitchSourceRef = pitchSourceRef
         self.examples = examples
     }
 }
@@ -184,9 +203,12 @@ extension JLPTImportError: LocalizedError {
 public protocol JLPTImporting: Sendable {
     func importedCounts() async throws -> [JLPTLevel: Int]
     func importedSourceRefs(_ sourceRefs: [String]) async throws -> Set<String>
+    /// `deckID` 为归属（home）牌组；`deckIDs` 为全部成员牌组（缺省仅 home）。
+    /// 任一成员牌组不存在时整体失败，不产生部分写入。
     func importVocabulary(
         _ vocabulary: BuiltinJLPTVocabulary,
         deckID: UUID,
+        deckIDs: Set<UUID>?,
         meaningZH: String,
         directions: Set<VocabularyCardDirection>
     ) async throws -> JLPTImportResult

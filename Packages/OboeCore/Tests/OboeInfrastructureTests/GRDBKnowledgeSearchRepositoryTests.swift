@@ -211,4 +211,5 @@ private func insertNote(
             """,
         arguments: [DatabaseValueCodec.encode(id), DatabaseValueCodec.encode(deckID), headword, reading, meaning]
     )
+    try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
 }

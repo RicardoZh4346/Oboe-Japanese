@@ -41,7 +41,8 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
                 japanese: "新規会員を募集する。",
                 translationZH: "招募新会员"
             ),
-            notes: "修订备注"
+            notes: "修订备注",
+            pitchAccent: PitchAccent(rawValue: 2)
         )
         let envelope = committedEnvelope(
             noteID: noteID,
@@ -65,6 +66,7 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
         XCTAssertEqual(note["part_of_speech"] as? String, "形容词")
         XCTAssertEqual(note["jlpt"] as? String, JLPTLevel.n4.rawValue)
         XCTAssertEqual(note["notes"] as? String, "修订备注")
+        XCTAssertEqual(note.pitchAccent, 2)
         XCTAssertEqual(note.contentVersion, 2)
 
         // Example index: exactly one primary example with the new content.
@@ -269,7 +271,7 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
         AIRepairDraftProvenance(
             providerID: "custom",
             modelID: "fixture-model",
-            promptVersion: "oboe-ai-repair-v1"
+            promptVersion: "oboe-ai-repair-v2"
         )
     }
 
@@ -345,6 +347,7 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
         var notes: String?
         var usage: String?
         var connection: String?
+        var pitchAccent: Int?
         var contentVersion: Int?
 
         subscript(column: String) -> String? {
@@ -368,7 +371,8 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
                 db,
                 sql: """
                     SELECT headword, reading, meaning_zh, part_of_speech,
-                           jlpt, notes, usage, connection, content_version
+                           jlpt, notes, usage, connection, pitch_accent,
+                           content_version
                     FROM notes WHERE id = ?
                     """,
                 arguments: [DatabaseValueCodec.encode(noteID)]
@@ -383,6 +387,7 @@ final class GRDBAIRepairCommitRepositoryTests: XCTestCase {
                 notes: row["notes"],
                 usage: row["usage"],
                 connection: row["connection"],
+                pitchAccent: row["pitch_accent"],
                 contentVersion: row["content_version"]
             )
         }

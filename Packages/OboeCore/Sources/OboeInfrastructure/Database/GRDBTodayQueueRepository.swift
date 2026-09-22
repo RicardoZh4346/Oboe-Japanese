@@ -157,10 +157,22 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
             DatabaseValueCodec.encode(studyDay.id), end
         ]
         if let deckID {
-            sql += "\nAND notes.deck_id = ?"
+            // 牌组过滤走 `note_decks` 成员关系；共享 Note 在每个成员
+            // 牌组的队列中可见，但 Card 不重复（EXISTS 不放大行数）。
+            sql += """
+
+                AND EXISTS (
+                    SELECT 1 FROM note_decks nd
+                    WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                )
+                """
             values.append(DatabaseValueCodec.encode(deckID))
         }
         let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(values))
+        let membershipMap = try GRDBNoteDeckMemberships.fetchDeckIDMap(
+            noteIDs: rows.map { $0["note_id"] as String },
+            in: db
+        )
         return try rows.map { row in
             let stateValue: Int = row["state"]
             let firstStudiedAt: Int64? = row["first_studied_at_ms"]
@@ -177,15 +189,18 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
             guard let template = CardTemplateKind(rawValue: templateValue) else {
                 throw DatabaseValueCodecError.invalidCardTemplate(templateValue)
             }
+            let noteIDValue: String = row["note_id"]
+            let memberDeckIDValues = membershipMap[noteIDValue]
             return try TodayQueueItem(
                 cardID: DatabaseValueCodec.decodeUUID(row["card_id"]),
-                noteID: DatabaseValueCodec.decodeUUID(row["note_id"]),
+                noteID: DatabaseValueCodec.decodeUUID(noteIDValue),
                 deckID: DatabaseValueCodec.decodeUUID(row["deck_id"]),
                 templateKind: template,
                 category: category,
                 availability: availability,
                 dueAt: DatabaseValueCodec.decodeDate(milliseconds: dueAtMilliseconds),
-                admittedAt: DatabaseValueCodec.decodeDate(milliseconds: row["admitted_at_ms"])
+                admittedAt: DatabaseValueCodec.decodeDate(milliseconds: row["admitted_at_ms"]),
+                deckIDs: memberDeckIDValues.map { try Set($0.map(DatabaseValueCodec.decodeUUID)) }
             )
         }
     }
@@ -217,7 +232,13 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
             try DatabaseValueCodec.encode(studyDay.endsAt)
         ]
         if let deckID {
-            sql += "\nAND notes.deck_id = ?"
+            sql += """
+
+                AND EXISTS (
+                    SELECT 1 FROM note_decks nd
+                    WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                )
+                """
             values.append(DatabaseValueCodec.encode(deckID))
         }
         let completedCount = try Int.fetchOne(

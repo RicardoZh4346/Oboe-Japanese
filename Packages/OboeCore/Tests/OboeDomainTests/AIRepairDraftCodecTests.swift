@@ -94,6 +94,30 @@ final class AIRepairDraftCodecTests: XCTestCase {
         }
     }
 
+    func testLegacyDraftPayloadWithoutPitchDecodesAsNil() throws {
+        let envelope = AIRepairDraftEnvelope(
+            targetNoteID: UUID(),
+            targetCardID: UUID(),
+            expectedContentVersion: 1,
+            targetCardEnabled: true,
+            affectedTemplateKinds: [.vocabularyJapaneseToChinese],
+            response: AIRepairResponse(
+                schemaVersion: 1,
+                problemTypes: [.lackOfContext],
+                summary: "旧草稿",
+                suggestions: [AIRepairSuggestion(
+                    type: .addNote,
+                    title: "补充说明",
+                    reason: "旧载荷没有音调键",
+                    replacement: AIRepairFieldPatch(notes: "保留")
+                )]
+            ),
+            phase: .suggested
+        )
+        let restored = try AIRepairDraftCodec.decode(AIRepairDraftCodec.encode(envelope))
+        XCTAssertNil(restored.response?.suggestions.first?.replacement?.pitchAccent)
+    }
+
     func testUncommittedEnvelopeRejectsReceipt() {
         var envelope = AIRepairDraftEnvelope(
             targetNoteID: UUID(),

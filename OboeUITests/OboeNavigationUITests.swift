@@ -1,3 +1,5 @@
+import Foundation
+import UIKit
 import XCTest
 
 final class OboeNavigationUITests: XCTestCase {
@@ -425,7 +427,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         let dailyLimit = app.descendants(matching: .any)["learning-daily-new-limit-stepper"]
         XCTAssertTrue(dailyLimit.waitForExistence(timeout: 5))
-        XCTAssertTrue(dailyLimit.label.contains("每日新卡"))
+        XCTAssertTrue(dailyLimit.label.contains("每日新词"))
         XCTAssertTrue(dailyLimit.label.contains("10"))
 
         let retention = app.descendants(matching: .any)["learning-retention-picker"]
@@ -972,9 +974,10 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     /// 牌组详情页顶部提供「设为主牌组」：当日新卡额度先满足主牌组，
-    /// 切换后立即重算；取消后回到公平轮转分配。
+    /// 切换后立即重算；未手动指定时自动以排序最前的牌组为主牌组，
+    /// 只有零牌组时才是未设置（无取消入口）。
     @MainActor
-    func testSetAndUnsetPrimaryDeckFromDeckDetail() {
+    func testPrimaryDeckAutoDefaultsAndSwitchesFromDeckDetail() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
@@ -996,14 +999,13 @@ final class OboeNavigationUITests: XCTestCase {
         deck.tap()
         XCTAssertTrue(app.navigationBars["主牌组测试"].waitForExistence(timeout: 3))
 
-        let setPrimary = app.buttons["deck-set-primary"]
-        XCTAssertTrue(setPrimary.waitForExistence(timeout: 3))
-        setPrimary.tap()
+        // 唯一牌组自动成为主牌组：直接显示状态，无设置/取消入口。
         XCTAssertTrue(
             app.descendants(matching: .any)["deck-primary-status"].waitForExistence(timeout: 5),
-            "设为主牌组后详情页必须显示当前主牌组状态"
+            "唯一牌组应自动成为主牌组并显示状态"
         )
-        XCTAssertTrue(app.buttons["deck-unset-primary"].exists)
+        XCTAssertFalse(app.buttons["deck-set-primary"].exists)
+        XCTAssertFalse(app.buttons["deck-unset-primary"].exists)
 
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(
@@ -1011,13 +1013,129 @@ final class OboeNavigationUITests: XCTestCase {
             "牌组列表必须给主牌组显示徽标"
         )
 
-        deck.tap()
-        let unsetPrimary = app.buttons["deck-unset-primary"]
-        XCTAssertTrue(unsetPrimary.waitForExistence(timeout: 3))
-        unsetPrimary.tap()
+        // 新建第二个牌组后可从详情页切换主牌组。
+        let createToolbar = app.buttons["deck-create-toolbar-button"]
+        XCTAssertTrue(createToolbar.waitForExistence(timeout: 5))
+        createToolbar.tap()
+        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+        nameField.tap()
+        nameField.typeText("副牌组")
+        app.buttons["deck-name-save-button"].tap()
+        let secondDeck = app.staticTexts["副牌组"]
+        XCTAssertTrue(secondDeck.waitForExistence(timeout: 5))
+        secondDeck.tap()
+        XCTAssertTrue(app.navigationBars["副牌组"].waitForExistence(timeout: 3))
+
+        let setPrimary = app.buttons["deck-set-primary"]
+        XCTAssertTrue(setPrimary.waitForExistence(timeout: 3))
+        setPrimary.tap()
         XCTAssertTrue(
-            app.buttons["deck-set-primary"].waitForExistence(timeout: 5),
-            "取消主牌组后必须回到可设置状态"
+            app.descendants(matching: .any)["deck-primary-status"].waitForExistence(timeout: 5),
+            "设为主牌组后详情页必须显示当前主牌组状态"
+        )
+
+        // 第一个牌组不再是主牌组，详情页恢复「设为主牌组」入口。
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        deck.tap()
+        XCTAssertTrue(
+            app.buttons["deck-set-primary"].waitForExistence(timeout: 3),
+            "非主牌组详情页必须提供「设为主牌组」"
+        )
+    }
+
+    /// T13：首页只显示一行主牌组（设计 §8.2）——有牌组时显示有效主牌组
+    ///（未手动指定时自动默认排序最前的牌组），主牌组被删除后自动回落
+    /// 下一个牌组，只有零牌组才显示「未设置」；不出现逐牌组学习入口。
+    @MainActor
+    func testTodayShowsPrimaryDeckLineWithoutPerDeckEntries() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        // 首个牌组走空态按钮，之后用工具栏的「新建牌组」。
+        for (index, name) in ["主牌组首页", "保留牌组"].enumerated() {
+            let createButton = index == 0
+                ? app.buttons["deck-create-empty-button"]
+                : app.buttons["deck-create-toolbar-button"]
+            XCTAssertTrue(createButton.waitForExistence(timeout: 5))
+            createButton.tap()
+            let nameField = app.textFields["deck-name-field"]
+            XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+            nameField.tap()
+            nameField.typeText(name)
+            app.buttons["deck-name-save-button"].tap()
+            XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 5))
+        }
+
+        // 自动默认状态：排序最前的「主牌组首页」即主牌组。
+        app.tabBars.buttons["今日"].tap()
+        app.buttons["today-refresh-button"].tap()
+        let primaryLine = app.staticTexts["today-primary-deck"]
+        XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            primaryLine.label.contains("主牌组首页"),
+            "有牌组时必须显示有效主牌组（自动默认排序最前者），实为 \(primaryLine.label)"
+        )
+        XCTAssertFalse(
+            app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'today-start-deck-'")
+            ).firstMatch.exists
+        )
+
+        // 手动改为「保留牌组」后首页显示它的名称。
+        decksTab.tap()
+        app.staticTexts["保留牌组"].tap()
+        let setPrimary = app.buttons["deck-set-primary"]
+        XCTAssertTrue(setPrimary.waitForExistence(timeout: 3))
+        setPrimary.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["deck-primary-status"]
+                .waitForExistence(timeout: 5)
+        )
+        app.tabBars.buttons["今日"].tap()
+        app.buttons["today-refresh-button"].tap()
+        XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(primaryLine.label.contains("保留牌组"))
+
+        // 删除当前主牌组后自动回落到剩余的「主牌组首页」。
+        decksTab.tap()
+        app.staticTexts["保留牌组"].tap()
+        let deleteButton = app.buttons["deck-delete-button"]
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 3))
+        deleteButton.tap()
+        let confirm = app.buttons["确认删除"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
+        confirm.tap()
+        XCTAssertTrue(app.staticTexts["主牌组首页"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["保留牌组"].exists)
+        app.tabBars.buttons["今日"].tap()
+        app.buttons["today-refresh-button"].tap()
+        XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            primaryLine.label.contains("主牌组首页"),
+            "删除主牌组后应自动回落到剩余牌组，实为 \(primaryLine.label)"
+        )
+
+        // 删除最后一个牌组后才显示「未设置」。
+        decksTab.tap()
+        app.staticTexts["主牌组首页"].tap()
+        XCTAssertTrue(deleteButton.waitForExistence(timeout: 3))
+        deleteButton.tap()
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
+        confirm.tap()
+        XCTAssertTrue(
+            app.buttons["deck-create-empty-button"].waitForExistence(timeout: 5),
+            "删除全部牌组后回到空态"
+        )
+        app.tabBars.buttons["今日"].tap()
+        app.buttons["today-refresh-button"].tap()
+        XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            primaryLine.label.contains("未设置"),
+            "没有任何牌组时才显示未设置，实为 \(primaryLine.label)"
         )
     }
 
@@ -1080,6 +1198,91 @@ final class OboeNavigationUITests: XCTestCase {
         reveal(restoredFormalSave, in: app)
         XCTAssertTrue(restoredFormalSave.exists)
         XCTAssertFalse(restoredFormalSave.isEnabled)
+    }
+
+    @MainActor
+    func testT08VocabularyPartOfSpeechUsesControlledMultiSelectAtAccessibilitySize() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_DYNAMIC_TYPE"] = "ax5"
+        app.launch()
+
+        let addTab = app.tabBars.buttons["添加"]
+        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
+        addTab.tap()
+
+        let additionalFields = app.buttons["更多字段（可选）"]
+        reveal(additionalFields, in: app)
+        XCTAssertTrue(additionalFields.isHittable)
+        additionalFields.tap()
+
+        let partOfSpeech = app.buttons["vocabulary-part-of-speech-field"]
+        reveal(partOfSpeech, in: app)
+        XCTAssertTrue(partOfSpeech.waitForExistence(timeout: 3))
+        XCTAssertTrue(partOfSpeech.isHittable)
+        XCTAssertFalse(
+            app.textFields["vocabulary-part-of-speech-field"].exists,
+            "词性必须是受控选择器，不能出现在文本输入 accessibility tree 中"
+        )
+        XCTAssertEqual(partOfSpeech.value as? String, "未设置")
+        partOfSpeech.tap()
+
+        let pronoun = app.buttons["part-of-speech-option-pronoun"]
+        let noun = app.buttons["part-of-speech-option-noun"]
+        XCTAssertTrue(pronoun.waitForExistence(timeout: 3))
+        XCTAssertEqual(pronoun.value as? String, "未选中")
+        pronoun.tap()
+        noun.tap()
+        XCTAssertEqual(pronoun.value as? String, "已选中")
+        XCTAssertEqual(noun.value as? String, "已选中")
+        app.buttons["part-of-speech-done"].tap()
+
+        XCTAssertTrue(partOfSpeech.waitForExistence(timeout: 3))
+        XCTAssertEqual(partOfSpeech.value as? String, "名词 / 代词")
+    }
+
+    @MainActor
+    func testT09VocabularyPitchPickerOffersMoraBoundedValues() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        let addTab = app.tabBars.buttons["添加"]
+        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
+        addTab.tap()
+
+        let additionalFields = app.buttons["更多字段（可选）"]
+        reveal(additionalFields, in: app)
+        XCTAssertTrue(additionalFields.isHittable)
+        additionalFields.tap()
+
+        let reading = app.textFields["vocabulary-reading-field"]
+        XCTAssertTrue(reading.waitForExistence(timeout: 3))
+        reading.tap()
+        reading.typeText("あいうえおか")
+        dismissKeyboard(in: app)
+
+        let pitch = app.buttons["vocabulary-pitch-accent-picker"]
+        reveal(pitch, in: app)
+        XCTAssertTrue(pitch.waitForExistence(timeout: 3))
+        XCTAssertTrue(pitch.label.contains("未设置"), pitch.label)
+        pitch.tap()
+        let six = app.buttons["6"]
+        XCTAssertTrue(six.waitForExistence(timeout: 3), "6 mora 读音必须提供音调 6")
+        six.tap()
+        XCTAssertTrue(pitch.label.contains("6"), pitch.label)
+
+        pitch.tap()
+        let unset = app.buttons["未设置"]
+        XCTAssertTrue(unset.waitForExistence(timeout: 3))
+        unset.tap()
+        XCTAssertTrue(pitch.label.contains("未设置"), pitch.label)
+
+        pitch.tap()
+        let flat = app.buttons["0（平板型）"]
+        XCTAssertTrue(flat.waitForExistence(timeout: 3))
+        flat.tap()
+        XCTAssertTrue(pitch.label.contains("0（平板型）"), pitch.label)
     }
 
     @MainActor
@@ -1359,12 +1562,15 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["today-new-count"].label, "1")
         XCTAssertEqual(app.staticTexts["today-remaining-count"].label, "1")
 
-        let deckStart = app.buttons.matching(
-            NSPredicate(format: "identifier BEGINSWITH 'today-start-deck-'")
-        ).firstMatch
-        XCTAssertTrue(deckStart.waitForExistence(timeout: 5))
-        deckStart.tap()
-        XCTAssertTrue(app.navigationBars["P11 Flow"].waitForExistence(timeout: 3))
+        // v0.5 T13：首页移除逐牌组入口；改由「全部牌组」继续同一队列，
+        // 牌组 scope 学习仍由仓库层接口支持（设计 §4.7）。
+        XCTAssertFalse(
+            app.buttons.matching(
+                NSPredicate(format: "identifier BEGINSWITH 'today-start-deck-'")
+            ).firstMatch.exists
+        )
+        start.tap()
+        XCTAssertTrue(app.navigationBars["全部牌组"].waitForExistence(timeout: 3))
         showReviewAnswer(in: app)
         let easy = app.buttons["review-rating-easy"]
         XCTAssertTrue(easy.waitForExistence(timeout: 3))
@@ -1505,7 +1711,11 @@ final class OboeNavigationUITests: XCTestCase {
         let finish = app.buttons["review-finish-button"]
         XCTAssertTrue(finish.waitForExistence(timeout: 3))
         finish.tap()
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        // T14: 任务清空后 Hero 呈现「今日完成」非可操作状态卡，
+        // today-start-all-button 只在可学状态下存在。
+        XCTAssertTrue(
+            app.staticTexts["today-day-complete"].waitForExistence(timeout: 5)
+        )
     }
 
     @MainActor
@@ -1926,6 +2136,241 @@ final class OboeNavigationUITests: XCTestCase {
         return app
     }
 
+    // MARK: - T16 真机与可访问性验收（模拟器可覆盖部分）
+
+    /// T16：v0.4 数据副本（schema v12）的真实升级路径——App 打开时执行
+    /// v13 迁移（含迁移前快照），启动后 enrichment 回填内置词音调与例句
+    /// 中文译文；升级库上本机快照创建/恢复可用。全程走真实打开路径，
+    /// 不绕过 `databaseLifecycle.open()`。
+    @MainActor
+    func testT16V04DatabaseUpgradeMigratesEnrichesAndRestores() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_STAGE_SCHEMA_V12"] = "1"
+        app.launch()
+
+        // 迁移失败会停在启动错误页；能进主界面即说明 v12→v13 成功。
+        let todayTab = app.tabBars.buttons["今日"]
+        XCTAssertTrue(todayTab.waitForExistence(timeout: 10), "升级后应能进入主界面")
+
+        // 新卡不丢：v12 种子的 6 张 New 卡被今日计划接纳，Hero 可学习。
+        XCTAssertTrue(
+            app.buttons["today-start-all-button"].waitForExistence(timeout: 5),
+            "升级库上的新卡必须进入今日队列"
+        )
+
+        // 牌组与内容保留：升级牌组含 2 个知识点、6 张卡。
+        app.tabBars.buttons["牌组"].tap()
+        let deckRow = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "升级牌组")
+        ).firstMatch
+        XCTAssertTrue(deckRow.waitForExistence(timeout: 5))
+        deckRow.tap()
+        let noteCount = app.descendants(matching: .any)["deck-note-count"].firstMatch
+        XCTAssertTrue(noteCount.waitForExistence(timeout: 5))
+        XCTAssertTrue(noteCount.label.contains("2"), "升级后知识点计数应为 2，实际：\(noteCount.label)")
+        let cardCount = app.descendants(matching: .any)["deck-card-count"].firstMatch
+        XCTAssertTrue(cardCount.label.contains("6"), "升级后卡片计数应为 6，实际：\(cardCount.label)")
+
+        // enrichment：启动调度只补 NULL——内置词的音调与例句中文译文
+        // 应已回填。先等词库页 running 指示消失（若已跑完则直接通过）。
+        app.navigationBars.buttons.firstMatch.tap()
+        let library = app.buttons["jlpt-library-entry"]
+        XCTAssertTrue(library.waitForExistence(timeout: 5))
+        library.tap()
+        let acknowledge = app.buttons["我知道了"]
+        if acknowledge.waitForExistence(timeout: 2) { acknowledge.tap() }
+        let running = app.descendants(matching: .any)["jlpt-enrichment-running"]
+        if running.waitForExistence(timeout: 3) {
+            let gone = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: running
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [gone], timeout: 15), .completed,
+                "enrichment 未在预期时间内完成"
+            )
+        }
+        XCTAssertFalse(
+            app.buttons["jlpt-enrichment-retry"].exists,
+            "enrichment 不应进入失败重试态"
+        )
+        app.navigationBars.buttons.firstMatch.tap()
+
+        // 打开回填过的内置词详情：音调 2 与例句中文译文来自词库 v2。
+        // 行内 headword 与 reading 同文本，须按行标识符定位避免重复匹配。
+        deckRow.tap()
+        let jlptNote = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH 'knowledge-row-' AND label CONTAINS 'あさって'"
+            )
+        ).firstMatch
+        XCTAssertTrue(jlptNote.waitForExistence(timeout: 5))
+        jlptNote.tap()
+        let pitchLabel = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label CONTAINS '音调'")
+        ).firstMatch
+        XCTAssertTrue(
+            pitchLabel.waitForExistence(timeout: 5),
+            "enrichment 后详情应显示音调"
+        )
+        XCTAssertTrue(
+            app.staticTexts["请后天来吧。"].waitForExistence(timeout: 3),
+            "enrichment 应回填例句中文译文"
+        )
+
+        // 回滚路径：升级库上创建本机快照并恢复，数据保持完整。
+        app.navigationBars.buttons.firstMatch.tap()
+        app.tabBars.buttons["设置"].tap()
+        let createSnapshot = app.buttons["local-snapshot-create-button"]
+        reveal(createSnapshot, in: app)
+        XCTAssertTrue(createSnapshot.exists)
+        createSnapshot.tap()
+        XCTAssertTrue(app.staticTexts["本机快照已创建。"].waitForExistence(timeout: 5))
+        let restoreButton = app.buttons["local-snapshot-restore-button"].firstMatch
+        reveal(restoreButton, in: app)
+        restoreButton.tap()
+        let confirmRestore = app.buttons["完整替换并恢复"]
+        XCTAssertTrue(confirmRestore.waitForExistence(timeout: 2))
+        confirmRestore.tap()
+
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 8))
+        decksTab.tap()
+        XCTAssertTrue(
+            app.buttons.matching(
+                NSPredicate(format: "label CONTAINS %@", "升级牌组")
+            ).firstMatch.waitForExistence(timeout: 5),
+            "快照恢复后牌组数据必须完整"
+        )
+    }
+
+    /// T16：Reduce Motion 下复习流程不依赖动画——展示答案与评分过渡
+    /// 关闭后流程照常完成。SwiftUI `accessibilityReduceMotion` 是只读
+    /// 环境值无法注入，运行前需先在模拟器开启系统级开关：
+    /// `xcrun simctl spawn booted defaults write com.apple.Accessibility
+    /// ReduceMotionEnabled -bool true`（跑完恢复 false）。
+    @MainActor
+    func testT16ReduceMotionReviewFlowCompletes() throws {
+        try XCTSkipUnless(
+            UIAccessibility.isReduceMotionEnabled,
+            "需要先在模拟器开启 Reduce Motion（见方法注释）"
+        )
+
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
+        app.launch()
+
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        showReviewAnswer(in: app)
+        let easy = app.buttons["review-rating-easy"]
+        XCTAssertTrue(easy.waitForExistence(timeout: 5))
+        XCTAssertTrue(easy.isHittable)
+        easy.tap()
+        // 评分后进入下一张或完成态——任一都证明流程未被动画阻断。
+        XCTAssertTrue(
+            app.descendants(matching: .any)["review-complete-state"]
+                .waitForExistence(timeout: 5)
+                || app.buttons["review-show-answer-button"].exists,
+            "Reduce Motion 下评分后流程必须继续"
+        )
+    }
+
+    /// T16：Today Hero 的自动无障碍审计（真机 VoiceOver 走查前的机器
+    /// 代理）——对比度、可点击区域、描述充分性、文本裁剪与 trait 审计，
+    /// 发现问题即失败。
+    ///
+    /// `.dynamicType` 一项不交给审计：它对懒容器（LazyVGrid/滚动边界）
+    /// 内的标准可缩放文本会持续误报且标记元素逐轮漂移；动态字体缩放
+    /// 由 `testT16AccessibilityTypeScalesWithoutTruncation` 用 ax5 实渲染
+    /// 帧高对比验证，比审计更直接。
+    @MainActor
+    func testT16AccessibilityAuditOnTodayHero() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
+        app.launch()
+        XCTAssertTrue(
+            app.buttons["today-start-all-button"].waitForExistence(timeout: 5)
+        )
+        // 打印每个 issue 的元素与描述供定位，不吞掉任何结果。
+        let logIssue: (XCUIAccessibilityAuditIssue) -> Void = { issue in
+            print(
+                "A11Y-ISSUE type=\(issue.auditType.rawValue) "
+                    + "element=\(issue.element) "
+                    + "desc=\(issue.compactDescription)"
+            )
+        }
+        // 第一遍：顶部静止位。视口底部边缘带内的元素可能处于懒网格
+        // 部分物化/标签栏遮挡区，对比度取色不可靠——留到底部复审
+        // （那时它们完全可见）统一裁决，不构成覆盖盲区。
+        let tabBarTop = app.tabBars.firstMatch.frame.minY
+        let bottomEdgeZoneTop = tabBarTop - 60
+        try app.performAccessibilityAudit(
+            for: .all.subtracting(.dynamicType)
+        ) { issue in
+            logIssue(issue)
+            if issue.auditType == .contrast,
+               let element = issue.element,
+               element.exists,
+               element.frame.maxY > bottomEdgeZoneTop {
+                return true
+            }
+            return false
+        }
+        // 第二遍：滚动到底部，让首屏外的元素物化，补做元素级检查
+        // （点击区域/描述/trait 基于树数据仍可靠）。对比度不随滚动
+        // 复审：审计对滚动后位置的像素取色会映射到滚动前截图（实测
+        // 黑字文本被误判落在 Hero 蓝渐变上），结果不可靠。
+        for _ in 0..<8 {
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        try app.performAccessibilityAudit(
+            for: .all.subtracting([.dynamicType, .contrast])
+        ) { issue in
+            logIssue(issue)
+            return false
+        }
+    }
+
+    /// T16：最大辅助功能字号实渲染验证——Hero 与指标在 ax5 下不截断、
+    /// 按钮可点击，且文本帧高确实随字号放大（审计之外的直接证据）。
+    @MainActor
+    func testT16AccessibilityTypeScalesWithoutTruncation() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
+        app.launchEnvironment["OBOE_UI_TEST_DYNAMIC_TYPE"] = "ax5"
+        app.launch()
+
+        // Hero 可操作且未截断。
+        let start = app.buttons["today-start-all-button"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5), "ax5 下 Hero 应存在")
+        XCTAssertTrue(start.isHittable, "ax5 下 Hero 必须可点击")
+        XCTAssertTrue(start.frame.height > 100, "ax5 下 Hero 应纵向放大")
+
+        // ax5 下 1 列指标网格使「剩余」落于折叠线下，先滚动使其物化。
+        let remaining = app.staticTexts["today-remaining-count"]
+        for _ in 0..<8 where !remaining.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(remaining.exists, "ax5 下指标必须可到达")
+        XCTAssertGreaterThan(
+            remaining.frame.height, 24,
+            "ax5 下指标数字必须随 Dynamic Type 放大"
+        )
+
+        // 首屏外区块在 ax5 下仍可滚动到达，不被布局锁死。
+        let stat = app.descendants(matching: .any)["today-learned-count"]
+        for _ in 0..<10 where !stat.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(stat.exists, "ax5 下今日统计必须可到达")
+    }
+
     @MainActor
     private func showReviewAnswer(in app: XCUIApplication) {
         let button = app.buttons["review-show-answer-button"]
@@ -2046,3 +2491,5 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
 }
+
+

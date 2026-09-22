@@ -95,14 +95,15 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
 
     public func deleteDeckIfEmpty(id: UUID) async throws -> DeckDeletionResult {
         try await pool.write { db in
+            // 空牌组 = `note_decks` 中无任何成员（home deck 也必为成员）。
             guard let row = try Row.fetchOne(
                 db,
                 sql: """
                     SELECT
-                        (SELECT COUNT(*) FROM notes WHERE deck_id = decks.id) AS note_count,
-                        (SELECT COUNT(*) FROM cards
-                         JOIN notes ON notes.id = cards.note_id
-                         WHERE notes.deck_id = decks.id) AS card_count
+                        (SELECT COUNT(*) FROM note_decks WHERE deck_id = decks.id) AS note_count,
+                        (SELECT COUNT(DISTINCT cards.id) FROM cards
+                         JOIN note_decks nd ON nd.note_id = cards.note_id
+                         WHERE nd.deck_id = decks.id) AS card_count
                     FROM decks
                     WHERE id = ?
                     """,
@@ -122,10 +123,16 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
                 arguments: [DatabaseValueCodec.encode(id)]
             )
             try db.execute(
-                sql: "DELETE FROM decks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM notes WHERE deck_id = decks.id)",
+                sql: "DELETE FROM decks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM note_decks WHERE deck_id = decks.id)",
                 arguments: [DatabaseValueCodec.encode(id)]
             )
             return db.changesCount == 1 ? .deleted : .notFound
+        }
+    }
+
+    public func previewDeletionImpact(id: UUID) async throws -> DeckDeletionImpact? {
+        try await pool.read { db in
+            try Self.fetchDeletionImpact(id: id, in: db)
         }
     }
 
@@ -153,14 +160,71 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
                 ) == true else {
                     return .destinationNotFound
                 }
+                // 1) 给全部源成员补目标成员关系（已是成员的跳过，共享
+                //    Note 保持其余成员关系不变）。
+                try db.execute(
+                    sql: """
+                        INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+                        SELECT note_id, ?, ? FROM note_decks WHERE deck_id = ?
+                        ON CONFLICT(note_id, deck_id) DO NOTHING
+                        """,
+                    arguments: [destinationValue, updatedAtMilliseconds, DatabaseValueCodec.encode(id)]
+                )
+                // 防御：home=源牌组但缺成员行的 Note 也补目标成员关系。
+                try db.execute(
+                    sql: """
+                        INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+                        SELECT id, ?, ? FROM notes WHERE deck_id = ?
+                        ON CONFLICT(note_id, deck_id) DO NOTHING
+                        """,
+                    arguments: [destinationValue, updatedAtMilliseconds, DatabaseValueCodec.encode(id)]
+                )
+                // 2) home=源牌组的 Note 切换 home 到目标牌组。
                 try db.execute(
                     sql: "UPDATE notes SET deck_id = ?, updated_at_ms = ? WHERE deck_id = ?",
                     arguments: [destinationValue, updatedAtMilliseconds, DatabaseValueCodec.encode(id)]
                 )
-            case .deleteContents:
+                // 3) 移除源牌组全部成员关系。
                 try db.execute(
-                    sql: "DELETE FROM notes WHERE deck_id = ?",
+                    sql: "DELETE FROM note_decks WHERE deck_id = ?",
                     arguments: [DatabaseValueCodec.encode(id)]
+                )
+            case .deleteContents:
+                let encodedID = DatabaseValueCodec.encode(id)
+                // 1) 删除独占 Note（唯一成员是本牌组，home 必在其中）；
+                //    cards/review_logs/note_decks 由外键级联清理。
+                try db.execute(
+                    sql: """
+                        DELETE FROM notes
+                        WHERE deck_id = ?
+                          AND NOT EXISTS (
+                              SELECT 1 FROM note_decks nd
+                              WHERE nd.note_id = notes.id AND nd.deck_id <> ?
+                          )
+                        """,
+                    arguments: [encodedID, encodedID]
+                )
+                // 2) home=源牌组的共享 Note 重新选 home：剩余成员中按
+                //    decks.sort_order/created_at_ms/id 排序的第一个。
+                try db.execute(
+                    sql: """
+                        UPDATE notes
+                        SET deck_id = (
+                            SELECT nd.deck_id FROM note_decks nd
+                            JOIN decks d ON d.id = nd.deck_id
+                            WHERE nd.note_id = notes.id AND nd.deck_id <> ?
+                            ORDER BY d.sort_order, d.created_at_ms, d.id
+                            LIMIT 1
+                        ),
+                        updated_at_ms = ?
+                        WHERE deck_id = ?
+                        """,
+                    arguments: [encodedID, updatedAtMilliseconds, encodedID]
+                )
+                // 3) 移除源牌组全部成员关系。
+                try db.execute(
+                    sql: "DELETE FROM note_decks WHERE deck_id = ?",
+                    arguments: [encodedID]
                 )
             }
 
@@ -176,6 +240,8 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
         }
     }
 
+    /// 牌组摘要按 `note_decks` 成员关系计数：共享 Note/Card 在其所属的
+    /// 每个牌组各计一次（设计 §4.5）。
     private static func fetchDeckSummaries(_ db: Database) throws -> [DeckSummary] {
         let rows = try Row.fetchAll(
             db,
@@ -184,9 +250,10 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
                     decks.id,
                     decks.name,
                     COUNT(DISTINCT notes.id) AS note_count,
-                    COUNT(cards.id) AS card_count
+                    COUNT(DISTINCT cards.id) AS card_count
                 FROM decks
-                LEFT JOIN notes ON notes.deck_id = decks.id
+                LEFT JOIN note_decks nd ON nd.deck_id = decks.id
+                LEFT JOIN notes ON notes.id = nd.note_id
                 LEFT JOIN cards ON cards.note_id = notes.id
                 GROUP BY decks.id
                 ORDER BY decks.sort_order, decks.created_at_ms, decks.id
@@ -202,28 +269,51 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
         }
     }
 
+    /// 删除影响统计（设计 §4.8）：noteCount/cardCount/reviewLogCount 按
+    /// 成员关系去重计数；exclusive/shared 区分 deleteContents 时会真正
+    /// 删除的 Note 与仅移除成员关系的共享 Note。
     private static func fetchDeletionImpact(id: UUID, in db: Database) throws -> DeckDeletionImpact? {
+        let encodedID = DatabaseValueCodec.encode(id)
         guard let row = try Row.fetchOne(
             db,
             sql: """
                 SELECT
-                    (SELECT COUNT(*) FROM notes WHERE deck_id = decks.id) AS note_count,
+                    (SELECT COUNT(*) FROM note_decks WHERE deck_id = decks.id) AS note_count,
+                    (SELECT COUNT(DISTINCT cards.id) FROM cards
+                     JOIN note_decks nd ON nd.note_id = cards.note_id
+                     WHERE nd.deck_id = decks.id) AS card_count,
+                    (SELECT COUNT(DISTINCT review_logs.id) FROM review_logs
+                     JOIN note_decks nd ON nd.note_id = review_logs.note_id
+                     WHERE nd.deck_id = decks.id) AS review_log_count,
+                    (SELECT COUNT(*) FROM notes
+                     WHERE deck_id = decks.id
+                       AND NOT EXISTS (
+                           SELECT 1 FROM note_decks nd
+                           WHERE nd.note_id = notes.id AND nd.deck_id <> decks.id
+                       )) AS exclusive_note_count,
                     (SELECT COUNT(*) FROM cards
-                     JOIN notes ON notes.id = cards.note_id
-                     WHERE notes.deck_id = decks.id) AS card_count,
-                    (SELECT COUNT(*) FROM review_logs
-                     WHERE note_id IN (SELECT id FROM notes WHERE deck_id = decks.id)) AS review_log_count
+                     JOIN notes n ON n.id = cards.note_id
+                     WHERE n.deck_id = decks.id
+                       AND NOT EXISTS (
+                           SELECT 1 FROM note_decks nd
+                           WHERE nd.note_id = n.id AND nd.deck_id <> decks.id
+                       )) AS exclusive_card_count
                 FROM decks
                 WHERE id = ?
                 """,
-            arguments: [DatabaseValueCodec.encode(id)]
+            arguments: [encodedID]
         ) else {
             return nil
         }
+        let noteCount: Int = row["note_count"]
+        let exclusiveCount: Int = row["exclusive_note_count"]
         return DeckDeletionImpact(
-            noteCount: row["note_count"],
+            noteCount: noteCount,
             cardCount: row["card_count"],
-            reviewLogCount: row["review_log_count"]
+            reviewLogCount: row["review_log_count"],
+            exclusiveNoteCount: exclusiveCount,
+            exclusiveCardCount: row["exclusive_card_count"],
+            sharedNoteCount: noteCount - exclusiveCount
         )
     }
 }

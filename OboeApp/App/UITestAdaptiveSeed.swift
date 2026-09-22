@@ -714,5 +714,185 @@ extension AppDependencies {
             }
         }
     }
+
+    /// `OBOE_UI_TEST_STAGE_SCHEMA_V12`（T16）：在 `databaseLifecycle.open()`
+    /// 之前把 UI 测试库写成 v0.4 形态（迁移仅应用到 v12——无
+    /// `note_decks`/`pitch_accent`），随后真实打开路径执行 v13 迁移并
+    /// 生成迁移前快照。种子里含一个 `builtin_jlpt` 词（真实 source_ref、
+    /// 音调与例句中文译文均缺），启动后的 enrichment 会回填它们，
+    /// 供 UI 断言"升级 + 回填 + 回滚"全链路。
+    func stageLegacySchemaV12DatabaseIfRequested() throws {
+        guard ProcessInfo.processInfo.environment["OBOE_UI_TEST_STAGE_SCHEMA_V12"] != nil,
+              let identifier = ProcessInfo.processInfo.environment["OBOE_UI_TEST_DATABASE_ID"],
+              let uuid = UUID(uuidString: identifier)
+        else { return }
+        let baseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Oboe-UITests", isDirectory: true)
+            .appendingPathComponent(uuid.uuidString, isDirectory: true)
+        let databaseURL = baseURL.appendingPathComponent("oboe.sqlite")
+        guard !FileManager.default.fileExists(atPath: databaseURL.path) else { return }
+        try FileManager.default.createDirectory(
+            at: baseURL, withIntermediateDirectories: true
+        )
+
+        var configuration = Configuration()
+        configuration.foreignKeysEnabled = true
+        configuration.prepareDatabase { db in
+            db.add(function: DatabaseFunction(
+                "oboe_normalize_search",
+                argumentCount: 1,
+                pure: true
+            ) { values in
+                guard let value = String.fromDatabaseValue(values[0]) else {
+                    return nil
+                }
+                return SearchTextNormalizer.normalize(value)
+            })
+        }
+        let pool = try DatabasePool(path: databaseURL.path, configuration: configuration)
+        defer { try? pool.close() }
+
+        let throughV12 = Array(OboeDatabaseSchema.migrationIdentifiers.prefix(
+            while: { $0 != "v13_note_deck_membership_and_pitch" }
+        ))
+        try OboeDatabaseSchema.makeMigrator(applying: throughV12).migrate(pool)
+        try pool.write { db in try Self.seedLegacyV12Fixture(in: db) }
+    }
+
+    /// v0.4 脱敏副本的合成等价物：1 个牌组；1 条手动词汇（三方向卡 +
+    /// 例句 + 一条评分历史）；1 条 `builtin_jlpt` 词（`source_ref` 指向
+    /// 内置词库真实条目「あさって」，音调列在 v12 尚不存在、例句中文
+    /// 译文为 NULL，供升级后 enrichment 回填）。
+    private static func seedLegacyV12Fixture(in db: Database) throws {
+        let encode: (UUID) -> String = DatabaseValueCodec.encode
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1_000)
+        let deckID = UUID()
+        let vocabNoteID = UUID()
+        let jlptNoteID = UUID()
+        let profileID = UUID()
+        let studyDayID = UUID()
+        let reviewCardID = UUID()
+
+        try db.execute(
+            sql: """
+                INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
+                VALUES (?, '升级牌组', 0, ?, ?)
+                """,
+            arguments: [encode(deckID), nowMs, nowMs]
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO app_settings(id, schema_version, learning_time_zone_id)
+                VALUES (1, 12, 'Asia/Shanghai')
+                """
+        )
+        let profile = SchedulerProfile.standard
+        try db.execute(
+            sql: """
+                INSERT INTO scheduler_profiles(
+                    id, configuration_version, algorithm_version, library_revision,
+                    parameters_json, desired_retention, max_interval_days, created_at_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+            arguments: [
+                encode(profileID),
+                profile.configurationVersion,
+                SwiftFSRSReviewScheduler.algorithmVersion,
+                SwiftFSRSReviewScheduler.dependencyRevision,
+                String(
+                    decoding: try JSONEncoder().encode(profile.parameters),
+                    as: UTF8.self
+                ),
+                profile.targetRetention,
+                profile.maximumIntervalDays,
+                nowMs
+            ]
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO notes(
+                    id, deck_id, kind, headword, reading, meaning_zh,
+                    part_of_speech, origin, content_version,
+                    created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'vocabulary', '食べる', 'たべる', '吃',
+                          '一段动词', 'manual', 1, ?, ?)
+                """,
+            arguments: [encode(vocabNoteID), encode(deckID), nowMs, nowMs]
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO notes(
+                    id, deck_id, kind, headword, reading, meaning_zh,
+                    part_of_speech, jlpt, origin, source_ref, content_version,
+                    created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'vocabulary', 'あさって', 'あさって', '后天',
+                          '名词', 'N5', 'builtin_jlpt',
+                          'openjlpt:N5:478754d45e8bd789cd61bcd29de281a97d4f1021655bccffb3392ee51c177f22',
+                          1, ?, ?)
+                """,
+            arguments: [encode(jlptNoteID), encode(deckID), nowMs, nowMs]
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order)
+                VALUES (?, ?, 'りんごを食べる。', '吃苹果。', 0)
+                """,
+            arguments: [encode(UUID()), encode(vocabNoteID)]
+        )
+        // 例句日文与内置词库一致、译文留 NULL——enrichment 的匹配键是
+        // (note_id, japanese, sort_order)。
+        try db.execute(
+            sql: """
+                INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order)
+                VALUES (?, ?, 'あさって来てください。', NULL, 0)
+                """,
+            arguments: [encode(UUID()), encode(jlptNoteID)]
+        )
+        for noteID in [vocabNoteID, jlptNoteID] {
+            for template in [
+                "vocabulary_ja_zh", "vocabulary_zh_ja", "vocabulary_listening"
+            ] {
+                let cardID = noteID == vocabNoteID && template == "vocabulary_ja_zh"
+                    ? reviewCardID : UUID()
+                try db.execute(
+                    sql: """
+                        INSERT INTO cards(
+                            id, note_id, template_kind, is_enabled, state, due_at_ms,
+                            stability, difficulty, reps, lapses, scheduled_days,
+                            elapsed_days, learning_step, state_version,
+                            algorithm_version, profile_id
+                        ) VALUES (?, ?, ?, 1, 0, ?, 0, 0, 0, 0, 0, 0, 0, 0, ?, ?)
+                        """,
+                    arguments: [
+                        encode(cardID), encode(noteID), template, nowMs,
+                        SwiftFSRSReviewScheduler.algorithmVersion, encode(profileID)
+                    ]
+                )
+            }
+        }
+        try db.execute(
+            sql: """
+                INSERT INTO study_days(
+                    id, local_date, time_zone_id, starts_at_ms, ends_at_ms, new_limit
+                ) VALUES (?, '2026-09-01', 'Asia/Shanghai', 1, 2, 10)
+                """,
+            arguments: [encode(studyDayID)]
+        )
+        try db.execute(
+            sql: """
+                INSERT INTO review_logs(
+                    id, event_id, card_id, card_key, note_id, deck_id_at_review,
+                    reviewed_at_ms, study_day_id, was_first_study, rating,
+                    previous_state_json, next_state_json, duration_ms,
+                    content_version, profile_id, algorithm_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 2, '{}', '{}', 1000, 1, ?, 'FSRS-6.0')
+                """,
+            arguments: [
+                encode(UUID()), encode(UUID()), encode(reviewCardID),
+                encode(reviewCardID), encode(vocabNoteID), encode(deckID),
+                nowMs, encode(studyDayID), encode(profileID)
+            ]
+        )
+    }
 }
 #endif

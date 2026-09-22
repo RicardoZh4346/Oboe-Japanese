@@ -1,17 +1,6 @@
 import OboeDomain
 import SwiftUI
 
-struct DeckPickerOptions: View {
-    let decks: [DeckSummary]
-
-    var body: some View {
-        Text("暂不选择").tag(nil as UUID?)
-        ForEach(decks) { deck in
-            Text(deck.name).tag(deck.id as UUID?)
-        }
-    }
-}
-
 struct KnowledgePointDetailDestination: View {
     let item: KnowledgePointSummary
     let vocabularyService: VocabularyService

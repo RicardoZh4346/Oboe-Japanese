@@ -3,7 +3,7 @@ import OboeDomain
 
 public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sendable {
     static let maximumResponseBytes = 256 * 1_024
-    static let maximumOutputTokens = 1_000
+    static let maximumOutputTokens = 1_200
 
     private let transport: any AIHTTPTransport
 
@@ -96,7 +96,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
     ) throws -> Data {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [
-                "schemaVersion": AICardPromptV1.schemaVersion,
+                "schemaVersion": AICardPromptV2.schemaVersion,
                 "kind": input.kind.rawValue,
                 "input": input.text,
                 "context": input.context
@@ -111,7 +111,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
             "messages": [
                 [
                     "role": "system",
-                    "content": AICardPromptV1.systemInstruction(for: input.kind)
+                    "content": AICardPromptV2.systemInstruction(for: input.kind)
                 ],
                 ["role": "user", "content": userContent]
             ],
@@ -123,7 +123,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
             body["response_format"] = [
                 "type": "json_schema",
                 "json_schema": [
-                    "name": "oboe_\(input.kind.rawValue)_card_v1",
+                    "name": "oboe_\(input.kind.rawValue)_card_v2",
                     "strict": true,
                     "schema": outputSchema(for: input.kind)
                 ]
@@ -162,7 +162,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
             "items": ["type": "string"]
         ]
         var properties: [String: Any] = [
-            "schemaVersion": ["type": "integer", "const": AICardPromptV1.schemaVersion],
+            "schemaVersion": ["type": "integer", "const": AICardPromptV2.schemaVersion],
             "kind": ["type": "string", "const": kind.rawValue],
             "meaningZH": ["type": "string"],
             "jlpt": nullableJLPT,
@@ -175,10 +175,23 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
         case .vocabulary:
             properties["headword"] = ["type": "string"]
             properties["reading"] = ["type": "string"]
-            properties["partOfSpeech"] = ["type": "string"]
+            properties["partsOfSpeech"] = [
+                "type": "array",
+                "uniqueItems": true,
+                "items": [
+                    "type": "string",
+                    "enum": VocabularyPartOfSpeech.allCases.map(\.rawValue)
+                ]
+            ]
+            properties["pitchAccent"] = [
+                "anyOf": [
+                    ["type": "integer", "minimum": 0],
+                    ["type": "null"]
+                ]
+            ]
             required = [
                 "schemaVersion", "kind", "headword", "reading", "meaningZH",
-                "partOfSpeech", "jlpt", "examples", "notes", "warnings"
+                "partsOfSpeech", "pitchAccent", "jlpt", "examples", "notes", "warnings"
             ]
         case .grammar:
             properties["grammarForm"] = ["type": "string"]

@@ -217,4 +217,5 @@ private func insertVocabulary(id: UUID, deckID: UUID, headword: String, in db: D
             headword
         ]
     )
+    try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
 }

@@ -75,6 +75,10 @@ public struct AIRepairSplitConfirmedMutation: Codable, Equatable, Sendable {
     /// silent commit over it.
     public var expectedTemplateKinds: [CardTemplateKind]
     public var deckID: UUID
+    /// 新 Note 的全部成员牌组（含 `deckID`）。可选项：旧编码载荷缺键时
+    /// 解码为 nil，落库按 `[deckID]` 处理；nil 也不参与 hash 字段输出，
+    /// 保证升级前已提交草稿的回放 hash 不变。
+    public var deckIDs: [UUID]?
     public var originalCardDisposition: AIRepairOriginalCardDisposition
     /// Parallel to `suggestion.splitNotes` — plan[i] writes candidate[i].
     public var plans: [AIRepairSplitNotePlan]
@@ -85,6 +89,7 @@ public struct AIRepairSplitConfirmedMutation: Codable, Equatable, Sendable {
         expectedContentVersion: Int,
         expectedTemplateKinds: [CardTemplateKind],
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         originalCardDisposition: AIRepairOriginalCardDisposition,
         plans: [AIRepairSplitNotePlan]
     ) {
@@ -93,6 +98,7 @@ public struct AIRepairSplitConfirmedMutation: Codable, Equatable, Sendable {
         self.expectedContentVersion = expectedContentVersion
         self.expectedTemplateKinds = expectedTemplateKinds
         self.deckID = deckID
+        self.deckIDs = deckIDs.map { $0.union([deckID]).sorted { $0.uuidString < $1.uuidString } }
         self.originalCardDisposition = originalCardDisposition
         self.plans = plans
     }
@@ -160,6 +166,8 @@ public struct AIRepairSplitNoteCommit: Equatable, Sendable {
     public var noteID: UUID
     public var exampleID: UUID
     public var deckID: UUID
+    /// 新 Note 的全部成员牌组；始终包含 `deckID`（home）。
+    public var deckIDs: Set<UUID>
     public var content: AIRepairValidatedContent
     public var cards: [NewCardSeed]
     public var schedulerProfileID: UUID
@@ -169,6 +177,7 @@ public struct AIRepairSplitNoteCommit: Equatable, Sendable {
         noteID: UUID,
         exampleID: UUID,
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         content: AIRepairValidatedContent,
         cards: [NewCardSeed],
         schedulerProfileID: UUID,
@@ -177,6 +186,7 @@ public struct AIRepairSplitNoteCommit: Equatable, Sendable {
         self.noteID = noteID
         self.exampleID = exampleID
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.content = content
         self.cards = cards
         self.schedulerProfileID = schedulerProfileID

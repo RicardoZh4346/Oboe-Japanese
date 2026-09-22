@@ -90,7 +90,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
     ) throws -> Data {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [
-                "schemaVersion": SentenceAnalysisPromptV1.schemaVersion,
+                "schemaVersion": SentenceAnalysisPromptV2.schemaVersion,
                 "sentence": input.sentence
             ],
             options: [.sortedKeys]
@@ -101,7 +101,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
         var body: [String: Any] = [
             "model": configuration.modelID,
             "messages": [
-                ["role": "system", "content": SentenceAnalysisPromptV1.systemInstruction],
+                ["role": "system", "content": SentenceAnalysisPromptV2.systemInstruction],
                 ["role": "user", "content": userContent]
             ],
             "max_tokens": maximumOutputTokens,
@@ -112,7 +112,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
             body["response_format"] = [
                 "type": "json_schema",
                 "json_schema": [
-                    "name": "oboe_sentence_analysis_v1",
+                    "name": "oboe_sentence_analysis_v2",
                     "strict": true,
                     "schema": outputSchema()
                 ]
@@ -145,14 +145,27 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
                 "headword": ["type": "string"],
                 "reading": ["type": "string"],
                 "meaningZH": ["type": "string"],
-                "partOfSpeech": ["type": "string"],
+                "partsOfSpeech": [
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": [
+                        "type": "string",
+                        "enum": VocabularyPartOfSpeech.allCases.map(\.rawValue)
+                    ]
+                ],
+                "pitchAccent": [
+                    "anyOf": [
+                        ["type": "integer", "minimum": 0],
+                        ["type": "null"]
+                    ]
+                ],
                 "usage": ["type": "string"],
                 "connection": ["type": "string"],
                 "notes": ["type": "string"]
             ],
             "required": [
-                "kind", "headword", "reading", "meaningZH", "partOfSpeech", "usage",
-                "connection", "notes"
+                "kind", "headword", "reading", "meaningZH", "partsOfSpeech", "pitchAccent",
+                "usage", "connection", "notes"
             ],
             "additionalProperties": false
         ]
@@ -177,7 +190,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
         return [
             "type": "object",
             "properties": [
-                "schemaVersion": ["type": "integer", "const": SentenceAnalysisPromptV1.schemaVersion],
+                "schemaVersion": ["type": "integer", "const": SentenceAnalysisPromptV2.schemaVersion],
                 "sentence": ["type": "string"],
                 "translationZH": ["type": "string"],
                 "explanationZH": ["type": "string"],

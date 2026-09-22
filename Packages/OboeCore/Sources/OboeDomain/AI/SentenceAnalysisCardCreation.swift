@@ -5,6 +5,7 @@ public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Senda
     public var kind: KnowledgePointKind
     public var headword: String
     public var reading: String
+    public var pitchAccent: PitchAccent?
     public var meaningZH: String
     public var partOfSpeech: String
     public var usage: String
@@ -20,6 +21,7 @@ public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Senda
         kind: KnowledgePointKind,
         headword: String,
         reading: String = "",
+        pitchAccent: PitchAccent? = nil,
         meaningZH: String,
         partOfSpeech: String = "",
         usage: String = "",
@@ -34,6 +36,7 @@ public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Senda
         self.kind = kind
         self.headword = headword
         self.reading = reading
+        self.pitchAccent = pitchAccent
         self.meaningZH = meaningZH
         self.partOfSpeech = partOfSpeech
         self.usage = usage
@@ -53,7 +56,8 @@ public struct SentenceAnalysisCardDraft: Codable, Equatable, Identifiable, Senda
             partOfSpeech: partOfSpeech,
             exampleJapanese: exampleJapanese,
             exampleTranslationZH: exampleTranslationZH,
-            notes: notes
+            notes: notes,
+            pitchAccent: pitchAccent
         )
     }
 
@@ -123,10 +127,17 @@ public enum SentenceAnalysisCardCommitItem: Equatable, Sendable {
 
 public struct SentenceAnalysisCardBatchCommit: Equatable, Sendable {
     public let deckID: UUID
+    /// 本批 Note 的全部成员牌组；始终包含 `deckID`（home）。
+    public let deckIDs: Set<UUID>
     public let items: [SentenceAnalysisCardCommitItem]
 
-    public init(deckID: UUID, items: [SentenceAnalysisCardCommitItem]) {
+    public init(
+        deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
+        items: [SentenceAnalysisCardCommitItem]
+    ) {
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? []).union([deckID])
         self.items = items
     }
 }
@@ -210,6 +221,7 @@ public struct SentenceAnalysisCardCreationService: Sendable {
 
     public func commit(
         deckID: UUID?,
+        deckIDs: Set<UUID>? = nil,
         drafts: [SentenceAnalysisCardDraft],
         sourceText: String? = nil,
         capture: CaptureCommitContext? = nil
@@ -217,6 +229,7 @@ public struct SentenceAnalysisCardCreationService: Sendable {
         guard let deckID else {
             throw SentenceAnalysisCardCreationError.deckRequired
         }
+        let membership = (deckIDs ?? []).union([deckID])
         try validate(drafts)
         let createdAt = now()
         let items = try drafts.map { draft -> SentenceAnalysisCardCommitItem in
@@ -240,7 +253,8 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         schedulerProfileID: makeID(),
                         createdAt: createdAt,
                         origin: .ai,
-                        sourceText: capture?.sourceText ?? sourceText
+                        sourceText: capture?.sourceText ?? sourceText,
+                        deckIDs: membership
                     )
                 )
             case .grammar:
@@ -259,13 +273,14 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         schedulerProfileID: makeID(),
                         createdAt: createdAt,
                         origin: .ai,
-                        sourceText: capture?.sourceText ?? sourceText
+                        sourceText: capture?.sourceText ?? sourceText,
+                        deckIDs: membership
                     )
                 )
             }
         }
         return try await repository.commitSentenceAnalysisCards(
-            SentenceAnalysisCardBatchCommit(deckID: deckID, items: items),
+            SentenceAnalysisCardBatchCommit(deckID: deckID, deckIDs: membership, items: items),
             capture: capture
         )
     }
@@ -297,6 +312,7 @@ public struct SentenceAnalysisCardCreationService: Sendable {
             kind: kind,
             headword: headword,
             reading: reading,
+            pitchAccent: kind == .vocabulary ? suggestion?.pitchAccent : nil,
             meaningZH: meaning,
             partOfSpeech: suggestion?.partOfSpeech ?? "",
             usage: suggestion?.usage.nonEmpty ?? (kind == .grammar ? item.roleZH : ""),

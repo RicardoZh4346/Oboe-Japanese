@@ -29,23 +29,25 @@ public struct GRDBStudyHistoryRepository: StudyHistoryRepository, Sendable {
                     """,
                 arguments: [studyDayIDValue]
             )
+            // 按成员关系分组：共享 Note 的今日任务在其所属的每个牌组
+            // 各计一次（设计 §4.5）；历史归因仍走 deck_id_at_review。
             let deckCounts = try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT notes.deck_id,
+                    SELECT nd.deck_id,
                            COUNT(DISTINCT CASE
                                WHEN daily_tasks.category_at_admission = 'new'
-                               THEN notes.id END) AS new_count,
+                               THEN cards.note_id END) AS new_count,
                            SUM(CASE WHEN daily_tasks.category_at_admission != 'new'
                                THEN 1 ELSE 0 END) AS review_count
                     FROM daily_tasks
                     JOIN cards ON cards.id = daily_tasks.card_id
-                    JOIN notes ON notes.id = cards.note_id
+                    JOIN note_decks nd ON nd.note_id = cards.note_id
                     WHERE daily_tasks.study_day_id = ?
                       AND daily_tasks.cancelled_at_ms IS NULL
                       AND cards.is_enabled = 1
-                    GROUP BY notes.deck_id
-                    ORDER BY notes.deck_id
+                    GROUP BY nd.deck_id
+                    ORDER BY nd.deck_id
                     """,
                 arguments: [studyDayIDValue]
             ).map { row in

@@ -26,7 +26,13 @@ public struct GRDBKnowledgeSearchRepository: KnowledgeSearchRepository, Sendable
                 containsPattern, containsPattern, containsPattern
             ]
             if let deckID {
-                deckClause = "AND notes.deck_id = ?"
+                // 牌组过滤走 `note_decks` 成员关系（设计 §4.4）。
+                deckClause = """
+                    AND EXISTS (
+                        SELECT 1 FROM note_decks nd
+                        WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                    )
+                    """
                 arguments.append(DatabaseValueCodec.encode(deckID))
             }
             arguments.append(normalizedQuery)
@@ -63,7 +69,11 @@ public struct GRDBKnowledgeSearchRepository: KnowledgeSearchRepository, Sendable
                 arguments: StatementArguments(arguments)
             )
             let hasMore = rows.count > limit
-            let items = try rows.prefix(limit).map(Self.decodeSummary)
+            let membershipMap = try GRDBNoteDeckMemberships.fetchDeckIDMap(
+                noteIDs: rows.prefix(limit).map { $0["id"] as String },
+                in: db
+            )
+            let items = try rows.prefix(limit).map { try Self.decodeSummary($0, membershipMap: membershipMap) }
             return KnowledgeSearchPage(
                 items: items,
                 nextOffset: hasMore ? offset + items.count : nil
@@ -79,22 +89,29 @@ public struct GRDBKnowledgeSearchRepository: KnowledgeSearchRepository, Sendable
         return prefixOnly ? "\(escaped)%" : "%\(escaped)%"
     }
 
-    private static func decodeSummary(_ row: Row) throws -> KnowledgePointSummary {
+    private static func decodeSummary(
+        _ row: Row,
+        membershipMap: [String: Set<String>]
+    ) throws -> KnowledgePointSummary {
         let kindValue: String = row["kind"]
         guard let kind = KnowledgePointKind(rawValue: kindValue) else {
             throw GRDBKnowledgePointRepositoryError.invalidKnowledgePointKind(kindValue)
         }
         let id: String = row["id"]
         let deckID: String = row["deck_id"]
-        return KnowledgePointSummary(
-            id: try DatabaseValueCodec.decodeUUID(id),
-            deckID: try DatabaseValueCodec.decodeUUID(deckID),
+        let deckIDs = try Set(
+            (membershipMap[id] ?? [deckID]).map { try DatabaseValueCodec.decodeUUID($0) }
+        )
+        return try KnowledgePointSummary(
+            id: DatabaseValueCodec.decodeUUID(id),
+            deckID: DatabaseValueCodec.decodeUUID(deckID),
             kind: kind,
             headword: row["headword"],
             reading: row["reading"],
             meaningZH: row["meaning_zh"],
             usage: row["usage"],
-            isFavorite: (row["is_favorite"] as Int) != 0
+            isFavorite: (row["is_favorite"] as Int) != 0,
+            deckIDs: deckIDs
         )
     }
 }

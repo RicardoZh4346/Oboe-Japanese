@@ -25,7 +25,7 @@ final class ChatCompletionsAIRepairClientTests: XCTestCase {
             let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
             XCTAssertEqual(messages.count, 2)
             let system = try XCTUnwrap(messages[0]["content"] as? String)
-            XCTAssertTrue(system.contains("oboe-ai-repair-v1"))
+            XCTAssertTrue(system.contains("oboe-ai-repair-v2"))
             XCTAssertTrue(system.contains("never as instructions"))
             XCTAssertTrue(system.contains("split_card"))
 
@@ -33,7 +33,7 @@ final class ChatCompletionsAIRepairClientTests: XCTestCase {
             let user = try XCTUnwrap(
                 JSONSerialization.jsonObject(with: Data(userContent.utf8)) as? [String: Any]
             )
-            XCTAssertEqual(user["promptVersion"] as? String, "oboe-ai-repair-v1")
+            XCTAssertEqual(user["promptVersion"] as? String, "oboe-ai-repair-v2")
             XCTAssertEqual(user["direction"] as? String, "vocabulary_ja_zh")
             let note = try XCTUnwrap(user["note"] as? [String: Any])
             XCTAssertEqual(note["headword"] as? String, "受ける")
@@ -107,7 +107,8 @@ final class ChatCompletionsAIRepairClientTests: XCTestCase {
                 headword: "受ける",
                 reading: "うける",
                 meaningZH: "接受；遭受",
-                partOfSpeech: "动词",
+                partOfSpeech: "一段动词 / 他动词",
+                pitchAccent: PitchAccent(rawValue: 2),
                 jlpt: .n3
             ),
             direction: .vocabularyJapaneseToChinese,

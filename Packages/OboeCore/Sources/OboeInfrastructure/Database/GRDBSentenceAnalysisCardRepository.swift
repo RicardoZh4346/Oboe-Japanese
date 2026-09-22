@@ -34,11 +34,15 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                     )
                 }
             }
-            try Self.requireDeck(batch.deckID, in: db)
+            for memberDeckID in batch.deckIDs {
+                try Self.requireDeck(memberDeckID, in: db)
+            }
             guard batch.items.allSatisfy({ item in
                 switch item {
-                case let .vocabulary(commit): commit.deckID == batch.deckID
-                case let .grammar(commit): commit.deckID == batch.deckID
+                case let .vocabulary(commit):
+                    commit.deckID == batch.deckID && commit.deckIDs == batch.deckIDs
+                case let .grammar(commit):
+                    commit.deckID == batch.deckID && commit.deckIDs == batch.deckIDs
                 }
             }) else {
                 throw ContentCardError.deckNotFound
@@ -132,8 +136,8 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 INSERT INTO notes(
                     id, deck_id, kind, headword, reading, meaning_zh,
                     part_of_speech, jlpt, notes, origin, source_text,
-                    content_version, created_at_ms, updated_at_ms
-                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                    pitch_accent, content_version, created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 """,
             arguments: [
                 DatabaseValueCodec.encode(commit.noteID),
@@ -146,9 +150,16 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 commit.content.notes,
                 commit.origin.rawValue,
                 commit.sourceText,
+                commit.content.pitchAccent?.rawValue,
                 timestamp,
                 timestamp
             ]
+        )
+        try GRDBContentCardRepository.insertMemberships(
+            noteID: commit.noteID,
+            deckIDs: commit.deckIDs,
+            atMilliseconds: timestamp,
+            in: db
         )
         if let example = commit.content.example {
             try insertExample(
@@ -209,6 +220,12 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 timestamp,
                 timestamp
             ]
+        )
+        try GRDBContentCardRepository.insertMemberships(
+            noteID: commit.noteID,
+            deckIDs: commit.deckIDs,
+            atMilliseconds: timestamp,
+            in: db
         )
         if let example = commit.content.example {
             try insertExample(

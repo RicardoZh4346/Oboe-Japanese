@@ -129,7 +129,10 @@ public struct GrammarExample: Codable, Equatable, Identifiable, Sendable {
 
 public struct GrammarNote: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let grammarForm: String
     public let meaningZH: String
     public let usage: String?
@@ -153,10 +156,12 @@ public struct GrammarNote: Codable, Equatable, Identifiable, Sendable {
         contentVersion: Int,
         createdAt: Date,
         updatedAt: Date,
-        examples: [GrammarExample]
+        examples: [GrammarExample],
+        deckIDs: Set<UUID>? = nil
     ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.grammarForm = grammarForm
         self.meaningZH = meaningZH
         self.usage = usage
@@ -167,6 +172,25 @@ public struct GrammarNote: Codable, Equatable, Identifiable, Sendable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.examples = examples
+    }
+
+    /// 兼容旧 JSON：缺失 `deckIDs` 键时以 home deck 为唯一成员。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        deckID = try container.decode(UUID.self, forKey: .deckID)
+        deckIDs = (try container.decodeIfPresent(Set<UUID>.self, forKey: .deckIDs) ?? [deckID])
+            .union([deckID])
+        grammarForm = try container.decode(String.self, forKey: .grammarForm)
+        meaningZH = try container.decode(String.self, forKey: .meaningZH)
+        usage = try container.decodeIfPresent(String.self, forKey: .usage)
+        connection = try container.decodeIfPresent(String.self, forKey: .connection)
+        jlpt = try container.decodeIfPresent(JLPTLevel.self, forKey: .jlpt)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        contentVersion = try container.decode(Int.self, forKey: .contentVersion)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        examples = try container.decode([GrammarExample].self, forKey: .examples)
     }
 
     public var formData: GrammarFormData {
@@ -186,13 +210,23 @@ public struct GrammarNote: Codable, Equatable, Identifiable, Sendable {
 
 public struct GrammarDraft: Codable, Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；对应 payload 的 `homeDeckID`/旧 `deckID`。
     public let deckID: UUID?
+    /// 草稿提交后 Note 应归属的全部牌组；始终包含 `deckID`（若非空）。
+    public let deckIDs: Set<UUID>
     public let formData: GrammarFormData
     public let updatedAt: Date
 
-    public init(id: UUID, deckID: UUID?, formData: GrammarFormData, updatedAt: Date) {
+    public init(
+        id: UUID,
+        deckID: UUID?,
+        deckIDs: Set<UUID>? = nil,
+        formData: GrammarFormData,
+        updatedAt: Date
+    ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? []).union(deckID.map { [$0] } ?? [])
         self.formData = formData
         self.updatedAt = updatedAt
     }
@@ -232,10 +266,16 @@ public struct GrammarService: Sendable {
     }
 
     @discardableResult
-    public func saveDraft(id: UUID?, deckID: UUID?, formData: GrammarFormData) async throws -> GrammarDraft {
+    public func saveDraft(
+        id: UUID?,
+        deckID: UUID?,
+        deckIDs: Set<UUID>? = nil,
+        formData: GrammarFormData
+    ) async throws -> GrammarDraft {
         let draft = GrammarDraft(
             id: id ?? makeID(),
             deckID: deckID,
+            deckIDs: deckIDs,
             formData: formData,
             updatedAt: now()
         )

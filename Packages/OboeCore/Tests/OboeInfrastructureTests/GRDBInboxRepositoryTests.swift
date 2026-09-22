@@ -627,6 +627,7 @@ private extension GRDBInboxRepositoryTests {
                 """,
             arguments: [DatabaseValueCodec.encode(id), DatabaseValueCodec.encode(deckID)]
         )
+        try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
     }
 
     static func insertDraft(in db: Database, id: String) throws {

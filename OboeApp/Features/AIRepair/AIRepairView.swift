@@ -334,10 +334,11 @@ private struct AIRepairSuggestionPreviewView: View {
     /// alert only fires after the edit sheet has fully dismissed.
     @State private var pendingEditedAdopt = false
     /// T09 split picks: per-candidate direction sets (index → kinds),
-    /// the shared deck and the required original-card disposition — nil
-    /// until the user picks one (推荐暂停只是标签，不是默认值).
+    /// the target deck membership (home + members) and the required
+    /// original-card disposition — nil until the user picks one
+    /// (推荐暂停只是标签，不是默认值).
     @State private var splitDirections: [Int: Set<CardTemplateKind>] = [:]
-    @State private var splitDeckID: UUID?
+    @State private var splitMembership = DeckMembershipSelection()
     @State private var splitDisposition: AIRepairOriginalCardDisposition?
     @State private var showsSplitConfirmation = false
 
@@ -451,8 +452,11 @@ private struct AIRepairSuggestionPreviewView: View {
                     splitDirections[index] = defaults.isEmpty ? applicable : defaults
                 }
             }
-            if splitDeckID == nil {
-                splitDeckID = model.targetDeckID
+            if splitMembership.deckIDs.isEmpty {
+                splitMembership = DeckMembershipSelection(
+                    homeDeckID: model.targetDeckID,
+                    deckIDs: model.targetDeckID.map { [$0] } ?? []
+                ).normalized(decks: model.decks)
             }
         }
         .alert("采用此建议？", isPresented: $showsAdoptConfirmation) {
@@ -469,7 +473,8 @@ private struct AIRepairSuggestionPreviewView: View {
         }
         .alert("确认拆分？", isPresented: $showsSplitConfirmation) {
             Button("拆分") {
-                guard let deckID = splitDeckID,
+                guard let deckID = splitMembership.homeDeckID,
+                      !splitMembership.deckIDs.isEmpty,
                       let disposition = splitDisposition,
                       let preview else { return }
                 let directions = preview.splitContents.indices.map { index in
@@ -480,6 +485,7 @@ private struct AIRepairSuggestionPreviewView: View {
                         at: suggestionIndex,
                         edited: adoptEditedCandidate,
                         deckID: deckID,
+                        deckIDs: splitMembership.deckIDs,
                         directions: directions,
                         disposition: disposition
                     )
@@ -659,22 +665,19 @@ private struct AIRepairSuggestionPreviewView: View {
         if model.decks.isEmpty {
             LabeledContent("新卡所属牌组", value: "与原笔记相同")
         } else {
-            Picker("新卡所属牌组", selection: Binding(
-                get: { splitDeckID },
-                set: { splitDeckID = $0 }
-            )) {
-                ForEach(model.decks) { deck in
-                    Text(deck.name).tag(deck.id as UUID?)
-                }
-            }
-            .accessibilityIdentifier("ai-repair-split-deck")
+            DeckMembershipField(
+                decks: model.decks,
+                selection: $splitMembership,
+                rowAccessibilityID: "ai-repair-split-deck"
+            )
         }
     }
 
     private var canAdoptSplit: Bool {
         guard model.canCommit,
               splitDisposition != nil,
-              splitDeckID != nil,
+              splitMembership.homeDeckID != nil,
+              !splitMembership.deckIDs.isEmpty,
               let preview, !preview.splitContents.isEmpty else { return false }
         return preview.splitContents.indices.allSatisfy {
             !(splitDirections[$0]?.isEmpty ?? true)
@@ -686,15 +689,18 @@ private struct AIRepairSuggestionPreviewView: View {
     private var splitConfirmationMessage: String {
         let noteCount = preview?.splitContents.count ?? 0
         let cardCount = splitDirections.values.reduce(0) { $0 + $1.count }
-        let deckName = model.decks.first(where: { $0.id == splitDeckID })?.name
+        let homeName = model.decks.first(where: { $0.id == splitMembership.homeDeckID })?.name
             ?? "所选牌组"
+        let deckDescription = splitMembership.deckIDs.count <= 1
+            ? "「\(homeName)」"
+            : "\(splitMembership.deckIDs.count) 个牌组（归属「\(homeName)」）"
         let disposition: String
         switch splitDisposition {
         case .keep, nil: disposition = "保留"
         case .pause: disposition = "暂停"
         case .delete: disposition = "删除"
         }
-        return "将在「\(deckName)」创建 \(noteCount) 个新笔记、\(cardCount) 张新卡（从「新卡」状态开始学习）；原卡将被\(disposition)。"
+        return "将在\(deckDescription)创建 \(noteCount) 个新笔记、\(cardCount) 张新卡（从「新卡」状态开始学习）；原卡将被\(disposition)。"
     }
 
     private var committedPreviewTitle: String {
@@ -737,11 +743,19 @@ private struct AIRepairCandidateEditView: View {
                     TextField(kind == .vocabulary ? "写法" : "语法形式", text: $fields.headword)
                     if kind == .vocabulary {
                         TextField("读音", text: $fields.reading)
+                        VocabularyPitchAccentField(
+                            reading: $fields.reading,
+                            pitchAccent: $fields.pitchAccent,
+                            accessibilityIdentifier: "ai-repair-pitch-accent-picker"
+                        )
                     }
                     TextField("释义", text: $fields.meaningZH, axis: .vertical)
                         .lineLimit(2...4)
                     if kind == .vocabulary {
-                        TextField("词性", text: $fields.partOfSpeech)
+                        VocabularyPartOfSpeechField(
+                            value: $fields.partOfSpeech,
+                            accessibilityIdentifier: "ai-repair-part-of-speech-field"
+                        )
                     } else {
                         TextField("用法", text: $fields.usage, axis: .vertical)
                             .lineLimit(1...3)

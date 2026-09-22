@@ -67,6 +67,8 @@ private actor DeckRepositorySpy: DeckRepository {
 
     func deleteDeckIfEmpty(id: UUID) async throws -> DeckDeletionResult { .deleted }
 
+    func previewDeletionImpact(id: UUID) async throws -> DeckDeletionImpact? { nil }
+
     func deleteDeck(
         id: UUID,
         strategy: DeckDeletionStrategy,

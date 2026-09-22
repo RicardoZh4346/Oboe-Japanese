@@ -81,19 +81,18 @@ struct TodayView: View {
                 } else if let plan = model.plan {
                     ScrollView {
                         VStack(spacing: 18) {
+                            heroCard(plan)
                             summary(plan.summary)
-                            if let statistics = model.statistics {
-                                todayStatistics(statistics)
+                            if let item = pendingContinueItem {
+                                continueCaptureEntry(item)
                             }
                             inboxEntry
                             if model.showsAdaptiveEntry {
                                 adaptiveEntry
                             }
-                            if let item = pendingContinueItem {
-                                continueCaptureEntry(item)
+                            if let statistics = model.statistics {
+                                todayStatistics(statistics)
                             }
-                            sessionStatus(plan)
-                            startButtons(plan)
                         }
                         .padding()
                     }
@@ -181,16 +180,18 @@ struct TodayView: View {
                 Spacer()
                 if let fraction = summary.completionFraction {
                     Text(fraction, format: .percent.precision(.fractionLength(0)))
-                        .font(.headline.monospacedDigit())
+                        .font(.headline)
+                        .monospacedDigit()
                         .accessibilityIdentifier("today-completion-percent")
                 } else {
                     Text("暂无任务")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                 }
             }
             if let fraction = summary.completionFraction {
                 ProgressView(value: fraction)
                     .accessibilityLabel("今日完成比例")
+                    .accessibilityRespondsToUserInteraction(false)
             }
             LazyVGrid(columns: summaryColumns, spacing: 12) {
                 SummaryMetric(title: "新词", value: summary.newCount, tint: .blue, identifier: "today-new-count")
@@ -232,9 +233,10 @@ struct TodayView: View {
                     VStack(spacing: 4) {
                         Text(rating.title)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                         Text("\(statistics.ratings[rating])")
-                            .font(.headline.monospacedDigit())
+                            .font(.headline)
+                            .monospacedDigit()
                     }
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .combine)
@@ -247,7 +249,7 @@ struct TodayView: View {
                     : "统计按有效评分事件计算，已撤销评分不计入。"
             )
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
         }
         .padding()
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
@@ -276,7 +278,7 @@ struct TodayView: View {
                         .foregroundStyle(OboeTheme.Colors.accent)
                     Text(item.text)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -288,7 +290,7 @@ struct TodayView: View {
                 clearPendingContinueItem()
             } label: {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("today-continue-capture-dismiss")
@@ -337,8 +339,9 @@ struct TodayView: View {
                         ? "\(unprocessedInboxCount) 条待处理"
                         : "暂无待处理"
                 )
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                 .accessibilityIdentifier("today-inbox-count")
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
@@ -391,8 +394,9 @@ struct TodayView: View {
                     .font(.subheadline.weight(.medium))
                 Spacer()
                 Text("\(model.adaptiveLeechCount) 张卡最近经常遗忘")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                     .accessibilityIdentifier("today-adaptive-count")
                 Image(systemName: "chevron.right")
                     .font(.caption.bold())
@@ -491,74 +495,175 @@ struct TodayView: View {
         )
     }
 
-    @ViewBuilder
-    private func sessionStatus(_ plan: TodayPlan) -> some View {
-        if plan.isDayComplete {
-            ContentUnavailableView(
-                "今日任务全部完成",
-                systemImage: "checkmark.circle.fill",
-                description: Text("明天 04:00 后会生成新的学习日计划。")
-            )
-            .accessibilityIdentifier("today-day-complete")
-        } else if plan.availableNow.isEmpty, let next = plan.nextAvailableAt {
-            ContentUnavailableView(
-                "当前已完成",
-                systemImage: "clock",
-                description: Text("\(StudyTimeText.until(next))后还有 \(plan.availableLater.count) 张。")
-            )
-            .accessibilityIdentifier("today-waiting-state")
+    // MARK: - 首屏 Hero（T14，设计 §8.1/§8.3）
+
+    /// Hero 卡即主 CTA：可学任务时整卡跳转「全部牌组」scope，卡内整合
+    /// now/later/完成/等待状态与主牌组一行。无可学任务时退化为纯展示
+    /// 状态卡（不包 NavigationLink），保证内部标识符可被查询、
+    /// VoiceOver 按 标题→状态→主牌组 顺序朗读。
+    private func heroCard(_ plan: TodayPlan) -> some View {
+        let hero = heroPresentation(plan)
+        return Group {
+            if hero.isActionable {
+                NavigationLink(value: StudyScope(deckID: nil, title: "全部牌组")) {
+                    heroContent(hero)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("today-start-all-button")
+            } else {
+                heroContent(hero)
+            }
         }
     }
 
-    @ViewBuilder
-    private func startButtons(_ plan: TodayPlan) -> some View {
-        if !model.decks.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                NavigationLink(value: StudyScope(deckID: nil, title: "全部牌组")) {
-                    Label("开始学习", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(plan.availableNow.isEmpty)
-                .accessibilityIdentifier("today-start-all-button")
-
-                Text("按牌组学习")
-                    .font(.headline)
-                    .padding(.top, 6)
-                ForEach(model.decks) { deck in
-                    let counts = model.counts(for: deck.id)
-                    NavigationLink(value: StudyScope(deckID: deck.id, title: deck.name)) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(deck.name)
-                                Text("现在 \(counts.now) · 稍后 \(counts.later)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.bold())
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
+    private func heroContent(_ hero: HeroPresentation) -> some View {
+        VStack(alignment: .leading, spacing: OboeTheme.Spacing.sm) {
+            if dynamicTypeSize.isAccessibilitySize {
+                heroIcon(hero)
+                heroTitle(hero)
+                heroStatus(hero)
+            } else {
+                HStack(spacing: OboeTheme.Spacing.md) {
+                    heroIcon(hero)
+                    VStack(alignment: .leading, spacing: OboeTheme.Spacing.xxs) {
+                        heroTitle(hero)
+                        heroStatus(hero)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(counts.now == 0)
-                    .accessibilityIdentifier("today-start-deck-\(deck.id.uuidString)")
-                    Divider()
+                    Spacer(minLength: 0)
+                    if hero.isActionable {
+                        Image(systemName: "chevron.right")
+                            .font(.title3.bold())
+                            .foregroundStyle(.white.opacity(0.9))
+                            .accessibilityHidden(true)
+                    }
                 }
             }
-            .padding()
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
-        } else {
-            ContentUnavailableView(
-                "还没有学习内容",
-                systemImage: "rectangle.stack.badge.plus",
-                description: Text("先到“牌组”创建牌组，再从“添加”保存手动卡片。")
-            )
-            .accessibilityIdentifier("today-no-decks")
+            Text("主牌组 · \(model.primaryDeckName ?? "未设置")")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(
+                    hero.isActionable ? Color.white.opacity(0.85) : OboeTheme.Colors.secondaryOnCard
+                )
+                .accessibilityIdentifier("today-primary-deck")
         }
+        .padding(OboeTheme.Spacing.cardPadding)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 150,
+            alignment: .leading
+        )
+        .background {
+            heroBackground(actionable: hero.isActionable)
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: OboeTheme.Radius.card,
+                        style: .continuous
+                    )
+                )
+        }
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: OboeTheme.Radius.card,
+                style: .continuous
+            )
+        )
+    }
+
+    private func heroTitle(_ hero: HeroPresentation) -> some View {
+        Text("开始学习")
+            .font(.title.bold())
+            .foregroundStyle(hero.isActionable ? Color.white : Color.primary)
+    }
+
+    /// 状态行：图标与文案同时区分状态（不依赖颜色），
+    /// `statusIdentifier` 保留既有 UI 测试锚点。
+    private func heroStatus(_ hero: HeroPresentation) -> some View {
+        Text(hero.statusText)
+            .font(.subheadline)
+            .foregroundStyle(
+                hero.isActionable ? Color.white.opacity(0.85) : OboeTheme.Colors.secondaryOnCard
+            )
+            .accessibilityIdentifier(hero.statusIdentifier)
+    }
+
+    private func heroIcon(_ hero: HeroPresentation) -> some View {
+        Image(systemName: hero.icon)
+            .font(.system(size: 44, weight: .semibold))
+            .foregroundStyle(hero.isActionable ? Color.white : hero.iconTint)
+            .accessibilityHidden(true)
+    }
+
+    /// 状态优先级：无牌组 > 全天完成 > 等待下一批 > 可学习。
+    /// 无牌组时保留 `today-no-decks` 语义——引导创建而非跳转。
+    private func heroPresentation(_ plan: TodayPlan) -> HeroPresentation {
+        if model.decks.isEmpty {
+            return HeroPresentation(
+                icon: "rectangle.stack.badge.plus",
+                statusText: "还没有学习内容，先到「牌组」创建牌组",
+                isActionable: false,
+                statusIdentifier: "today-no-decks",
+                iconTint: OboeTheme.Colors.accent
+            )
+        }
+        if plan.isDayComplete {
+            return HeroPresentation(
+                icon: "checkmark.circle.fill",
+                statusText: "今日任务全部完成，明天 04:00 后生成新计划",
+                isActionable: false,
+                statusIdentifier: "today-day-complete",
+                iconTint: .green
+            )
+        }
+        if plan.availableNow.isEmpty {
+            if let next = plan.nextAvailableAt {
+                return HeroPresentation(
+                    icon: "clock",
+                    statusText: "当前已完成，\(StudyTimeText.until(next))后还有 \(plan.availableLater.count) 张",
+                    isActionable: false,
+                    statusIdentifier: "today-waiting-state",
+                    iconTint: .orange
+                )
+            }
+            return HeroPresentation(
+                icon: "clock",
+                statusText: "暂无可学任务",
+                isActionable: false,
+                statusIdentifier: "today-waiting-state",
+                iconTint: .orange
+            )
+        }
+        return HeroPresentation(
+            icon: "play.fill",
+            statusText: "现在 \(plan.availableNow.count) 张 · 今日完成 \(plan.summary.completedCount)",
+            isActionable: true,
+            statusIdentifier: "today-hero-ready",
+            iconTint: .white
+        )
+    }
+
+    /// 压暗端用黑色叠加而非半透明 accent：白字在渐变任何位置都保持
+    /// ≥4.5:1 对比度（深色模式的 accent 较亮，黑叠层同样生效）。
+    private func heroBackground(actionable: Bool) -> AnyView {
+        guard actionable else {
+            return AnyView(OboeTheme.Colors.cardBackground)
+        }
+        return AnyView(
+            ZStack {
+                OboeTheme.Colors.accent
+                LinearGradient(
+                    colors: [.black.opacity(0.22), .black.opacity(0.42)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        )
+    }
+
+    private struct HeroPresentation {
+        let icon: String
+        let statusText: String
+        let isActionable: Bool
+        let statusIdentifier: String
+        let iconTint: Color
     }
 }
 private struct SummaryMetric: View {
@@ -573,10 +678,11 @@ private struct SummaryMetric: View {
                 .fill(tint)
                 .frame(width: 8, height: 8)
             Text(title)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
             Spacer()
             Text("\(value)")
-                .font(.headline.monospacedDigit())
+                .font(.headline)
+                .monospacedDigit()
                 .accessibilityIdentifier(identifier)
         }
     }
@@ -591,9 +697,10 @@ private struct StatisticMetric: View {
         VStack(spacing: 4) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
             Text("\(value)")
-                .font(.title3.bold().monospacedDigit())
+                .font(.title3.bold())
+                .monospacedDigit()
                 .accessibilityIdentifier(identifier)
         }
         .frame(maxWidth: .infinity)
@@ -612,6 +719,9 @@ private final class TodayViewModel {
     var plan: TodayPlan?
     var statistics: TodayReviewStatistics?
     var decks: [DeckSummary] = []
+    /// 主牌组显示名：settings.primaryDeckID 已是有效值（未设置/失效时自动
+    /// 取排序最前的牌组）；nil 只在没有任何牌组时出现，View 显示「未设置」。
+    var primaryDeckName: String?
     var adaptiveLeechCount = 0
     var leechRemindersEnabled = true
     var isLoading = true
@@ -635,18 +745,32 @@ private final class TodayViewModel {
         self.adaptivePreferencesService = adaptivePreferencesService
     }
 
+    /// T13（设计 §8.2）：plan/decks/settings 并发发出；statistics 依赖
+    /// plan 的 studyDay.id，拿到 plan 后再并行展开。`primaryDeckName`
+    /// 由 settings.primaryDeckID 在 decks 中解析——并发读取之间牌组被
+    /// 删除时安全回落为 nil，由 View 统一显示「未设置」。
     func load() async {
         isLoading = true
+        let timeZoneID = TimeZone.autoupdatingCurrent.identifier
         do {
-            let freshPlan = try await studyService.buildTodayPlan(
-                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            async let planRequest = studyService.buildTodayPlan(
+                defaultTimeZoneID: timeZoneID
             )
             async let decksRequest = deckService.fetchDecks()
+            async let settingsRequest = studyService.loadLearningSettings(
+                defaultTimeZoneID: timeZoneID
+            )
+            let freshPlan = try await planRequest
             async let statisticsRequest = historyService.fetchTodayStatistics(
                 studyDayID: freshPlan.studyDay.id
             )
+            let fetchedDecks = try await decksRequest
+            let settings = try await settingsRequest
             plan = freshPlan
-            decks = try await decksRequest
+            decks = fetchedDecks
+            primaryDeckName = settings.primaryDeckID.flatMap { id in
+                fetchedDecks.first { $0.id == id }?.name
+            }
             statistics = try await statisticsRequest
             await loadAdaptiveState()
             loadErrorMessage = nil
@@ -678,14 +802,6 @@ private final class TodayViewModel {
         } catch {
             adaptiveLeechCount = 0
         }
-    }
-
-    func counts(for deckID: UUID) -> (now: Int, later: Int) {
-        guard let plan else { return (0, 0) }
-        return (
-            plan.availableNow.count { $0.deckID == deckID },
-            plan.availableLater.count { $0.deckID == deckID }
-        )
     }
 
     func refreshPeriodically() async {

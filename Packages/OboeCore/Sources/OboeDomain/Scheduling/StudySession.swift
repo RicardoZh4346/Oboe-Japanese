@@ -3,7 +3,10 @@ import Foundation
 public struct ReviewCardContent: Equatable, Sendable {
     public let cardID: UUID
     public let noteID: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let templateKind: CardTemplateKind
     public let headword: String
     public let reading: String?
@@ -14,6 +17,7 @@ public struct ReviewCardContent: Equatable, Sendable {
     public let exampleJapanese: String?
     public let exampleTranslationZH: String?
     public let notes: String?
+    public let pitchAccent: PitchAccent?
     public let contentVersion: Int
 
     public init(
@@ -30,11 +34,14 @@ public struct ReviewCardContent: Equatable, Sendable {
         exampleJapanese: String?,
         exampleTranslationZH: String?,
         notes: String?,
-        contentVersion: Int = 1
+        contentVersion: Int = 1,
+        pitchAccent: PitchAccent? = nil,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.cardID = cardID
         self.noteID = noteID
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.templateKind = templateKind
         self.headword = headword
         self.reading = reading
@@ -45,6 +52,7 @@ public struct ReviewCardContent: Equatable, Sendable {
         self.exampleJapanese = exampleJapanese
         self.exampleTranslationZH = exampleTranslationZH
         self.notes = notes
+        self.pitchAccent = pitchAccent
         self.contentVersion = contentVersion
     }
 }
@@ -202,12 +210,15 @@ public struct StudySessionService: Sendable {
         )
     }
 
+    /// `scopeDeckID` 为复习会话的牌组 scope；nil 表示从“全部今日
+    /// 任务”进入，历史归因到 home 牌组（设计 §4.7）。
     public func submit(
         card: LoadedReviewCard,
         rating: ReviewRating,
         studyDay: StudyDay,
         eventID: UUID,
-        durationMilliseconds: Int
+        durationMilliseconds: Int,
+        scopeDeckID: UUID? = nil
     ) async throws -> ReviewLogRecord {
         try await SubmitReview(
             repository: submissionRepository,
@@ -220,7 +231,8 @@ public struct StudySessionService: Sendable {
                 expectedStateVersion: card.stateVersion,
                 rating: rating,
                 durationMilliseconds: durationMilliseconds,
-                studyDay: studyDay.context
+                studyDay: studyDay.context,
+                scopeDeckID: scopeDeckID
             )
         )
     }

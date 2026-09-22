@@ -7,6 +7,10 @@ struct JLPTLibraryView: View {
     let importer: any JLPTImporting
     let deckService: DeckManagementService
     let speechService: any SpeechService
+    /// T12: 已导入词条的音调/例句中文回填状态（设计 §7.4）；进入本页
+    /// 会触发一次幂等调度，失败时在此给出可重试入口。
+    let enrichmentStatus: JLPTEnrichmentStatus
+    let scheduleEnrichment: () -> Void
     /// T25: the dashboard's weak-vocabulary list reuses the adaptive
     /// detail/actions — same services, same editor destinations.
     let adaptiveCardService: AdaptiveCardService
@@ -45,6 +49,7 @@ struct JLPTLibraryView: View {
                 }
                 .accessibilityIdentifier("jlpt-progress-entry")
             }
+            enrichmentStatusSection
             Section {
                 ForEach(levels, id: \.self) { level in
                     NavigationLink {
@@ -87,7 +92,10 @@ struct JLPTLibraryView: View {
         }
         .overlay { if isLoading { ProgressView("正在载入词库…") } }
         .navigationTitle("JLPT 词汇库")
-        .task { await refresh() }
+        .task {
+            scheduleEnrichment()
+            await refresh()
+        }
         .sheet(isPresented: $isShowingNotice) { noticeSheet }
         .alert("无法读取词库", isPresented: errorBinding) {
             Button("好", role: .cancel) {}
@@ -116,6 +124,40 @@ struct JLPTLibraryView: View {
         }
         .presentationDetents([.medium])
         .interactiveDismissDisabled(!didShowNotice)
+    }
+
+    /// 最低限度回填提示（设计 §7.4）：只在进行/失败时占用一行；
+    /// 失败保留可重试入口，不展示内部错误细节。
+    @ViewBuilder
+    private var enrichmentStatusSection: some View {
+        switch enrichmentStatus {
+        case .idle:
+            EmptyView()
+        case let .running(processed, total):
+            Section {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text(
+                        total > 0
+                            ? "正在补充音调与例句翻译 \(processed)/\(total)"
+                            : "正在补充音调与例句翻译…"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("jlpt-enrichment-running")
+            }
+        case .failed:
+            Section {
+                Label(
+                    "词库新字段补充未完成；学习不受影响，可重试。",
+                    systemImage: "arrow.triangle.2.circlepath"
+                )
+                .font(.footnote)
+                Button("重试") { scheduleEnrichment() }
+                    .accessibilityIdentifier("jlpt-enrichment-retry")
+            }
+        }
     }
 
     private var errorBinding: Binding<Bool> {
@@ -370,6 +412,9 @@ private struct JLPTVocabularyRow: View {
                 .lineLimit(2)
             HStack {
                 Text(vocabulary.level.rawValue)
+                if let pitch = pitchAccentDisplayValue(vocabulary.pitchAccent) {
+                    Text("音调 \(pitch)")
+                }
                 Spacer()
                 Text(isImported ? "已加入学习" : "未加入")
             }
@@ -403,6 +448,9 @@ struct JLPTVocabularyDetailView: View {
                         if let partOfSpeech = vocabulary.partOfSpeech {
                             LabeledContent("词性", value: partOfSpeech)
                         }
+                        if let pitch = pitchAccentDisplayValue(vocabulary.pitchAccent) {
+                            LabeledContent("音调", value: pitch)
+                        }
                         LabeledContent("等级", value: vocabulary.level.rawValue)
                     }
 
@@ -424,6 +472,10 @@ struct JLPTVocabularyDetailView: View {
                             ForEach(vocabulary.examples) { example in
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(example.japanese)
+                                    if let translation = example.translationZH {
+                                        Text(translation)
+                                            .foregroundStyle(.secondary)
+                                    }
                                     if let english = example.english {
                                         Text(english)
                                             .font(.caption)
@@ -440,8 +492,11 @@ struct JLPTVocabularyDetailView: View {
                                 errorMessage = error.localizedDescription
                             }
                         }
-                        Button("导入到牌组", systemImage: "square.and.arrow.down") {
+                        Button {
                             isShowingImport = true
+                        } label: {
+                            Text("导入到牌组")
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -518,7 +573,7 @@ private struct JLPTSingleImportSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var decks: [DeckSummary] = []
-    @State private var selectedDeckID: UUID?
+    @State private var selection = DeckMembershipSelection()
     @State private var meaningZH: String
     @State private var isImporting = false
     @State private var message: String?
@@ -548,11 +603,11 @@ private struct JLPTSingleImportSheet: View {
                         Text("请先在牌组页创建一个牌组。")
                             .foregroundStyle(.secondary)
                     } else {
-                        Picker("牌组", selection: $selectedDeckID) {
-                            ForEach(decks) { deck in
-                                Text(deck.name).tag(Optional(deck.id))
-                            }
-                        }
+                        DeckMembershipField(
+                            decks: decks,
+                            selection: $selection,
+                            rowAccessibilityID: "jlpt-import-deck-picker"
+                        )
                     }
                 }
 
@@ -578,7 +633,8 @@ private struct JLPTSingleImportSheet: View {
     }
 
     private var canImport: Bool {
-        selectedDeckID != nil
+        selection.homeDeckID != nil
+            && !selection.deckIDs.isEmpty
             && !meaningZH.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !isImporting
     }
@@ -586,19 +642,25 @@ private struct JLPTSingleImportSheet: View {
     private func loadDecks() async {
         do {
             decks = try await deckService.fetchDecks()
-            selectedDeckID = selectedDeckID ?? decks.first?.id
+            selection = selection.normalized(decks: decks)
+            if selection.deckIDs.isEmpty, let first = decks.first?.id {
+                selection = DeckMembershipSelection(single: first)
+            }
         } catch {
             message = error.localizedDescription
         }
     }
 
     private func performImport() async {
-        guard let selectedDeckID else { return }
+        guard let homeDeckID = selection.homeDeckID, !selection.deckIDs.isEmpty else {
+            return
+        }
         isImporting = true
         do {
             let result = try await importer.importVocabulary(
                 vocabulary,
-                deckID: selectedDeckID,
+                deckID: homeDeckID,
+                deckIDs: selection.deckIDs,
                 meaningZH: meaningZH,
                 directions: Set(VocabularyCardDirection.allCases)
             )

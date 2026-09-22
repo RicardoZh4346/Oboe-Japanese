@@ -30,6 +30,7 @@ public enum AIRepairSuggestionType: String, CaseIterable, Codable, Hashable, Sen
 public enum AIRepairClearableField: String, CaseIterable, Codable, Hashable, Sendable {
     case reading
     case partOfSpeech
+    case pitchAccent
     case usage
     case connection
     case notes
@@ -53,6 +54,7 @@ public struct AIRepairFieldPatch: Codable, Equatable, Sendable {
     public var reading: String?
     public var meaningZH: String?
     public var partOfSpeech: String?
+    public var pitchAccent: PitchAccent?
     public var usage: String?
     public var connection: String?
     public var notes: String?
@@ -67,12 +69,14 @@ public struct AIRepairFieldPatch: Codable, Equatable, Sendable {
         usage: String? = nil,
         connection: String? = nil,
         notes: String? = nil,
-        examples: [AIRepairExampleCandidate]? = nil
+        examples: [AIRepairExampleCandidate]? = nil,
+        pitchAccent: PitchAccent? = nil
     ) {
         self.headword = headword
         self.reading = reading
         self.meaningZH = meaningZH
         self.partOfSpeech = partOfSpeech
+        self.pitchAccent = pitchAccent
         self.usage = usage
         self.connection = connection
         self.notes = notes
@@ -89,6 +93,7 @@ public struct AIRepairNoteCandidate: Codable, Equatable, Sendable {
     public var reading: String?
     public var meaningZH: String
     public var partOfSpeech: String?
+    public var pitchAccent: PitchAccent?
     public var jlpt: String?
     public var usage: String?
     public var connection: String?
@@ -105,13 +110,15 @@ public struct AIRepairNoteCandidate: Codable, Equatable, Sendable {
         usage: String? = nil,
         connection: String? = nil,
         notes: String? = nil,
-        examples: [AIRepairExampleCandidate]? = nil
+        examples: [AIRepairExampleCandidate]? = nil,
+        pitchAccent: PitchAccent? = nil
     ) {
         self.kind = kind
         self.headword = headword
         self.reading = reading
         self.meaningZH = meaningZH
         self.partOfSpeech = partOfSpeech
+        self.pitchAccent = pitchAccent
         self.jlpt = jlpt
         self.usage = usage
         self.connection = connection
@@ -152,7 +159,7 @@ public struct AIRepairResponse: Codable, Equatable, Sendable {
     public var suggestions: [AIRepairSuggestion]
 
     public init(
-        schemaVersion: Int = AIRepairDraftFormat.currentSchemaVersion,
+        schemaVersion: Int = AIRepairPromptV2.schemaVersion,
         problemTypes: [AIRepairProblemType],
         summary: String,
         suggestions: [AIRepairSuggestion]

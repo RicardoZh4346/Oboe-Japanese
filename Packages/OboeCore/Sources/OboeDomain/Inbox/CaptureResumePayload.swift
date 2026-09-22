@@ -19,7 +19,11 @@ public struct CaptureTextSelection: Codable, Equatable, Sendable {
 /// the revision analysis ran against, and a pending commit operation ID.
 public struct CaptureResumePayload: Equatable, Sendable {
     public var selection: CaptureTextSelection?
+    /// 归属（home）牌组。v0.5 起是 `targetDeckIDs` 中的一员；旧 payload 只有
+    /// 这一个键时解码自动迁移为单元素集合。
     public var targetDeckID: UUID?
+    /// 批量制卡后 Note 应归属的全部牌组；始终包含 `targetDeckID`（若非空）。
+    public var targetDeckIDs: Set<UUID>
     public var vocabularyDirections: Set<VocabularyCardDirection>
     public var grammarFormToExplanation: Bool
     public var selectedAnalysisItemIDs: [UUID]
@@ -30,6 +34,7 @@ public struct CaptureResumePayload: Equatable, Sendable {
     public init(
         selection: CaptureTextSelection? = nil,
         targetDeckID: UUID? = nil,
+        targetDeckIDs: Set<UUID>? = nil,
         vocabularyDirections: Set<VocabularyCardDirection> = [.japaneseToChinese],
         grammarFormToExplanation: Bool = true,
         selectedAnalysisItemIDs: [UUID] = [],
@@ -39,6 +44,7 @@ public struct CaptureResumePayload: Equatable, Sendable {
     ) {
         self.selection = selection
         self.targetDeckID = targetDeckID
+        self.targetDeckIDs = (targetDeckIDs ?? []).union(targetDeckID.map { [$0] } ?? [])
         self.vocabularyDirections = vocabularyDirections
         self.grammarFormToExplanation = grammarFormToExplanation
         self.selectedAnalysisItemIDs = selectedAnalysisItemIDs
@@ -147,6 +153,7 @@ public enum CaptureResumePayloadCodec {
         var version: Int
         var selection: CaptureTextSelection?
         var targetDeckID: UUID?
+        var targetDeckIDs: [UUID]?
         var vocabularyDirections: Set<VocabularyCardDirection>?
         var grammarFormToExplanation: Bool?
         var selectedAnalysisItemIDs: [UUID]?
@@ -158,6 +165,7 @@ public enum CaptureResumePayloadCodec {
             version = CaptureResumePayloadFormat.currentVersion
             selection = payload.selection
             targetDeckID = payload.targetDeckID
+            targetDeckIDs = payload.targetDeckIDs.isEmpty ? nil : Array(payload.targetDeckIDs)
             vocabularyDirections = payload.vocabularyDirections
             grammarFormToExplanation = payload.grammarFormToExplanation
             selectedAnalysisItemIDs = payload.selectedAnalysisItemIDs
@@ -170,6 +178,7 @@ public enum CaptureResumePayloadCodec {
             CaptureResumePayload(
                 selection: selection,
                 targetDeckID: targetDeckID,
+                targetDeckIDs: targetDeckIDs.map(Set.init),
                 vocabularyDirections: vocabularyDirections ?? [.japaneseToChinese],
                 grammarFormToExplanation: grammarFormToExplanation ?? true,
                 selectedAnalysisItemIDs: selectedAnalysisItemIDs ?? [],

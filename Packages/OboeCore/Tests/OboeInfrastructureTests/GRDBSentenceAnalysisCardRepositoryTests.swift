@@ -41,6 +41,95 @@ final class GRDBSentenceAnalysisCardRepositoryTests: XCTestCase {
         XCTAssertEqual(exampleCount, 2)
     }
 
+    /// T07: 多牌组批量建卡——每个新 Note 写入全部成员行，home 归 batch.deckID。
+    func testMultiDeckBatchWritesMembershipForEveryNote() async throws {
+        let location = try SentenceCardTestDatabaseLocation()
+        defer { location.remove() }
+        let database = try OboeDatabase(path: location.databaseURL.path)
+        let homeDeck = UUID()
+        let memberDeck = UUID()
+        try await database.pool.write { db in
+            try insertSentenceCardDeck(id: homeDeck, in: db)
+            try insertSentenceCardDeck(id: memberDeck, in: db)
+        }
+        let repository = GRDBSentenceAnalysisCardRepository(database: database)
+        let service = SentenceAnalysisCardCreationService(repository: repository)
+        let result = makeInfrastructureSentenceAnalysisResult()
+        let drafts = try service.makeDrafts(
+            from: result,
+            selectedItemIDs: Set(result.items.map(\.id))
+        )
+
+        let saved = try await service.commit(
+            deckID: homeDeck,
+            deckIDs: [homeDeck, memberDeck],
+            drafts: drafts
+        )
+
+        let rows = try await database.pool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: "SELECT note_id, deck_id FROM note_decks ORDER BY note_id, deck_id"
+            ).map { row in
+                (
+                    try DatabaseValueCodec.decodeUUID(row["note_id"]),
+                    try DatabaseValueCodec.decodeUUID(row["deck_id"])
+                )
+            }
+        }
+        XCTAssertEqual(rows.count, saved.noteIDs.count * 2)
+        for noteID in saved.noteIDs {
+            let members = rows.filter { $0.0 == noteID }.map(\.1)
+            XCTAssertEqual(Set(members), [homeDeck, memberDeck])
+            let homeValue: UUID? = try await database.pool.read { db in
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT deck_id FROM notes WHERE id = ?",
+                    arguments: [DatabaseValueCodec.encode(noteID)]
+                ).flatMap { try? DatabaseValueCodec.decodeUUID($0) }
+            }
+            XCTAssertEqual(homeValue, homeDeck)
+        }
+    }
+
+    /// T07: 成员牌组在提交前被并发删除——整个批次失败，不产生任何写入。
+    func testMissingMemberDeckAbortsBatchAtomically() async throws {
+        let location = try SentenceCardTestDatabaseLocation()
+        defer { location.remove() }
+        let database = try OboeDatabase(path: location.databaseURL.path)
+        let homeDeck = UUID()
+        try await database.pool.write { db in try insertSentenceCardDeck(id: homeDeck, in: db) }
+        let repository = GRDBSentenceAnalysisCardRepository(database: database)
+        let service = SentenceAnalysisCardCreationService(repository: repository)
+        let result = makeInfrastructureSentenceAnalysisResult()
+        let drafts = try service.makeDrafts(
+            from: result,
+            selectedItemIDs: Set(result.items.map(\.id))
+        )
+
+        do {
+            _ = try await service.commit(
+                deckID: homeDeck,
+                deckIDs: [homeDeck, UUID()],
+                drafts: drafts
+            )
+            XCTFail("Expected missing member deck to abort the batch")
+        } catch {
+            XCTAssertEqual(error as? ContentCardError, .deckNotFound)
+        }
+
+        let counts = try await database.pool.read { db in
+            (
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? -1,
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cards") ?? -1,
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM note_decks") ?? -1
+            )
+        }
+        XCTAssertEqual(counts.0, 0)
+        XCTAssertEqual(counts.1, 0)
+        XCTAssertEqual(counts.2, 0)
+    }
+
     func testSecondInsertFailureRollsBackTheEntireBatch() async throws {
         let location = try SentenceCardTestDatabaseLocation()
         defer { location.remove() }
@@ -107,7 +196,7 @@ private func insertSentenceCardDeck(id: UUID, in db: Database) throws {
 
 private func makeInfrastructureSentenceAnalysisResult() -> SentenceAnalysisResult {
     SentenceAnalysisResult(
-        promptVersion: SentenceAnalysisPromptV1.promptVersion,
+        promptVersion: SentenceAnalysisPromptV2.promptVersion,
         schemaVersion: 1,
         sentence: "日本に行ったことがありますか。",
         translationZH: "你去过日本吗？",

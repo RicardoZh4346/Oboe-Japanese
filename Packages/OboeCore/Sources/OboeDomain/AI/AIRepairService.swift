@@ -17,7 +17,7 @@ public struct AIRepairDraftProvenance: Equatable, Sendable {
         self.init(
             providerID: configuration.serviceKind.rawValue,
             modelID: configuration.modelID,
-            promptVersion: AIRepairPromptV1.promptVersion
+            promptVersion: AIRepairPromptV2.promptVersion
         )
     }
 }
@@ -444,7 +444,7 @@ public actor AIRepairService {
                 provenance: AIRepairDraftProvenance(
                     providerID: nil,
                     modelID: nil,
-                    promptVersion: AIRepairPromptV1.promptVersion
+                    promptVersion: AIRepairPromptV2.promptVersion
                 ),
                 content: content,
                 newExampleID: UUID(),
@@ -510,9 +510,11 @@ public actor AIRepairService {
         suggestionIndex: Int,
         adoptingEditedCandidate: Bool = false,
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         directions: [[CardTemplateKind]],
         originalCardDisposition: AIRepairOriginalCardDisposition
     ) async throws -> AIRepairCommitReceipt {
+        let membership = (deckIDs ?? []).union([deckID])
         var envelope = try await requireDraft(draftID)
         guard !envelope.adoptionBlocked else {
             throw AIRepairCommitError.targetUnavailable
@@ -570,6 +572,9 @@ public actor AIRepairService {
             expectedTemplateKinds: envelope.affectedTemplateKinds
                 .sorted { $0.rawValue < $1.rawValue },
             deckID: deckID,
+            // 单牌组选择与旧载荷编码一致（deckIDs 缺省），保证升级前已提交
+            // 草稿的 payloadHash 回放路径不变。
+            deckIDs: membership == [deckID] ? nil : membership,
             originalCardDisposition: originalCardDisposition,
             plans: plans
         )
@@ -635,6 +640,7 @@ public actor AIRepairService {
                 noteID: plan.noteID,
                 exampleID: plan.exampleID,
                 deckID: deckID,
+                deckIDs: membership,
                 content: content,
                 cards: zip(plan.templateKinds, plan.cardIDs).map {
                     NewCardSeed(id: $1, templateKind: $0)
@@ -665,7 +671,7 @@ public actor AIRepairService {
                 provenance: AIRepairDraftProvenance(
                     providerID: nil,
                     modelID: nil,
-                    promptVersion: AIRepairPromptV1.promptVersion
+                    promptVersion: AIRepairPromptV2.promptVersion
                 ),
                 commits: commits,
                 originalCardDisposition: originalCardDisposition,
@@ -756,7 +762,7 @@ public actor AIRepairService {
             provenance: AIRepairDraftProvenance(
                 providerID: nil,
                 modelID: nil,
-                promptVersion: AIRepairPromptV1.promptVersion
+                promptVersion: AIRepairPromptV2.promptVersion
             ),
             updatedAt: clock()
         )

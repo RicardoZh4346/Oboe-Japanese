@@ -105,7 +105,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let (current, backupURL) = try await makeValidBackup(in: fixture)
         var futureText = try String(contentsOf: backupURL, encoding: .utf8)
         futureText = futureText.replacingOccurrences(
-            of: #""formatVersion":5"#,
+            of: #""formatVersion":6"#,
             with: #""formatVersion":99"#
         )
         let futureURL = fixture.rootURL.appendingPathComponent("future.oboe-backup")
@@ -413,6 +413,7 @@ private extension PortableBackupRestorationPreparerTests {
                     """,
                 arguments: [encode(noteID), encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: "INSERT INTO examples VALUES (?, ?, '魚を食べる。', '吃鱼。', 0)",
                 arguments: [encode(exampleID), encode(noteID)]

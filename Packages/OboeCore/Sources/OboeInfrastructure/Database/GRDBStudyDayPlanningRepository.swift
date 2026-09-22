@@ -199,6 +199,7 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
             // kept first.
             let candidates = try Self.newCardCandidates(
                 studyDayID: studyDay.id,
+                primaryDeckID: primaryDeckID,
                 in: db
             )
             let selection = Self.selectNotes(
@@ -266,8 +267,7 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         guard let row = try Row.fetchOne(
             db,
             sql: """
-                SELECT learning_time_zone_id, daily_new_card_limit, retention_preset,
-                       primary_deck_id
+                SELECT learning_time_zone_id, daily_new_card_limit, retention_preset
                 FROM app_settings WHERE id = 1
                 """
         ) else {
@@ -276,7 +276,6 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         let timeZoneID: String = row["learning_time_zone_id"]
         let limit: Int = row["daily_new_card_limit"]
         let retentionRawValue: Int = row["retention_preset"]
-        let primaryDeckRaw: String? = row["primary_deck_id"]
         guard TimeZone(identifier: timeZoneID) != nil else {
             throw StudyDayPlanningError.invalidTimeZone(timeZoneID)
         }
@@ -290,18 +289,34 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
             learningTimeZoneID: timeZoneID,
             dailyNewCardLimit: limit,
             retentionPreset: retentionPreset,
-            primaryDeckID: primaryDeckRaw.flatMap { UUID(uuidString: $0) }
+            primaryDeckID: try fetchPrimaryDeckID(in: db)
         )
     }
 
+    /// 有效主牌组：显式设置且引用仍存在时用它；否则自动回落到牌组排序
+    /// （sort_order/created_at_ms/id，与牌组列表一致）的第一个。只有完全
+    /// 没有牌组时才返回 nil——有牌组时主牌组永远有效（v0.5 自动默认）。
     private static func fetchPrimaryDeckID(in db: Database) throws -> UUID? {
-        guard let raw: String = try Row.fetchOne(
+        if let raw: String = try Row.fetchOne(
             db,
             sql: "SELECT primary_deck_id FROM app_settings WHERE id = 1"
-        ).map({ $0["primary_deck_id"] as String? }) ?? nil else {
-            return nil
+        ).map({ $0["primary_deck_id"] as String? }) ?? nil,
+           let stored = UUID(uuidString: raw),
+           try Int.fetchOne(
+               db,
+               sql: "SELECT COUNT(*) FROM decks WHERE id = ?",
+               arguments: [DatabaseValueCodec.encode(stored)]
+           ) == 1 {
+            return stored
         }
-        return UUID(uuidString: raw)
+        return try Row.fetchOne(
+            db,
+            sql: """
+                SELECT id FROM decks
+                ORDER BY sort_order, created_at_ms, id
+                LIMIT 1
+                """
+        ).map { try DatabaseValueCodec.decodeUUID($0["id"]) }
     }
 
     private static func insertStudyDay(_ studyDay: StudyDay, in db: Database) throws {
@@ -379,10 +394,17 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         in db: Database
     ) throws -> [NewCardReservation] {
         let encodedStudyDayID = DatabaseValueCodec.encode(studyDayID)
+        let primaryDeckValue = try fetchPrimaryDeckID(in: db)
+            .map(DatabaseValueCodec.encode)
         return try Row.fetchAll(
             db,
             sql: """
-                SELECT daily_tasks.card_id, notes.deck_id, daily_tasks.admitted_at_ms
+                SELECT daily_tasks.card_id,
+                       CASE WHEN ? IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM note_decks nd
+                           WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                       ) THEN ? ELSE notes.deck_id END AS allocation_deck_id,
+                       daily_tasks.admitted_at_ms
                 FROM daily_tasks
                 JOIN cards ON cards.id = daily_tasks.card_id
                 JOIN notes ON notes.id = cards.note_id
@@ -398,11 +420,14 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                   )
                 ORDER BY daily_tasks.admitted_at_ms, daily_tasks.card_id
                 """,
-            arguments: [encodedStudyDayID]
+            arguments: [
+                primaryDeckValue, primaryDeckValue, primaryDeckValue,
+                encodedStudyDayID
+            ]
         ).map { row in
             try NewCardReservation(
                 cardID: DatabaseValueCodec.decodeUUID(row["card_id"]),
-                deckID: DatabaseValueCodec.decodeUUID(row["deck_id"]),
+                deckID: DatabaseValueCodec.decodeUUID(row["allocation_deck_id"]),
                 admittedAt: DatabaseValueCodec.decodeDate(milliseconds: row["admitted_at_ms"])
             )
         }
@@ -413,60 +438,82 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
     /// quota unit is the NOTE: `noteID` groups a word's direction cards and
     /// `noteStartedToday` marks notes already counted in `usedCount` — their
     /// remaining direction cards ride along without consuming another slot.
-    /// Deck order comes first so `deckRank` can break round-robin ties;
-    /// within a deck, previously admitted cards (live or cancelled) precede
-    /// never-queued ones.
+    ///
+    /// 每个候选 Note 只有一个 `allocationDeckID`（设计 §4.6）：属于当前
+    /// 主牌组时用主牌组，否则用 home 牌组。牌组排序按分配牌组进行，
+    /// 使 `deckRank` 能为同一分配牌组内的轮转打破平局；同一牌组内，
+    /// 曾入队（无论是否取消）的卡先于从未入队的卡。
     private static func newCardCandidates(
         studyDayID: UUID,
+        primaryDeckID: UUID?,
         in db: Database
     ) throws -> [NewCardCandidate] {
         let studyDayIDValue = DatabaseValueCodec.encode(studyDayID)
+        let primaryDeckValue = primaryDeckID.map(DatabaseValueCodec.encode)
         let rows = try Row.fetchAll(
             db,
             sql: """
-                SELECT cards.id AS card_id,
-                       cards.note_id AS note_id,
-                       notes.deck_id AS deck_id,
-                       cards.due_at_ms AS card_due_at_ms,
-                       daily_tasks.admitted_at_ms AS existing_admitted_at_ms,
-                       CASE WHEN daily_tasks.card_id IS NOT NULL
-                             AND daily_tasks.cancelled_at_ms IS NULL
-                            THEN 1 ELSE 0 END AS has_live_admission,
-                       CASE WHEN EXISTS (
-                           SELECT 1 FROM review_logs
-                           WHERE review_logs.study_day_id = ?
-                             AND review_logs.note_id = notes.id
-                             AND review_logs.was_first_study = 1
-                             AND review_logs.undone_at_ms IS NULL
-                       ) THEN 1 ELSE 0 END AS note_started_today
-                FROM cards
-                JOIN notes ON notes.id = cards.note_id
-                JOIN decks ON decks.id = notes.deck_id
-                LEFT JOIN daily_tasks
-                  ON daily_tasks.study_day_id = ? AND daily_tasks.card_id = cards.id
-                WHERE cards.is_enabled = 1
-                  AND cards.state = 0
-                  AND cards.first_studied_at_ms IS NULL
-                  AND (daily_tasks.card_id IS NULL
-                       OR daily_tasks.cancelled_at_ms IS NOT NULL
-                       OR daily_tasks.category_at_admission = 'new')
+                SELECT candidates.card_id,
+                       candidates.note_id,
+                       candidates.allocation_deck_id,
+                       candidates.card_due_at_ms,
+                       candidates.existing_admitted_at_ms,
+                       candidates.has_live_admission,
+                       candidates.note_started_today
+                FROM (
+                    SELECT cards.id AS card_id,
+                           cards.note_id AS note_id,
+                           CASE WHEN ? IS NOT NULL AND EXISTS (
+                               SELECT 1 FROM note_decks nd
+                               WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                           ) THEN ? ELSE notes.deck_id END AS allocation_deck_id,
+                           cards.due_at_ms AS card_due_at_ms,
+                           daily_tasks.admitted_at_ms AS existing_admitted_at_ms,
+                           CASE WHEN daily_tasks.card_id IS NOT NULL
+                                 AND daily_tasks.cancelled_at_ms IS NULL
+                                THEN 1 ELSE 0 END AS has_live_admission,
+                           CASE WHEN EXISTS (
+                               SELECT 1 FROM review_logs
+                               WHERE review_logs.study_day_id = ?
+                                 AND review_logs.note_id = notes.id
+                                 AND review_logs.was_first_study = 1
+                                 AND review_logs.undone_at_ms IS NULL
+                           ) THEN 1 ELSE 0 END AS note_started_today,
+                           CASE cards.template_kind
+                               WHEN 'vocabulary_ja_zh' THEN 0
+                               WHEN 'vocabulary_zh_ja' THEN 1
+                               WHEN 'vocabulary_listening' THEN 2
+                               ELSE 3 END AS template_rank
+                    FROM cards
+                    JOIN notes ON notes.id = cards.note_id
+                    LEFT JOIN daily_tasks
+                      ON daily_tasks.study_day_id = ? AND daily_tasks.card_id = cards.id
+                    WHERE cards.is_enabled = 1
+                      AND cards.state = 0
+                      AND cards.first_studied_at_ms IS NULL
+                      AND (daily_tasks.card_id IS NULL
+                           OR daily_tasks.cancelled_at_ms IS NOT NULL
+                           OR daily_tasks.category_at_admission = 'new')
+                ) candidates
+                JOIN decks ON decks.id = candidates.allocation_deck_id
                 ORDER BY decks.sort_order, decks.created_at_ms, decks.id,
-                         CASE WHEN daily_tasks.admitted_at_ms IS NULL THEN 1 ELSE 0 END,
-                         daily_tasks.admitted_at_ms, cards.due_at_ms,
-                         CASE cards.template_kind
-                             WHEN 'vocabulary_ja_zh' THEN 0
-                             WHEN 'vocabulary_zh_ja' THEN 1
-                             WHEN 'vocabulary_listening' THEN 2
-                             ELSE 3 END,
-                         cards.id
+                         CASE WHEN candidates.existing_admitted_at_ms IS NULL
+                              THEN 1 ELSE 0 END,
+                         candidates.existing_admitted_at_ms,
+                         candidates.card_due_at_ms,
+                         candidates.template_rank,
+                         candidates.card_id
                 """,
-            arguments: [studyDayIDValue, studyDayIDValue]
+            arguments: [
+                primaryDeckValue, primaryDeckValue, primaryDeckValue,
+                studyDayIDValue, studyDayIDValue
+            ]
         )
         return try rows.enumerated().map { index, row in
             NewCardCandidate(
                 cardID: try DatabaseValueCodec.decodeUUID(row["card_id"]),
                 noteID: try DatabaseValueCodec.decodeUUID(row["note_id"]),
-                deckID: try DatabaseValueCodec.decodeUUID(row["deck_id"]),
+                allocationDeckID: try DatabaseValueCodec.decodeUUID(row["allocation_deck_id"]),
                 deckRank: index,
                 existingAdmissionMilliseconds: row["existing_admitted_at_ms"],
                 hasLiveAdmission: (row["has_live_admission"] as Int) == 1,
@@ -506,8 +553,13 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
         var selectedNotes: [[NewCardCandidate]] = []
         var remainder: [(deckID: UUID, deckRank: Int, cards: [NewCardCandidate])] =
             notes.map { cards in
-                (deckID: cards[0].deckID, deckRank: cards[0].deckRank, cards: cards)
+                (
+                    deckID: cards[0].allocationDeckID,
+                    deckRank: cards[0].deckRank,
+                    cards: cards
+                )
             }
+        // 主牌组成员的 Note 以主牌组为 allocationDeckID，自然先分配。
         if let primaryDeckID {
             selectedNotes = remainder
                 .filter { $0.deckID == primaryDeckID }
@@ -541,7 +593,9 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
 private struct NewCardCandidate: Sendable {
     let cardID: UUID
     let noteID: UUID
-    let deckID: UUID
+    /// 额度归属牌组：Note 是主牌组成员时为主牌组，否则为 home
+    /// （设计 §4.6）。多牌组 Note 只进入一个轮转队列。
+    let allocationDeckID: UUID
     let deckRank: Int
     let existingAdmissionMilliseconds: Int64?
     let hasLiveAdmission: Bool

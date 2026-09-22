@@ -69,6 +69,7 @@ public struct AIRepairNoteSnapshot: Equatable, Sendable {
     public var reading: String?
     public var meaningZH: String
     public var partOfSpeech: String?
+    public var pitchAccent: PitchAccent?
     public var jlpt: JLPTLevel?
     public var usage: String?
     public var connection: String?
@@ -81,6 +82,7 @@ public struct AIRepairNoteSnapshot: Equatable, Sendable {
         reading: String? = nil,
         meaningZH: String,
         partOfSpeech: String? = nil,
+        pitchAccent: PitchAccent? = nil,
         jlpt: JLPTLevel? = nil,
         usage: String? = nil,
         connection: String? = nil,
@@ -92,6 +94,7 @@ public struct AIRepairNoteSnapshot: Equatable, Sendable {
         self.reading = reading
         self.meaningZH = meaningZH
         self.partOfSpeech = partOfSpeech
+        self.pitchAccent = pitchAccent
         self.jlpt = jlpt
         self.usage = usage
         self.connection = connection
@@ -106,6 +109,7 @@ public struct AIRepairNoteSnapshot: Equatable, Sendable {
             reading: note.reading,
             meaningZH: note.meaningZH,
             partOfSpeech: note.partOfSpeech,
+            pitchAccent: note.pitchAccent,
             jlpt: note.jlpt,
             notes: note.notes,
             examples: note.examples.map {
@@ -213,8 +217,8 @@ public enum AIRepairRequestEncoder {
     }
 
     private struct WireRequest: Encodable {
-        var schemaVersion: Int = AIRepairPromptV1.schemaVersion
-        var promptVersion: String = AIRepairPromptV1.promptVersion
+        var schemaVersion: Int = AIRepairPromptV2.schemaVersion
+        var promptVersion: String = AIRepairPromptV2.promptVersion
         var note: WireNote
         var direction: String
         var reviewSummary: AIRepairReviewSummary
@@ -235,7 +239,8 @@ public enum AIRepairRequestEncoder {
         var headword: String
         var reading: String?
         var meaningZH: String
-        var partOfSpeech: String?
+        var partsOfSpeech: [String]
+        var pitchAccent: Int?
         var usage: String?
         var connection: String?
         var examples: [AIRepairExampleCandidate]
@@ -246,7 +251,10 @@ public enum AIRepairRequestEncoder {
             headword = snapshot.headword
             reading = snapshot.reading
             meaningZH = snapshot.meaningZH
-            partOfSpeech = snapshot.partOfSpeech
+            partsOfSpeech = snapshot.partOfSpeech.map {
+                VocabularyPartOfSpeech.parse($0).known.map(\.rawValue)
+            } ?? []
+            pitchAccent = snapshot.pitchAccent?.rawValue
             usage = snapshot.usage
             connection = snapshot.connection
             examples = snapshot.examples
@@ -258,9 +266,9 @@ public enum AIRepairRequestEncoder {
 /// Versioned prompt contract for the repair analysis (设计 §6.1/§6.2). The
 /// prompt treats note content and the user comment as data, demands the exact
 /// JSON schema and forbids ratings, FSRS parameters and database operations.
-public enum AIRepairPromptV1 {
-    public static let promptVersion = "oboe-ai-repair-v1"
-    public static let schemaVersion = 1
+public enum AIRepairPromptV2 {
+    public static let promptVersion = "oboe-ai-repair-v2"
+    public static let schemaVersion = 2
 
     public static func systemInstruction() -> String {
         """
@@ -277,14 +285,15 @@ public enum AIRepairPromptV1 {
         Each suggestion contains type, title and reason, plus only the optional fields that apply: \
         replacement, clearFields, splitNotes. \
         type is one of: \(AIRepairSuggestionType.allCases.map { $0.rawValue }.joined(separator: ", ")). \
-        replacement may only contain these optional fields: headword, reading, meaningZH, partOfSpeech, \
-        usage, connection, notes, examples; absent fields stay unchanged. \
+        replacement may only contain these optional fields: headword, reading, meaningZH, partsOfSpeech, \
+        pitchAccent, usage, connection, notes, examples; absent fields stay unchanged. \
         clearFields may only contain: \(AIRepairClearableField.allCases.map { $0.rawValue }.joined(separator: ", ")); \
         never list a field in both replacement and clearFields. \
         splitNotes is allowed only when type is split_card: an array of 2 to \
         \(AIRepairOutputDecoder.maximumSplitNotes) complete note objects, each with kind (vocabulary or \
-        grammar), headword, meaningZH, and optional reading, partOfSpeech, jlpt, usage, connection, \
-        notes, examples. Each split note must carry one single clear meaning. \
+        grammar), headword, meaningZH, partsOfSpeech, pitchAccent, and optional reading, jlpt, usage, connection, \
+        notes, examples. Vocabulary partsOfSpeech may contain only: \(VocabularyPartOfSpeech.allCases.map(\.rawValue).joined(separator: ", ")). \
+        pitchAccent is the Tokyo-style mora accent nucleus: 0 means heiban, positive integers count morae from the start; omit an uncertain patch value and use null in splitNotes rather than guessing. Grammar split notes must use [] and null. Each split note must carry one single clear meaning. \
         Every suggestion must include at least one of replacement, clearFields or splitNotes. \
         examples entries contain exactly japanese and optional translationZH; provide at most one. \
         Never output identifiers, deck or card references, ratings, FSRS or scheduling parameters, \

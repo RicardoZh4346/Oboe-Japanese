@@ -223,10 +223,11 @@ struct SentenceAnalysisSections: View {
 
             if !model.sentenceCardDrafts.isEmpty {
                 Section("目标牌组") {
-                    Picker("牌组", selection: $model.sentenceAnalysisDeckID) {
-                        DeckPickerOptions(decks: model.decks)
-                    }
-                    .accessibilityIdentifier("sentence-card-deck-picker")
+                    DeckMembershipField(
+                        decks: model.decks,
+                        selection: $model.currentMembershipSelection,
+                        rowAccessibilityID: "sentence-card-deck-picker"
+                    )
                 }
 
                 ForEach(model.sentenceCardDrafts) { draftSnapshot in
@@ -258,7 +259,15 @@ struct SentenceAnalysisSections: View {
                                 .onChange(of: draft.reading) { _, _ in
                                     model.sentenceCardDraftDidChange(itemID: draft.id)
                                 }
-                            TextField("词性（可选）", text: draftBinding.partOfSpeech)
+                            VocabularyPitchAccentField(
+                                reading: draftBinding.reading,
+                                pitchAccent: draftBinding.pitchAccent,
+                                accessibilityIdentifier: "sentence-card-pitch-accent-\(draft.id.uuidString)"
+                            )
+                            VocabularyPartOfSpeechField(
+                                value: draftBinding.partOfSpeech,
+                                accessibilityIdentifier: "sentence-card-part-of-speech-\(draft.id.uuidString)"
+                            )
                             Text("将创建全部三个方向的卡片")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)

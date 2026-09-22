@@ -14,6 +14,7 @@ struct AddView: View {
     private let sentenceAnalysisService: SentenceAnalysisService
     private let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     private let historyService: StudyHistoryService
+    private let studyService: StudySessionService?
     private let speechService: any SpeechService
     private let inboxService: InboxService
     private let inboxImageStore: InboxImageStore?
@@ -32,6 +33,7 @@ struct AddView: View {
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         historyService: StudyHistoryService,
+        studyService: StudySessionService? = nil,
         speechService: any SpeechService,
         inboxService: InboxService,
         inboxImageStore: InboxImageStore? = nil,
@@ -49,6 +51,7 @@ struct AddView: View {
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         self.historyService = historyService
+        self.studyService = studyService
         self.speechService = speechService
         self.inboxService = inboxService
         self.inboxImageStore = inboxImageStore
@@ -71,6 +74,7 @@ struct AddView: View {
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                 historyService: historyService,
                 speechService: speechService,
+                studyService: studyService,
                 inboxService: inboxService,
                 inboxImageStore: inboxImageStore,
                 ocrService: ocrService,
@@ -155,10 +159,13 @@ struct VocabularyDetailView: View {
                         }
                     }
 
-                    if note.partOfSpeech != nil || note.jlpt != nil {
+                    if note.partOfSpeech != nil || note.pitchAccent != nil || note.jlpt != nil {
                         Section("分类") {
                             if let partOfSpeech = note.partOfSpeech {
                                 LabeledContent("词性", value: partOfSpeech)
+                            }
+                            if let pitch = pitchAccentDisplayValue(note.pitchAccent) {
+                                LabeledContent("音调", value: pitch)
                             }
                             if let jlpt = note.jlpt {
                                 LabeledContent("JLPT", value: jlpt.rawValue)
@@ -571,21 +578,30 @@ private struct KnowledgePointLifecycleSection: View {
     let onChanged: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var destinationDecks: [DeckSummary] = []
-    @State private var isPresentingMove = false
+    @State private var decks: [DeckSummary] = []
+    @State private var membership: DeckMembershipSelection?
+    @State private var isPresentingMembership = false
     @State private var isConfirmingDelete = false
     @State private var deletionImpact: KnowledgePointDeletionImpact?
-    @State private var didMove = false
     @State private var isWorking = false
     @State private var errorMessage: String?
 
     var body: some View {
         Section {
-            Button("移动到其他牌组") {
-                isPresentingMove = true
+            Button {
+                isPresentingMembership = membership != nil
+            } label: {
+                HStack {
+                    Text("管理牌组")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(membershipSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .disabled(destinationDecks.isEmpty || isWorking)
-            .accessibilityIdentifier("knowledge-move-button")
+            .disabled(decks.isEmpty || membership == nil || isWorking)
+            .accessibilityIdentifier("knowledge-membership-button")
 
             Button("删除知识点", role: .destructive) {
                 prepareDeletion()
@@ -595,27 +611,22 @@ private struct KnowledgePointLifecycleSection: View {
         } header: {
             Text("管理")
         } footer: {
-            if destinationDecks.isEmpty {
-                Text("创建另一个牌组后才能移动。删除会移除正文和卡片，但保留不含正文的评分历史。")
-            } else {
-                Text("移动会带上全部卡片并保留历史牌组标识。删除会移除正文和卡片，但保留不含正文的评分历史。")
-            }
+            Text("知识点可同时属于多个牌组；卡片与复习进度在所有成员间共享，归属牌组决定新卡额度与复习归因。删除会移除正文和卡片，但保留不含正文的评分历史。")
         }
         .task {
-            await loadDestinationDecks()
+            await loadMembershipState()
         }
-        .sheet(isPresented: $isPresentingMove, onDismiss: {
-            if didMove {
-                dismiss()
-            }
-        }) {
-            KnowledgePointMoveSheet(
-                noteID: noteID,
-                destinations: destinationDecks,
-                knowledgeService: knowledgeService
-            ) {
-                didMove = true
-                await onChanged()
+        .sheet(isPresented: $isPresentingMembership) {
+            if let membership {
+                KnowledgePointMembershipSheet(
+                    noteID: noteID,
+                    decks: decks,
+                    initial: membership,
+                    knowledgeService: knowledgeService
+                ) { updated in
+                    self.membership = DeckMembershipSelection(membership: updated)
+                    await onChanged()
+                }
             }
         }
         .confirmationDialog(
@@ -643,6 +654,15 @@ private struct KnowledgePointLifecycleSection: View {
         }
     }
 
+    private var membershipSummary: String {
+        guard let membership, !membership.deckIDs.isEmpty else { return "" }
+        let homeName = decks.first(where: { $0.id == membership.homeDeckID })?.name
+        if membership.deckIDs.count == 1 {
+            return homeName ?? "1 个牌组"
+        }
+        return "\(membership.deckIDs.count) 个牌组 · 归属 \(homeName ?? "未指定")"
+    }
+
     private var deleteButtonTitle: String {
         "删除正文与 \(deletionImpact?.cardCount ?? 0) 张卡片"
     }
@@ -652,9 +672,15 @@ private struct KnowledgePointLifecycleSection: View {
         return "例句、标签关联、卡片和当前任务会一并删除；\(logs) 条评分历史仅保留标识与调度记录。此操作不可撤销，可通过已有备份恢复。"
     }
 
-    private func loadDestinationDecks() async {
+    private func loadMembershipState() async {
         do {
-            destinationDecks = try await deckService.fetchDecks().filter { $0.id != currentDeckID }
+            decks = try await deckService.fetchDecks()
+            if let fetched = try await knowledgeService.fetchMembership(noteID: noteID) {
+                membership = DeckMembershipSelection(membership: fetched)
+                    .normalized(decks: decks)
+            } else {
+                errorMessage = "这个知识点已不存在。"
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -700,44 +726,63 @@ private struct KnowledgePointLifecycleSection: View {
     }
 }
 
-private struct KnowledgePointMoveSheet: View {
+/// 「管理牌组」sheet：编辑成员集合与归属牌组，保存时一次性原子替换。
+/// 取消不产生任何写入；保存失败时草稿选择保留，可修正后重试。
+private struct KnowledgePointMembershipSheet: View {
     let noteID: UUID
-    let destinations: [DeckSummary]
+    let decks: [DeckSummary]
+    let initial: DeckMembershipSelection
     let knowledgeService: KnowledgePointService
-    let onMoved: () async -> Void
+    let onSaved: (NoteDeckMembership) async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var isWorking = false
+    @State private var draft: DeckMembershipSelection
+    @State private var isSaving = false
     @State private var errorMessage: String?
+
+    init(
+        noteID: UUID,
+        decks: [DeckSummary],
+        initial: DeckMembershipSelection,
+        knowledgeService: KnowledgePointService,
+        onSaved: @escaping (NoteDeckMembership) async -> Void
+    ) {
+        self.noteID = noteID
+        self.decks = decks
+        self.initial = initial
+        self.knowledgeService = knowledgeService
+        self.onSaved = onSaved
+        _draft = State(initialValue: initial)
+    }
+
+    private var hasChanges: Bool { draft != initial }
+    private var isValid: Bool {
+        !draft.deckIDs.isEmpty
+            && draft.homeDeckID.map({ draft.deckIDs.contains($0) }) == true
+    }
 
     var body: some View {
         NavigationStack {
-            List(destinations) { deck in
-                Button {
-                    move(to: deck.id)
-                } label: {
-                    HStack {
-                        Text(deck.name)
-                        Spacer()
-                        Text("\(deck.noteCount) 个知识点")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .disabled(isWorking)
-                .accessibilityIdentifier("knowledge-move-destination-\(deck.id.uuidString)")
+            Form {
+                DeckMembershipList(decks: decks, selection: $draft)
             }
-            .navigationTitle("移动知识点")
+            .navigationTitle("管理牌组")
             .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(isWorking)
+            .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
-                        .disabled(isWorking)
+                        .disabled(isSaving)
+                        .accessibilityIdentifier("knowledge-membership-cancel")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { save() }
+                        .disabled(!isValid || !hasChanges || isSaving)
+                        .accessibilityIdentifier("knowledge-membership-save")
                 }
             }
             .alert(
-                "无法移动知识点",
+                "无法保存牌组设置",
                 isPresented: Binding(
                     get: { errorMessage != nil },
                     set: { if !$0 { errorMessage = nil } }
@@ -750,28 +795,27 @@ private struct KnowledgePointMoveSheet: View {
         }
     }
 
-    private func move(to deckID: UUID) {
-        guard !isWorking else { return }
-        isWorking = true
+    private func save() {
+        guard isValid, !isSaving else { return }
+        isSaving = true
+        let target = draft.normalized(decks: decks)
+        guard let home = target.homeDeckID else {
+            isSaving = false
+            return
+        }
         Task {
             do {
-                switch try await knowledgeService.move(noteID: noteID, to: deckID) {
-                case .moved:
-                    await onMoved()
-                    dismiss()
-                case .noteNotFound:
-                    errorMessage = "这个知识点已不存在。"
-                    isWorking = false
-                case .destinationNotFound:
-                    errorMessage = "目标牌组已不存在。"
-                    isWorking = false
-                case .alreadyInDestination:
-                    errorMessage = "知识点已在这个牌组中。"
-                    isWorking = false
-                }
+                let updated = try await knowledgeService.replaceMembership(
+                    noteID: noteID,
+                    deckIDs: target.deckIDs,
+                    homeDeckID: home
+                )
+                await onSaved(updated)
+                dismiss()
             } catch {
+                // 草稿选择保留，用户可修正后重试。
                 errorMessage = error.localizedDescription
-                isWorking = false
+                isSaving = false
             }
         }
     }

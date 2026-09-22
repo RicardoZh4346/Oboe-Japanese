@@ -13,6 +13,7 @@ final class CaptureResumePayloadTests: XCTestCase {
         let payload = CaptureResumePayload(
             selection: CaptureTextSelection(utf16Offset: 3, utf16Length: 7),
             targetDeckID: deckID,
+            targetDeckIDs: [deckID, UUID()],
             vocabularyDirections: [.chineseToJapanese],
             grammarFormToExplanation: false,
             selectedAnalysisItemIDs: [itemID],

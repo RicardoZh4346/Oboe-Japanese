@@ -48,23 +48,28 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
     public func importVocabulary(
         _ vocabulary: BuiltinJLPTVocabulary,
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         meaningZH: String,
         directions: Set<VocabularyCardDirection>
     ) async throws -> JLPTImportResult {
         let meaning = meaningZH.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !meaning.isEmpty else { throw JLPTImportError.chineseMeaningRequired }
         guard !directions.isEmpty else { throw JLPTImportError.directionRequired }
+        let membership = (deckIDs ?? []).union([deckID])
         return try await pool.write { db in
-            guard try Bool.fetchOne(
-                db,
-                sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",
-                arguments: [DatabaseValueCodec.encode(deckID)]
-            ) == true else {
-                throw JLPTImportError.deckNotFound
+            for memberDeckID in membership {
+                guard try Bool.fetchOne(
+                    db,
+                    sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",
+                    arguments: [DatabaseValueCodec.encode(memberDeckID)]
+                ) == true else {
+                    throw JLPTImportError.deckNotFound
+                }
             }
             let inserted = try Self.insert(
                 vocabulary,
                 deckID: deckID,
+                deckIDs: membership,
                 meaningZH: meaning,
                 directions: directions,
                 timestamp: try DatabaseValueCodec.encode(Date()),
@@ -172,6 +177,7 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
     private static func insert(
         _ vocabulary: BuiltinJLPTVocabulary,
         deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         meaningZH: String,
         directions: Set<VocabularyCardDirection>,
         timestamp: Int64,
@@ -196,9 +202,9 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
             sql: """
                 INSERT INTO notes(
                     id, deck_id, kind, headword, reading, meaning_zh,
-                    part_of_speech, jlpt, origin, source_ref, content_version,
-                    created_at_ms, updated_at_ms
-                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, 'builtin_jlpt', ?, 1, ?, ?)
+                    part_of_speech, jlpt, origin, source_ref, pitch_accent,
+                    content_version, created_at_ms, updated_at_ms
+                ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, 'builtin_jlpt', ?, ?, 1, ?, ?)
                 """,
             arguments: [
                 noteIDValue,
@@ -209,21 +215,31 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
                 vocabulary.partOfSpeech,
                 vocabulary.level.rawValue,
                 vocabulary.id,
+                vocabulary.pitchAccent?.rawValue,
                 timestamp,
                 timestamp
             ]
         )
+        for memberDeckID in (deckIDs ?? [deckID]).union([deckID]) {
+            try GRDBContentCardRepository.insertHomeMembership(
+                noteID: noteID,
+                deckID: memberDeckID,
+                atMilliseconds: timestamp,
+                in: db
+            )
+        }
 
         for example in vocabulary.examples.prefix(3) {
             try db.execute(
                 sql: """
                     INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order)
-                    VALUES (?, ?, ?, NULL, ?)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(UUID()),
                     noteIDValue,
                     example.japanese,
+                    example.translationZH,
                     example.sortOrder
                 ]
             )

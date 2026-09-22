@@ -154,6 +154,7 @@ private struct P22bPerformanceFixture {
                         nowMilliseconds, nowMilliseconds
                     ]
                 )
+                try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
                 for direction in 0..<2 {
                     let cardIndex = noteIndex * 2 + direction
                     let cardID = performanceUUID(30_000 + cardIndex)

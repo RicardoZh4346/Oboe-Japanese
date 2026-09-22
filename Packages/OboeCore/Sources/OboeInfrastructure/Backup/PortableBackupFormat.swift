@@ -2,7 +2,7 @@ import Foundation
 
 public enum PortableBackupFormat {
     public static let identifier = "oboe-portable-backup"
-    public static let currentVersion = 5
+    public static let currentVersion = 6
     public static let fileExtension = "oboe-backup"
     public static let checksumAlgorithm = "sha256"
 
@@ -23,6 +23,25 @@ struct PortableBackupTableSpecification: Sendable {
     let recordType: String
     let columns: [String]
     let orderBy: String
+    /// Overrides the default `SELECT <columns> FROM <table>` export query.
+    /// Used by `noteDeck` so notes lacking a membership row still export
+    /// their home-deck membership, keeping the home∈membership invariant
+    /// even if a live database drifted (设计 §9).
+    let selectSQL: String?
+
+    init(
+        tableName: String,
+        recordType: String,
+        columns: [String],
+        orderBy: String,
+        selectSQL: String? = nil
+    ) {
+        self.tableName = tableName
+        self.recordType = recordType
+        self.columns = columns
+        self.orderBy = orderBy
+        self.selectSQL = selectSQL
+    }
 }
 
 enum PortableBackupFormatV1 {
@@ -269,6 +288,51 @@ enum PortableBackupFormatV5 {
     static let tableSpecifications: [PortableBackupTableSpecification] =
         PortableBackupFormatV4.tableSpecifications.map { specification in
             specification.recordType == "settings" ? settings : specification
+        }
+
+    static let recordTypes = tableSpecifications.map(\.recordType)
+    static let specificationByRecordType = Dictionary(
+        uniqueKeysWithValues: tableSpecifications.map { ($0.recordType, $0) }
+    )
+}
+
+/// v6 (Oboe v0.5): the `note` record gains `pitch_accent` and a new
+/// `noteDeck` record carries the many-to-many membership table (设计 §9).
+/// `noteDeck` sits immediately after `note` so its foreign keys resolve in
+/// record order. `notes.deck_id` is retained — it is the home deck and must
+/// be one of the note's memberships.
+enum PortableBackupFormatV6 {
+    static let note = PortableBackupTableSpecification(
+        tableName: "notes",
+        recordType: "note",
+        columns: PortableBackupFormatV2.specificationByRecordType["note"]!.columns
+            + ["pitch_accent"],
+        orderBy: "id"
+    )
+
+    /// The export query unions real membership rows with a home-deck
+    /// fallback for notes that somehow lack one, so every exported note is
+    /// guaranteed at least its home membership. A synthesized row can never
+    /// collide with a real row on the (note_id, deck_id) key: it is emitted
+    /// only when the note has no membership rows at all.
+    static let noteDeck = PortableBackupTableSpecification(
+        tableName: "note_decks",
+        recordType: "noteDeck",
+        columns: ["note_id", "deck_id", "added_at_ms"],
+        orderBy: "note_id, deck_id",
+        selectSQL: """
+            SELECT note_id, deck_id, added_at_ms FROM note_decks
+            UNION
+            SELECT id, deck_id, created_at_ms FROM notes n
+            WHERE NOT EXISTS (
+                SELECT 1 FROM note_decks nd WHERE nd.note_id = n.id
+            )
+            """
+    )
+
+    static let tableSpecifications: [PortableBackupTableSpecification] =
+        PortableBackupFormatV5.tableSpecifications.flatMap { specification in
+            specification.recordType == "note" ? [note, noteDeck] : [specification]
         }
 
     static let recordTypes = tableSpecifications.map(\.recordType)

@@ -55,7 +55,10 @@ public struct VocabularyContentCommit: Equatable, Sendable {
     public let noteID: UUID
     public let exampleID: UUID
     public let draftID: UUID?
+    /// 归属（home）牌组。
     public let deckID: UUID
+    /// Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let content: ValidatedVocabularyContent
     public let tags: [KnowledgeTag]
     public let cards: [NewCardSeed]
@@ -79,12 +82,14 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         createdAt: Date,
         origin: ContentOrigin = .manual,
         sourceRef: String? = nil,
-        sourceText: String? = nil
+        sourceText: String? = nil,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
         self.draftID = draftID
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.content = content
         self.tags = tags
         self.cards = cards
@@ -100,7 +105,10 @@ public struct GrammarContentCommit: Equatable, Sendable {
     public let noteID: UUID
     public let exampleID: UUID
     public let draftID: UUID?
+    /// 归属（home）牌组。
     public let deckID: UUID
+    /// Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let content: ValidatedGrammarContent
     public let tags: [KnowledgeTag]
     public let card: NewCardSeed
@@ -120,12 +128,14 @@ public struct GrammarContentCommit: Equatable, Sendable {
         schedulerProfileID: UUID,
         createdAt: Date,
         origin: ContentOrigin = .manual,
-        sourceText: String? = nil
+        sourceText: String? = nil,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
         self.draftID = draftID
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.content = content
         self.tags = tags
         self.card = card
@@ -201,6 +211,7 @@ public struct ContentCardService: Sendable {
         self.makeID = makeID
     }
 
+    /// `deckIDs` 为 Note 的全部成员牌组；缺省时仅以 `deckID`（home）为成员。
     public func commitVocabulary(
         draftID: UUID?,
         deckID: UUID?,
@@ -209,7 +220,8 @@ public struct ContentCardService: Sendable {
         rawTagNames: [String] = [],
         origin: ContentOrigin = .manual,
         sourceRef: String? = nil,
-        capture: CaptureCommitContext? = nil
+        capture: CaptureCommitContext? = nil,
+        deckIDs: Set<UUID>? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -236,11 +248,13 @@ public struct ContentCardService: Sendable {
             createdAt: now(),
             origin: origin,
             sourceRef: sourceRef,
-            sourceText: capture?.sourceText
+            sourceText: capture?.sourceText,
+            deckIDs: deckIDs
         )
         return try await repository.commitVocabulary(commit, capture: capture)
     }
 
+    /// `deckIDs` 为 Note 的全部成员牌组；缺省时仅以 `deckID`（home）为成员。
     public func commitGrammar(
         draftID: UUID?,
         deckID: UUID?,
@@ -248,7 +262,8 @@ public struct ContentCardService: Sendable {
         includesDirection: Bool,
         rawTagNames: [String] = [],
         origin: ContentOrigin = .manual,
-        capture: CaptureCommitContext? = nil
+        capture: CaptureCommitContext? = nil,
+        deckIDs: Set<UUID>? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -267,7 +282,8 @@ public struct ContentCardService: Sendable {
             schedulerProfileID: makeID(),
             createdAt: now(),
             origin: origin,
-            sourceText: capture?.sourceText
+            sourceText: capture?.sourceText,
+            deckIDs: deckIDs
         )
         return try await repository.commitGrammar(commit, capture: capture)
     }

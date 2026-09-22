@@ -57,6 +57,7 @@ final class GRDBAIRepairSplitCommitTests: XCTestCase {
         for (index, commit) in commits.enumerated() {
             let row = try await noteRow(noteID: commit.noteID)
             XCTAssertEqual(row["headword"], "拆分\(index + 1)")
+            XCTAssertEqual(row["pitch_accent"], "0")
             XCTAssertEqual(row["origin"], "ai")
             XCTAssertNil(row["source_ref"])
             XCTAssertNil(row["source_text"])
@@ -466,13 +467,110 @@ final class GRDBAIRepairSplitCommitTests: XCTestCase {
         XCTAssertNil(firstNote["id"])
     }
 
+    /// T07: 拆卡新 Note 携带多牌组成员——每个候选写全部 note_decks 行，
+    /// notes.deck_id 指向 home。
+    func testSplitCommitWritesAllMembershipDecks() async throws {
+        let noteID = fixture.freshNote.noteID
+        let cardID = fixture.freshNote.cardID(.vocabularyJapaneseToChinese)
+        let draftID = try await seedCommittingDraft(
+            noteID: noteID,
+            cardID: cardID,
+            kinds: [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese]
+        )
+        let members: Set<UUID> = [fixture.deckAID, fixture.deckBID]
+        var commits = makeCommits(count: 2, deckID: fixture.deckAID)
+        for index in commits.indices { commits[index].deckIDs = members }
+        let repository = GRDBAIRepairCommitRepository(database: fixture.database)
+
+        try await repository.commitSplitRepair(
+            draftID: draftID,
+            envelope: committedSplitEnvelope(
+                noteID: noteID,
+                cardID: cardID,
+                commits: commits,
+                disposition: .keep,
+                kinds: [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese]
+            ),
+            provenance: Self.provenance,
+            commits: commits,
+            originalCardDisposition: .keep,
+            updatedAt: Date()
+        )
+
+        for commit in commits {
+            let memberRows = try await fixture.database.pool.read { db in
+                try Row.fetchAll(
+                    db,
+                    sql: "SELECT deck_id FROM note_decks WHERE note_id = ?",
+                    arguments: [DatabaseValueCodec.encode(commit.noteID)]
+                ).compactMap { try? DatabaseValueCodec.decodeUUID($0["deck_id"]) }
+            }
+            XCTAssertEqual(Set(memberRows), members)
+            let homeDeck: UUID? = try await fixture.database.pool.read { db in
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT deck_id FROM notes WHERE id = ?",
+                    arguments: [DatabaseValueCodec.encode(commit.noteID)]
+                ).flatMap { try? DatabaseValueCodec.decodeUUID($0) }
+            }
+            XCTAssertEqual(homeDeck, fixture.deckAID)
+        }
+    }
+
+    /// T07: 成员牌组在提交前被删除——整单回滚，任何候选都不落库。
+    func testSplitCommitMissingMemberDeckAbortsAtomically() async throws {
+        let noteID = fixture.freshNote.noteID
+        let cardID = fixture.freshNote.cardID(.vocabularyJapaneseToChinese)
+        let draftID = try await seedCommittingDraft(
+            noteID: noteID,
+            cardID: cardID,
+            kinds: [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese]
+        )
+        var commits = makeCommits(count: 2, deckID: fixture.deckAID)
+        commits[0].deckIDs = [fixture.deckAID, fixture.deckBID]
+        commits[1].deckIDs = [fixture.deckAID, UUID()]  // 第二个候选成员缺失
+        let repository = GRDBAIRepairCommitRepository(database: fixture.database)
+
+        await assertThrows(
+            verifying: { $0 as? ContentCardError == .deckNotFound }
+        ) {
+            try await repository.commitSplitRepair(
+                draftID: draftID,
+                envelope: committedSplitEnvelope(
+                    noteID: noteID,
+                    cardID: cardID,
+                    commits: commits,
+                    disposition: .keep,
+                    kinds: [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese]
+                ),
+                provenance: Self.provenance,
+                commits: commits,
+                originalCardDisposition: .keep,
+                updatedAt: Date()
+            )
+        }
+        for commit in commits {
+            let created = try await noteRow(noteID: commit.noteID)
+            XCTAssertNil(created["id"])
+        }
+        let noteIDs = commits.map(\.noteID)
+        let membershipCount = try await fixture.database.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM note_decks WHERE note_id IN (?, ?)",
+                arguments: [
+                    DatabaseValueCodec.encode(noteIDs[0]),
+                    DatabaseValueCodec.encode(noteIDs[1])
+                ]) ?? -1
+        }
+        XCTAssertEqual(membershipCount, 0)
+    }
+
     // MARK: - Helpers
 
     private static var provenance: AIRepairDraftProvenance {
         AIRepairDraftProvenance(
             providerID: "custom",
             modelID: "fixture-model",
-            promptVersion: "oboe-ai-repair-v1"
+            promptVersion: "oboe-ai-repair-v2"
         )
     }
 
@@ -496,7 +594,8 @@ final class GRDBAIRepairSplitCommitTests: XCTestCase {
                         japanese: "例文\(index + 1)です。",
                         translationZH: nil
                     ),
-                    notes: nil
+                    notes: nil,
+                    pitchAccent: PitchAccent(rawValue: 0)
                 )),
                 cards: [
                     NewCardSeed(
@@ -593,7 +692,7 @@ final class GRDBAIRepairSplitCommitTests: XCTestCase {
                 db,
                 sql: """
                     SELECT id, kind, headword, origin, source_ref, source_text,
-                           is_favorite, content_version
+                           is_favorite, pitch_accent, content_version
                     FROM notes WHERE id = ?
                     """,
                 arguments: [DatabaseValueCodec.encode(noteID)]
@@ -607,6 +706,7 @@ final class GRDBAIRepairSplitCommitTests: XCTestCase {
                 "source_ref": row["source_ref"] as? String,
                 "source_text": row["source_text"] as? String,
                 "is_favorite": (row["is_favorite"] as? Int64).map(String.init),
+                "pitch_accent": (row["pitch_accent"] as? Int64).map(String.init),
                 "content_version": (row["content_version"] as? Int64).map(String.init)
             ], contentVersion: row["content_version"])
         }

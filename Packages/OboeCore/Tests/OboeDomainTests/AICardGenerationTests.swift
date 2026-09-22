@@ -16,8 +16,8 @@ final class AICardGenerationTests: XCTestCase {
             requestID: vocabularyInput.requestID,
             sourceInput: try AICardOutputDecoder.validated(vocabularyInput)
         )
-        XCTAssertEqual(vocabulary.promptVersion, "oboe-card-generation-v1")
-        XCTAssertEqual(vocabulary.schemaVersion, 1)
+        XCTAssertEqual(vocabulary.promptVersion, "oboe-card-generation-v2")
+        XCTAssertEqual(vocabulary.schemaVersion, 2)
         XCTAssertEqual(vocabulary.sourceInput.inputVersion, 7)
         guard case let .vocabulary(form) = vocabulary.payload else {
             return XCTFail("Expected vocabulary payload")
@@ -25,6 +25,8 @@ final class AICardGenerationTests: XCTestCase {
         XCTAssertEqual(form.headword, "食べる")
         XCTAssertEqual(form.reading, "たべる")
         XCTAssertEqual(form.meaningZH, "吃")
+        XCTAssertEqual(form.partOfSpeech, "一段动词 / 他动词")
+        XCTAssertEqual(form.pitchAccent, PitchAccent(rawValue: 2))
         XCTAssertEqual(form.jlpt, .n5)
         XCTAssertEqual(form.exampleJapanese, "毎朝パンを食べます。")
         XCTAssertEqual(vocabulary.warnings, ["语境不足时请核对词义"])
@@ -47,7 +49,7 @@ final class AICardGenerationTests: XCTestCase {
         let input = AICardGenerationInput(kind: .vocabulary, text: "食べる")
         let failures: [(String, AICardGenerationError)] = [
             ("not-json", .invalidJSON),
-            (Self.vocabularyJSON.replacingOccurrences(of: #""schemaVersion":1"#, with: #""schemaVersion":2"#), .unsupportedSchemaVersion),
+            (Self.vocabularyJSON.replacingOccurrences(of: #""schemaVersion":2"#, with: #""schemaVersion":1"#), .unsupportedSchemaVersion),
             (Self.vocabularyJSON.replacingOccurrences(of: #""kind":"vocabulary""#, with: #""kind":"grammar""#), .kindMismatch),
             (Self.vocabularyJSON.replacingOccurrences(of: #""warnings":["语境不足时请核对词义"]"#, with: #""warnings":[],"extra":"no""#), .unexpectedFields),
             (Self.vocabularyJSON.replacingOccurrences(of: #""jlpt":"N5""#, with: #""jlpt":"N0""#), .invalidJLPT),
@@ -62,6 +64,55 @@ final class AICardGenerationTests: XCTestCase {
                 XCTAssertEqual(error as? AICardGenerationError, expected)
             }
         }
+    }
+
+    func testVocabularyV2ValidatesControlledPartsAndRealMoraPitch() throws {
+        let input = AICardGenerationInput(kind: .vocabulary, text: "あいうえおか")
+        func decode(_ json: String) throws -> VocabularyFormData {
+            let candidate = try AICardOutputDecoder.decode(
+                json,
+                requestID: input.requestID,
+                sourceInput: input
+            )
+            guard case let .vocabulary(form) = candidate.payload else {
+                throw AICardGenerationError.kindMismatch
+            }
+            return form
+        }
+
+        for pitch in [0, 5, 6] {
+            let json = Self.longReadingJSON.replacingOccurrences(
+                of: #""pitchAccent":6"#,
+                with: #""pitchAccent":\#(pitch)"#
+            )
+            XCTAssertEqual(try decode(json).pitchAccent, PitchAccent(rawValue: pitch))
+        }
+        XCTAssertNil(try decode(Self.longReadingJSON.replacingOccurrences(
+            of: #""pitchAccent":6"#,
+            with: #""pitchAccent":null"#
+        )).pitchAccent)
+
+        let failures: [(String, AICardGenerationError)] = [
+            (Self.longReadingJSON.replacingOccurrences(of: #""pitchAccent":6"#, with: #""pitchAccent":-1"#), .invalidPitchAccent),
+            (Self.longReadingJSON.replacingOccurrences(of: #""pitchAccent":6"#, with: #""pitchAccent":7"#), .invalidPitchAccent),
+            (Self.longReadingJSON.replacingOccurrences(of: #"["名词"]"#, with: #"["未知词性"]"#), .invalidPartOfSpeech("未知词性"))
+        ]
+        for (json, expected) in failures {
+            XCTAssertThrowsError(try decode(json)) {
+                XCTAssertEqual($0 as? AICardGenerationError, expected)
+            }
+        }
+
+        let grammarInput = AICardGenerationInput(kind: .grammar, text: "～たことがある")
+        let grammarWithPitch = Self.grammarJSON.replacingOccurrences(
+            of: #""warnings":[]"#,
+            with: #""warnings":[],"pitchAccent":0"#
+        )
+        XCTAssertThrowsError(try AICardOutputDecoder.decode(
+            grammarWithPitch,
+            requestID: grammarInput.requestID,
+            sourceInput: grammarInput
+        )) { XCTAssertEqual($0 as? AICardGenerationError, .unexpectedFields) }
     }
 
     func testInputLimitsAndRequestGateProtectAgainstLateResponses() throws {
@@ -123,8 +174,9 @@ final class AICardGenerationTests: XCTestCase {
 }
 
 private extension AICardGenerationTests {
-    static let vocabularyJSON = #"{"schemaVersion":1,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partOfSpeech":"一段动词","jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":["语境不足时请核对词义"]}"#
-    static let grammarJSON = #"{"schemaVersion":1,"kind":"grammar","grammarForm":"～たことがある","meaningZH":"曾经……过","usage":"表示过去的经历","connection":"动词た形＋ことがある","jlpt":"N4","examples":[{"japanese":"日本へ行ったことがあります。","translationZH":"我去过日本。"}],"notes":"","warnings":[]}"#
+    static let vocabularyJSON = #"{"schemaVersion":2,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":["语境不足时请核对词义"]}"#
+    static let longReadingJSON = #"{"schemaVersion":2,"kind":"vocabulary","headword":"あいうえおか","reading":"あいうえおか","meaningZH":"测试","partsOfSpeech":["名词"],"pitchAccent":6,"jlpt":null,"examples":[],"notes":"","warnings":[]}"#
+    static let grammarJSON = #"{"schemaVersion":2,"kind":"grammar","grammarForm":"～たことがある","meaningZH":"曾经……过","usage":"表示过去的经历","connection":"动词た形＋ことがある","jlpt":"N4","examples":[{"japanese":"日本へ行ったことがあります。","translationZH":"我去过日本。"}],"notes":"","warnings":[]}"#
 }
 
 private struct FixedAIRepository: AIConfigurationRepository {

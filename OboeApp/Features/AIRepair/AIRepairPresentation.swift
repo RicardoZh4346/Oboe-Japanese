@@ -85,6 +85,7 @@ extension AIRepairPreviewField {
         case .reading: "读音"
         case .meaningZH: "释义"
         case .partOfSpeech: "词性"
+        case .pitchAccent: "音调"
         case .usage: "用法"
         case .connection: "接续"
         case .notes: "说明"
@@ -114,6 +115,7 @@ struct AIRepairEditableFields: Equatable {
     var reading = ""
     var meaningZH = ""
     var partOfSpeech = ""
+    var pitchAccent: PitchAccent?
     var usage = ""
     var connection = ""
     var notes = ""
@@ -157,13 +159,17 @@ struct AIRepairEditableFields: Equatable {
         let patch: AIRepairFieldPatch
         switch kind {
         case .vocabulary:
+            if pitchAccent == nil {
+                clear.append(.pitchAccent)
+            }
             patch = AIRepairFieldPatch(
                 headword: trimmed(headword),
                 reading: optionalValue(reading, .reading),
                 meaningZH: trimmed(meaningZH),
                 partOfSpeech: optionalValue(partOfSpeech, .partOfSpeech),
                 notes: optionalValue(notes, .notes),
-                examples: examples
+                examples: examples,
+                pitchAccent: pitchAccent
             )
         case .grammar:
             patch = AIRepairFieldPatch(
@@ -203,6 +209,7 @@ extension AIRepairValidatedContent {
                 reading: content.reading ?? "",
                 meaningZH: content.meaningZH,
                 partOfSpeech: content.partOfSpeech ?? "",
+                pitchAccent: content.pitchAccent,
                 notes: content.notes ?? "",
                 exampleJapanese: content.example?.japanese ?? "",
                 exampleTranslationZH: content.example?.translationZH ?? ""

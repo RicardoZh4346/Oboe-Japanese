@@ -30,20 +30,54 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 -------------------------------------------------------------------------------
-Oboe Built-in JLPT Vocabulary Dataset 2026.09.13-1
+Oboe Built-in JLPT Vocabulary Dataset 2026.09.21-2
 Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
 
 Derived from OpenJLPT (evanclan/OpenJLPT), revision
-c42fd9fa3777bfc1775446f7c418d549dfd6e4cf, and Tomoshi Dictionary Open Data
-(Y1Z), release v2026-09-02. Upstream content includes community JLPT level
-assignments from Jonathan Waller's JLPT Resources, JMdict content from the
-Electronic Dictionary Research and Development Group (EDRDG), and Tatoeba
-Japanese-English example sentences. Oboe's modifications and full attribution
-are recorded in OboeApp/Resources/JLPT/NOTICE.txt.
+c42fd9fa3777bfc1775446f7c418d549dfd6e4cf, Tomoshi Dictionary Open Data
+(Y1Z) release v2026-09-02, UniDic-CWJ 3.1.0, kanjium revision
+8a0cdaa16d64a281a2048de2eee2ec5e3a440fa6, and Tatoeba export snapshot
+2026-09-19. Upstream content includes community JLPT level assignments from
+Jonathan Waller's JLPT Resources and JMdict content from the Electronic
+Dictionary Research and Development Group (EDRDG). Oboe's modifications and
+full attribution are recorded in OboeApp/Resources/JLPT/NOTICE.txt.
 
 https://github.com/evanclan/OpenJLPT
 https://github.com/tomoshi-app/tomoshi-dict-data
 https://creativecommons.org/licenses/by-sa/4.0/legalcode
+
+Schema v2 enrichment inputs:
+
+- UniDic-CWJ 3.1.0, National Institute for Japanese Language and Linguistics
+  (NINJAL). Oboe selects the New BSD / BSD-3-Clause option offered with the
+  distribution. https://clrd.ninjal.ac.jp/unidic/en/
+- kanjium, revision 8a0cdaa16d64a281a2048de2eee2ec5e3a440fa6,
+  by mifunetoshiro; the pitch accent database is attributed upstream to
+  Uros O. Licensed CC BY-SA 4.0.
+  https://github.com/mifunetoshiro/kanjium
+- Tatoeba Japanese and Mandarin Chinese sentences and direct translation
+  links, export snapshot 2026-09-19. Copyright the contributing authors;
+  licensed CC BY 2.0 FR. https://tatoeba.org/eng/downloads
+
+Exact input files, byte sizes, SHA-256 values, download locations, licenses and
+attributions are recorded in Scripts/jlpt_sources_v2.json. Raw dictionaries and
+dumps are build inputs only and are not included in the App bundle. The
+generated schema v2 NOTICE repeats these attributions alongside the bundled
+database.
+
+- Helsinki-NLP OPUS-MT English-to-Chinese model, repository
+  Helsinki-NLP/opus-mt-en-zh, revision
+  408d9bc410a388e1d9aef112a2daba955b945255. Used only at build time for
+  deterministic offline Simplified Chinese coverage where the locked Tatoeba
+  snapshot has no suitable Chinese translation. Licensed Apache License 2.0.
+  Model weights are not included in the App bundle.
+  https://huggingface.co/Helsinki-NLP/opus-mt-en-zh
+  https://www.apache.org/licenses/LICENSE-2.0
+
+The model files, runtime versions, deterministic generation settings and
+supplemental Tatoeba English input hashes are recorded in
+Scripts/jlpt_translation_model_v1.json. The reviewed derived coverage and
+source-bound corrections are recorded in Scripts/JLPTData/.
 
 -------------------------------------------------------------------------------
 swift-fsrs, revision 4fbaf20184d62f82a9f44f343337c61a2c5483e9

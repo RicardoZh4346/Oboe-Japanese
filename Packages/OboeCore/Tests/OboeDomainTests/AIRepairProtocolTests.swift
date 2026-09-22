@@ -20,8 +20,8 @@ final class AIRepairProtocolTests: XCTestCase {
             Set(object.keys),
             ["schemaVersion", "promptVersion", "note", "direction", "reviewSummary", "userComment"]
         )
-        XCTAssertEqual(object["schemaVersion"] as? Int, 1)
-        XCTAssertEqual(object["promptVersion"] as? String, AIRepairPromptV1.promptVersion)
+        XCTAssertEqual(object["schemaVersion"] as? Int, 2)
+        XCTAssertEqual(object["promptVersion"] as? String, AIRepairPromptV2.promptVersion)
         XCTAssertEqual(object["direction"] as? String, "vocabulary_ja_zh")
         XCTAssertEqual(object["userComment"] as? String, "例句总是记不住")
 
@@ -29,13 +29,15 @@ final class AIRepairProtocolTests: XCTestCase {
         // Nil optionals are omitted; every emitted key must be whitelisted.
         XCTAssertTrue(
             Set(note.keys).isSubset(of: [
-                "kind", "headword", "reading", "meaningZH", "partOfSpeech",
-                "usage", "connection", "examples", "notes"
+                "kind", "headword", "reading", "meaningZH", "partsOfSpeech",
+                "pitchAccent", "usage", "connection", "examples", "notes"
             ])
         )
         XCTAssertTrue(Set(note.keys).isSuperset(of: ["kind", "headword", "meaningZH"]))
         XCTAssertEqual(note["kind"] as? String, "vocabulary")
         XCTAssertEqual(note["headword"] as? String, "受ける")
+        XCTAssertEqual(note["partsOfSpeech"] as? [String], ["一段动词", "他动词"])
+        XCTAssertEqual(note["pitchAccent"] as? Int, 2)
 
         let summary = try XCTUnwrap(object["reviewSummary"] as? [String: Any])
         XCTAssertEqual(
@@ -127,7 +129,7 @@ final class AIRepairProtocolTests: XCTestCase {
                 ]
             ]
         ])
-        XCTAssertEqual(response.schemaVersion, 1)
+        XCTAssertEqual(response.schemaVersion, 2)
         XCTAssertEqual(response.problemTypes, [.tooManyMeanings, .lackOfContext])
         XCTAssertEqual(response.suggestions.count, 2)
 
@@ -253,6 +255,46 @@ final class AIRepairProtocolTests: XCTestCase {
             suggestion: validSuggestion
         )) { error in
             XCTAssertEqual(error as? AIRepairError, .unsupportedSchemaVersion(99))
+        }
+    }
+
+    func testV2ControlledPartsAndPitchAreValidatedWithoutGuessing() throws {
+        let response = try decodeResponse([
+            "problemTypes": ["lack_of_context"],
+            "summary": "补齐受控字段。",
+            "suggestions": [[
+                "type": "add_note",
+                "title": "补齐词性与音调",
+                "reason": "提升辨识度",
+                "replacement": [
+                    "partsOfSpeech": ["一段动词", "他动词"],
+                    "pitchAccent": 2
+                ]
+            ]]
+        ])
+        let preview = try AIRepairPreviewBuilder.preview(
+            response.suggestions[0],
+            note: makeVocabularySnapshot()
+        )
+        guard case let .vocabulary(content) = preview.resultContent else {
+            return XCTFail("expected vocabulary content")
+        }
+        XCTAssertEqual(content.partOfSpeech, "一段动词 / 他动词")
+        XCTAssertEqual(content.pitchAccent, PitchAccent(rawValue: 2))
+
+        assertDecodeFails(
+            suggestion: ["type": "add_note", "title": "t", "reason": "r",
+                         "replacement": ["partsOfSpeech": ["未知词性"]]],
+            equals: .invalidCandidate("无效或重复的词性：未知词性")
+        )
+        assertDecodeFails(
+            suggestion: ["type": "add_note", "title": "t", "reason": "r",
+                         "replacement": ["pitchAccent": -1]],
+            equals: .invalidCandidate("音调必须是非负整数")
+        )
+
+        XCTAssertThrowsError(try decodeResponse(["schemaVersion": 1])) { error in
+            XCTAssertEqual(error as? AIRepairError, .unsupportedSchemaVersion(1))
         }
     }
 
@@ -386,7 +428,7 @@ final class AIRepairProtocolTests: XCTestCase {
         }
 
         var object: [String: Any] = [
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "problemTypes": [],
             "summary": String(repeating: "长", count: 64 * 1_024),
             "suggestions": []
@@ -426,7 +468,7 @@ final class AIRepairProtocolTests: XCTestCase {
             title: "精简",
             reason: "只保留核心",
             replacement: AIRepairFieldPatch(meaningZH: "参加考试"),
-            clearFields: [.reading, .notes]
+            clearFields: [.reading, .pitchAccent, .notes]
         )
         let preview = try AIRepairPreviewBuilder.preview(
             suggestion,
@@ -440,7 +482,7 @@ final class AIRepairProtocolTests: XCTestCase {
         XCTAssertEqual(content.meaningZH, "参加考试")
         XCTAssertEqual(
             preview.changes.map(\.field),
-            [.reading, .meaningZH, .notes]
+            [.reading, .meaningZH, .pitchAccent, .notes]
         )
     }
 
@@ -560,7 +602,8 @@ final class AIRepairProtocolTests: XCTestCase {
             headword: "受ける",
             reading: "うける",
             meaningZH: "接受；遭受",
-            partOfSpeech: "动词",
+            partOfSpeech: "一段动词 / 他动词",
+            pitchAccent: PitchAccent(rawValue: 2),
             jlpt: .n3,
             notes: "原注释",
             examples: [AIRepairExampleCandidate(
@@ -602,7 +645,7 @@ final class AIRepairProtocolTests: XCTestCase {
         suggestion: [String: Any]? = nil
     ) throws -> AIRepairResponse {
         var object: [String: Any] = [
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "problemTypes": ["unknown"],
             "summary": "诊断",
             "suggestions": [suggestion ?? validSuggestion]
@@ -610,11 +653,34 @@ final class AIRepairProtocolTests: XCTestCase {
         for (key, value) in overrides {
             object[key] = value
         }
+        if let suggestions = object["suggestions"] as? [[String: Any]] {
+            object["suggestions"] = suggestions.map(upgradedSuggestion)
+        }
         let json = String(
             decoding: try JSONSerialization.data(withJSONObject: object),
             as: UTF8.self
         )
         return try AIRepairOutputDecoder.decode(json)
+    }
+
+    private func upgradedSuggestion(_ suggestion: [String: Any]) -> [String: Any] {
+        guard let candidates = suggestion["splitNotes"] as? [[String: Any]] else {
+            return suggestion
+        }
+        var suggestion = suggestion
+        suggestion["splitNotes"] = candidates.map { candidate in
+            var candidate = candidate
+            candidate["reading"] = candidate["reading"] ?? NSNull()
+            candidate["partsOfSpeech"] = candidate["partsOfSpeech"] ?? []
+            candidate["pitchAccent"] = candidate["pitchAccent"] ?? NSNull()
+            candidate["jlpt"] = candidate["jlpt"] ?? NSNull()
+            candidate["usage"] = candidate["usage"] ?? NSNull()
+            candidate["connection"] = candidate["connection"] ?? NSNull()
+            candidate["notes"] = candidate["notes"] ?? NSNull()
+            candidate["examples"] = candidate["examples"] ?? NSNull()
+            return candidate
+        }
+        return suggestion
     }
 
     private func assertDecodeFails(

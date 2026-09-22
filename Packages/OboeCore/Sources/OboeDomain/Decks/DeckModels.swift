@@ -73,14 +73,33 @@ public enum DeckDeletionResult: Equatable, Sendable {
 }
 
 public struct DeckDeletionImpact: Equatable, Sendable {
+    /// 成员 Note 总数（含共享）。
     public let noteCount: Int
+    /// 成员 Note 的 Card 总数（含共享 Note 的卡）。
     public let cardCount: Int
+    /// 成员 Note 的复习日志总数（含共享 Note 的日志）。
     public let reviewLogCount: Int
+    /// 仅属于该牌组的 Note 数：deleteContents 时会被真正删除。
+    public let exclusiveNoteCount: Int
+    /// 独占 Note 的 Card 数：deleteContents 时随独占 Note 一并删除。
+    public let exclusiveCardCount: Int
+    /// 同时属于其他牌组的 Note 数：deleteContents 时仅移除本牌组成员关系。
+    public let sharedNoteCount: Int
 
-    public init(noteCount: Int, cardCount: Int, reviewLogCount: Int) {
+    public init(
+        noteCount: Int,
+        cardCount: Int,
+        reviewLogCount: Int,
+        exclusiveNoteCount: Int? = nil,
+        exclusiveCardCount: Int? = nil,
+        sharedNoteCount: Int? = nil
+    ) {
         self.noteCount = noteCount
         self.cardCount = cardCount
         self.reviewLogCount = reviewLogCount
+        self.exclusiveNoteCount = exclusiveNoteCount ?? noteCount
+        self.exclusiveCardCount = exclusiveCardCount ?? cardCount
+        self.sharedNoteCount = sharedNoteCount ?? 0
     }
 }
 
@@ -103,6 +122,8 @@ public protocol DeckRepository: Sendable {
     func createDeck(id: UUID, name: String, at date: Date) async throws -> Deck
     func renameDeck(id: UUID, name: String, at date: Date) async throws -> Bool
     func deleteDeckIfEmpty(id: UUID) async throws -> DeckDeletionResult
+    /// 删除前预览影响（独占/共享计数）；牌组不存在返回 nil。
+    func previewDeletionImpact(id: UUID) async throws -> DeckDeletionImpact?
     func deleteDeck(
         id: UUID,
         strategy: DeckDeletionStrategy,
@@ -155,6 +176,12 @@ public struct DeckManagementService: Sendable {
 
     public func deleteEmptyDeck(id: UUID) async throws -> DeckDeletionResult {
         try await repository.deleteDeckIfEmpty(id: id)
+    }
+
+    /// 删除确认页用：分别展示独占（将真正删除）与共享（仅解除关系）
+    /// 知识点数（设计 §4.8）。
+    public func previewDeletionImpact(id: UUID) async throws -> DeckDeletionImpact? {
+        try await repository.previewDeletionImpact(id: id)
     }
 
     public func deleteDeck(

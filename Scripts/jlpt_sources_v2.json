@@ -1,0 +1,107 @@
+{
+  "manifestVersion": 1,
+  "schemaVersion": 2,
+  "datasetVersion": "2026.09.21-2",
+  "sources": {
+    "openjlpt": {
+      "version": "c42fd9fa3777bfc1775446f7c418d549dfd6e4cf",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "OpenJLPT by evanclan; incorporates Jonathan Waller JLPT lists, JMdict/EDICT and Tatoeba examples",
+      "sourceURL": "https://github.com/evanclan/OpenJLPT/tree/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf",
+      "files": {
+        "n1.json": {
+          "bytes": 1311444,
+          "sha256": "e9662df1dba34c2f566a128f203c8a78296c1c2c1a337b8ef036ca516ea8430e",
+          "downloadURL": "https://raw.githubusercontent.com/evanclan/OpenJLPT/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf/data/json/vocab/n1.json"
+        },
+        "n2.json": {
+          "bytes": 680482,
+          "sha256": "12094a0f89a8f4a77f7d230aa280900c60c149f60dba2a810589f60407d3190f",
+          "downloadURL": "https://raw.githubusercontent.com/evanclan/OpenJLPT/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf/data/json/vocab/n2.json"
+        },
+        "n3.json": {
+          "bytes": 679580,
+          "sha256": "d8ce3998ebb254567436ef3d34c96f6aac83c2c88dbfb85af5e5935bd1bd21ed",
+          "downloadURL": "https://raw.githubusercontent.com/evanclan/OpenJLPT/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf/data/json/vocab/n3.json"
+        },
+        "n4.json": {
+          "bytes": 218895,
+          "sha256": "978b9813afaac181fe1308eb1ad7d4cb4ad4ffc9178fa88fc7fb2832de5dbb62",
+          "downloadURL": "https://raw.githubusercontent.com/evanclan/OpenJLPT/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf/data/json/vocab/n4.json"
+        },
+        "n5.json": {
+          "bytes": 222308,
+          "sha256": "3e606fc15fd5d177fa7c3928c17f28b0d34ac84ec6bdbfe0947b339d9d815a6d",
+          "downloadURL": "https://raw.githubusercontent.com/evanclan/OpenJLPT/c42fd9fa3777bfc1775446f7c418d549dfd6e4cf/data/json/vocab/n5.json"
+        }
+      }
+    },
+    "tomoshi": {
+      "version": "v2026-09-02",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "Tomoshi Dictionary Open Data by Y1Z; only tables carrying CC-BY-SA-4.0 metadata are consumed",
+      "sourceURL": "https://github.com/tomoshi-app/tomoshi-dict-data/releases/tag/v2026-09-02",
+      "files": {
+        "tomoshi-dict-open.db": {
+          "bytes": 649523200,
+          "sha256": "8b19c7d65a7d7d6df9afc58832b17b22fd349724e5d06d2acf3bb9a6c4b0ed9d",
+          "downloadURL": "https://github.com/tomoshi-app/tomoshi-dict-data/releases/download/v2026-09-02/tomoshi-dict-open.db.zst",
+          "archiveBytes": 85966850,
+          "archiveSHA256": "7153dfd7a8e42e2d920308370eac90cf9f2e4b4cfe67fb9a86e9aa1c89494073"
+        }
+      }
+    },
+    "unidic_cwj": {
+      "version": "3.1.0-full",
+      "license": "BSD-3-Clause",
+      "attribution": "UniDic-CWJ 3.1.0, National Institute for Japanese Language and Linguistics (NINJAL)",
+      "sourceURL": "https://clrd.ninjal.ac.jp/unidic/en/",
+      "files": {
+        "lex_3_1.csv": {
+          "bytes": 233538541,
+          "sha256": "5c892d88de9bb87dd90a2c1b2492b4cce0d13dacd9888d25e05298a00612a376",
+          "downloadURL": "https://clrd.ninjal.ac.jp/unidic_archive/cwj/3.1.0/unidic-cwj-3.1.0-full.zip",
+          "archiveBytes": 1753389251,
+          "archiveSHA256": "4b4e828deb77119e30a6e1cade4ea086281fded686ffa3ba1a63029f7fcc83e4",
+          "archiveMember": "unidic-cwj-3.1.0-full/lex_3_1.csv"
+        }
+      }
+    },
+    "kanjium": {
+      "version": "8a0cdaa16d64a281a2048de2eee2ec5e3a440fa6",
+      "license": "CC-BY-SA-4.0",
+      "attribution": "kanjium by mifunetoshiro; pitch accent database attributed upstream to Uros O.",
+      "sourceURL": "https://github.com/mifunetoshiro/kanjium/tree/8a0cdaa16d64a281a2048de2eee2ec5e3a440fa6",
+      "files": {
+        "accents.txt": {
+          "bytes": 3226405,
+          "sha256": "8bd0dd127dab32ceec94cb03ab1ba6b68858ea73421dfa1731af2f373deb4f20",
+          "downloadURL": "https://raw.githubusercontent.com/mifunetoshiro/kanjium/8a0cdaa16d64a281a2048de2eee2ec5e3a440fa6/data/source_files/raw/accents.txt"
+        }
+      }
+    },
+    "tatoeba": {
+      "version": "2026-09-19",
+      "license": "CC-BY-2.0-FR",
+      "attribution": "Tatoeba contributors; Japanese and Mandarin Chinese sentences and direct translation links",
+      "sourceURL": "https://tatoeba.org/eng/downloads",
+      "files": {
+        "jpn_sentences.tsv.bz2": {
+          "bytes": 3417672,
+          "sha256": "a1d7ceacb2da36ad04f0d3ef9b211cfe7a77734e86131fa7086d192ee49a8aac",
+          "downloadURL": "https://downloads.tatoeba.org/exports/per_language/jpn/jpn_sentences.tsv.bz2"
+        },
+        "cmn_sentences.tsv.bz2": {
+          "bytes": 1257035,
+          "sha256": "c8768f4c850f065366b8a083f5ddf25c2f5d7ee67a2387235062460f13d54d7d",
+          "downloadURL": "https://downloads.tatoeba.org/exports/per_language/cmn/cmn_sentences.tsv.bz2"
+        },
+        "jpn-cmn_links.tsv.bz2": {
+          "bytes": 99677,
+          "sha256": "e9e2e4fdf5ff52e73d363bd013c400b8f5287fbf5ec5c2f614022f5159bdacd2",
+          "downloadURL": "https://downloads.tatoeba.org/exports/per_language/jpn/jpn-cmn_links.tsv.bz2"
+        }
+      }
+    }
+  }
+}

@@ -18,6 +18,7 @@ struct AddContentEditorView: View {
     private let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     private let historyService: StudyHistoryService
     private let speechService: any SpeechService
+    private let studyService: StudySessionService?
     private let inboxService: InboxService?
     private let inboxImageStore: InboxImageStore?
     private let ocrService: (any OCRRecognizing)?
@@ -44,6 +45,7 @@ struct AddContentEditorView: View {
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         historyService: StudyHistoryService,
         speechService: any SpeechService,
+        studyService: StudySessionService? = nil,
         inboxService: InboxService? = nil,
         inboxImageStore: InboxImageStore? = nil,
         ocrService: (any OCRRecognizing)? = nil,
@@ -63,6 +65,7 @@ struct AddContentEditorView: View {
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         self.historyService = historyService
         self.speechService = speechService
+        self.studyService = studyService
         self.inboxService = inboxService
         self.inboxImageStore = inboxImageStore
         self.ocrService = ocrService
@@ -80,6 +83,7 @@ struct AddContentEditorView: View {
                 aiCardGenerationService: aiCardGenerationService,
                 sentenceAnalysisService: sentenceAnalysisService,
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                studyService: studyService,
                 capture: captureSession
             )
         )
@@ -351,7 +355,8 @@ struct AddContentEditorView: View {
             sentenceAnalysisService: sentenceAnalysisService,
             sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
             historyService: historyService,
-            speechService: speechService
+            speechService: speechService,
+            studyService: studyService
         )
     }
 
@@ -537,18 +542,24 @@ struct AddContentEditorView: View {
     @ViewBuilder
     private var targetDeckSection: some View {
         @Bindable var model = model
-        Section("目标牌组") {
+        Section {
             if model.kind == .vocabulary {
-                Picker("牌组", selection: $model.vocabularyDeckID) {
-                    DeckPickerOptions(decks: model.decks)
-                }
-                .accessibilityIdentifier("vocabulary-deck-picker")
+                DeckMembershipField(
+                    decks: model.decks,
+                    selection: $model.currentMembershipSelection,
+                    rowAccessibilityID: "vocabulary-deck-picker"
+                )
             } else {
-                Picker("牌组", selection: $model.grammarDeckID) {
-                    DeckPickerOptions(decks: model.decks)
-                }
-                .accessibilityIdentifier("grammar-deck-picker")
+                DeckMembershipField(
+                    decks: model.decks,
+                    selection: $model.currentMembershipSelection,
+                    rowAccessibilityID: "grammar-deck-picker"
+                )
             }
+        } header: {
+            Text("目标牌组")
+        } footer: {
+            Text("知识点会加入全部所选牌组；归属牌组决定新卡额度与复习归因，切换不影响学习进度。")
         }
     }
 

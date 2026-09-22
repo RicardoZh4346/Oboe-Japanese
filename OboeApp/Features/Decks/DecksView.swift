@@ -11,11 +11,17 @@ struct DecksView: View {
     private let knowledgePointService: KnowledgePointService
     private let searchService: KnowledgeSearchService
     private let contentCardService: ContentCardService
+    private let studyService: StudySessionService
     private let historyService: StudyHistoryService
+    private let speechPreferencesService: SpeechPreferencesService
+    private let adaptivePreferencesService: AdaptivePreferencesService
     private let speechService: any SpeechService
     private let jlptProgressService: JLPTProgressService
     private let jlptLibraryService: JLPTLibraryService
     private let jlptImporter: any JLPTImporting
+    /// T12: 词库回填状态与幂等调度入口，透传给词库页。
+    private let jlptEnrichmentStatus: JLPTEnrichmentStatus
+    private let scheduleJLPTEnrichment: () -> Void
     /// T25: the JLPT weak-vocabulary list drills into the shared adaptive
     /// card detail — same services as the Today-tab Adaptive center.
     private let adaptiveCardService: AdaptiveCardService
@@ -30,10 +36,14 @@ struct DecksView: View {
         contentCardService: ContentCardService,
         studyService: StudySessionService,
         historyService: StudyHistoryService,
+        speechPreferencesService: SpeechPreferencesService,
+        adaptivePreferencesService: AdaptivePreferencesService,
         speechService: any SpeechService,
         jlptProgressService: JLPTProgressService,
         jlptLibraryService: JLPTLibraryService,
         jlptImporter: any JLPTImporting,
+        jlptEnrichmentStatus: JLPTEnrichmentStatus,
+        scheduleJLPTEnrichment: @escaping () -> Void,
         adaptiveCardService: AdaptiveCardService,
         aiRepairService: AIRepairService
     ) {
@@ -43,11 +53,16 @@ struct DecksView: View {
         self.knowledgePointService = knowledgePointService
         self.searchService = searchService
         self.contentCardService = contentCardService
+        self.studyService = studyService
         self.historyService = historyService
+        self.speechPreferencesService = speechPreferencesService
+        self.adaptivePreferencesService = adaptivePreferencesService
         self.speechService = speechService
         self.jlptProgressService = jlptProgressService
         self.jlptLibraryService = jlptLibraryService
         self.jlptImporter = jlptImporter
+        self.jlptEnrichmentStatus = jlptEnrichmentStatus
+        self.scheduleJLPTEnrichment = scheduleJLPTEnrichment
         self.adaptiveCardService = adaptiveCardService
         self.aiRepairService = aiRepairService
         _model = State(
@@ -70,6 +85,8 @@ struct DecksView: View {
                             importer: jlptImporter,
                             deckService: deckService,
                             speechService: speechService,
+                            enrichmentStatus: jlptEnrichmentStatus,
+                            scheduleEnrichment: scheduleJLPTEnrichment,
                             adaptiveCardService: adaptiveCardService,
                             contentCardService: contentCardService,
                             aiRepairService: aiRepairService,
@@ -121,7 +138,7 @@ struct DecksView: View {
                 } header: {
                     Text("我的牌组")
                 } footer: {
-                    Text("今日页会汇总全部任务，并可按牌组开始学习。")
+                    Text("今日页会汇总全部任务；牌组详情内可按本牌组范围学习。")
                 }
             }
             .listStyle(.insetGrouped)
@@ -177,7 +194,12 @@ struct DecksView: View {
                     knowledgePointService: knowledgePointService,
                     searchService: searchService,
                     contentCardService: contentCardService,
+                    studyService: studyService,
                     historyService: historyService,
+                    speechPreferencesService: speechPreferencesService,
+                    adaptiveCardService: adaptiveCardService,
+                    adaptivePreferencesService: adaptivePreferencesService,
+                    aiRepairService: aiRepairService,
                     speechService: speechService
                 )
             }
@@ -253,6 +275,7 @@ private final class DecksViewModel {
     var decks: [DeckSummary] = []
     var todayStatistics: TodayReviewStatistics?
     var primaryDeckID: UUID?
+    var deletionImpacts: [UUID: DeckDeletionImpact] = [:]
     var isLoading = true
     var errorMessage: String?
 
@@ -343,6 +366,14 @@ private final class DecksViewModel {
             errorMessage = Self.message(for: error)
         }
         return false
+    }
+
+    /// 删除确认页预览：独占（将删除）/共享（仅解除关系）计数
+    /// （设计 §4.8）。预览失败不阻断流程，文案回退为汇总计数。
+    func loadDeletionImpact(for deckID: UUID) async {
+        do {
+            deletionImpacts[deckID] = try await service.previewDeletionImpact(id: deckID)
+        } catch {}
     }
 
     func refreshDecks() async {
@@ -453,7 +484,12 @@ private struct DeckDetailView: View {
     let knowledgePointService: KnowledgePointService
     let searchService: KnowledgeSearchService
     let contentCardService: ContentCardService
+    let studyService: StudySessionService
     let historyService: StudyHistoryService
+    let speechPreferencesService: SpeechPreferencesService
+    let adaptiveCardService: AdaptiveCardService
+    let adaptivePreferencesService: AdaptivePreferencesService
+    let aiRepairService: AIRepairService
     let speechService: any SpeechService
 
     @Environment(\.dismiss) private var dismiss
@@ -476,7 +512,12 @@ private struct DeckDetailView: View {
         knowledgePointService: KnowledgePointService,
         searchService: KnowledgeSearchService,
         contentCardService: ContentCardService,
+        studyService: StudySessionService,
         historyService: StudyHistoryService,
+        speechPreferencesService: SpeechPreferencesService,
+        adaptiveCardService: AdaptiveCardService,
+        adaptivePreferencesService: AdaptivePreferencesService,
+        aiRepairService: AIRepairService,
         speechService: any SpeechService
     ) {
         self.deckID = deckID
@@ -487,7 +528,12 @@ private struct DeckDetailView: View {
         self.knowledgePointService = knowledgePointService
         self.searchService = searchService
         self.contentCardService = contentCardService
+        self.studyService = studyService
         self.historyService = historyService
+        self.speechPreferencesService = speechPreferencesService
+        self.adaptiveCardService = adaptiveCardService
+        self.adaptivePreferencesService = adaptivePreferencesService
+        self.aiRepairService = aiRepairService
         self.speechService = speechService
         _contentModel = State(
             initialValue: DeckContentViewModel(
@@ -516,10 +562,6 @@ private struct DeckDetailView: View {
                             Label("当前主牌组", systemImage: "star.fill")
                                 .foregroundStyle(OboeTheme.Colors.accent)
                                 .accessibilityIdentifier("deck-primary-status")
-                            Button("取消主牌组") {
-                                Task { await model.setPrimaryDeck(nil) }
-                            }
-                            .accessibilityIdentifier("deck-unset-primary")
                         } else {
                             Button("设为主牌组") {
                                 Task { await model.setPrimaryDeck(deck.id) }
@@ -529,7 +571,7 @@ private struct DeckDetailView: View {
                     } header: {
                         Text("今日主牌组")
                     } footer: {
-                        Text("每日新词额度优先分配给主牌组，剩余额度再分配给其他牌组。一个词的全部方向占一个名额。切换后立即重算今日新词。")
+                        Text("每日新词额度优先分配给主牌组，剩余额度再分配给其他牌组。一个词的全部方向占一个名额。切换后立即重算今日新词。未手动指定时自动使用排序最前的牌组。")
                     }
 
                     Section {
@@ -543,6 +585,7 @@ private struct DeckDetailView: View {
                                 isConfirmingDelete = true
                             } else {
                                 isChoosingNonEmptyDeletion = true
+                                Task { await model.loadDeletionImpact(for: deck.id) }
                             }
                         }
                         .accessibilityIdentifier("deck-delete-button")
@@ -594,6 +637,29 @@ private struct DeckDetailView: View {
 
                     Section("今日") {
                         let counts = model.todayTasks(for: deck.id)
+                        NavigationLink {
+                            ReviewView(
+                                service: studyService,
+                                historyService: historyService,
+                                speechPreferencesService: speechPreferencesService,
+                                adaptiveCardService: adaptiveCardService,
+                                adaptivePreferencesService: adaptivePreferencesService,
+                                aiRepairService: aiRepairService,
+                                deckService: deckService,
+                                repairNoteEditor: { noteID, kind, onUpdated in
+                                    AnyView(noteEditorDestination(
+                                        noteID: noteID,
+                                        kind: kind,
+                                        onUpdated: onUpdated
+                                    ))
+                                },
+                                speechService: speechService,
+                                scope: StudyScope(deckID: deck.id, title: deck.name)
+                            )
+                        } label: {
+                            Label("学习此牌组", systemImage: "play.fill")
+                        }
+                        .accessibilityIdentifier("deck-study-button")
                         LabeledContent("分配新词", value: "\(counts.newCount)")
                             .accessibilityIdentifier("deck-detail-today-new-count")
                         LabeledContent("复习任务", value: "\(counts.reviewCount)")
@@ -643,7 +709,18 @@ private struct DeckDetailView: View {
                     }
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text("将影响 \(deck.noteCount) 个知识点和 \(deck.cardCount) 张卡片。移动会保留卡片进度；连同内容删除会移除正文与卡片。")
+                    if let impact = model.deletionImpacts[deck.id] {
+                        Text("本牌组包含 \(impact.noteCount) 个知识点（\(impact.exclusiveNoteCount) 个独占、\(impact.sharedNoteCount) 个共享）与 \(impact.cardCount) 张卡片。移动会保留卡片进度；连同内容删除只移除独占内容，共享内容仅解除与本牌组的关系。")
+                    } else {
+                        Text("将影响 \(deck.noteCount) 个知识点和 \(deck.cardCount) 张卡片。移动会保留卡片进度；连同内容删除会移除正文与卡片。")
+                    }
+                    if model.primaryDeckID == deck.id {
+                        if model.decks.count > 1 {
+                            Text("这是当前主牌组，删除后将自动把排序最前的牌组设为主牌组。")
+                        } else {
+                            Text("这是当前主牌组，删除后将没有牌组，主牌组显示为未设置。")
+                        }
+                    }
                 }
                 .confirmationDialog(
                     "确认连同牌组内容删除？",
@@ -651,7 +728,9 @@ private struct DeckDetailView: View {
                     titleVisibility: .visible
                 ) {
                     Button(
-                        "删除 \(deck.noteCount) 个知识点与 \(deck.cardCount) 张卡片",
+                        model.deletionImpacts[deck.id].map {
+                            "删除 \($0.exclusiveNoteCount) 个独占知识点与 \($0.exclusiveCardCount) 张卡片"
+                        } ?? "删除 \(deck.noteCount) 个知识点与 \(deck.cardCount) 张卡片",
                         role: .destructive
                     ) {
                         Task {
@@ -663,7 +742,11 @@ private struct DeckDetailView: View {
                     .accessibilityIdentifier("deck-delete-with-content-confirm-button")
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text("例句、标签关联、卡片和当前任务会删除；评分历史仅保留不可变标识。操作不可撤销，可通过已有备份恢复。")
+                    if let impact = model.deletionImpacts[deck.id], impact.sharedNoteCount > 0 {
+                        Text("独占内容的例句、标签关联、卡片和当前任务会删除；\(impact.sharedNoteCount) 个共享知识点仅解除与本牌组的关系，卡片与进度保留。评分历史仅保留不可变标识。操作不可撤销，可通过已有备份恢复。")
+                    } else {
+                        Text("例句、标签关联、卡片和当前任务会删除；评分历史仅保留不可变标识。操作不可撤销，可通过已有备份恢复。")
+                    }
                 }
                 .sheet(isPresented: $isMovingBeforeDeletion, onDismiss: {
                     if didDeleteAfterMove {
@@ -785,6 +868,39 @@ private struct DeckDetailView: View {
                 await model.refreshDecks()
                 await searchModel.refresh(searchText)
             }
+        }
+    }
+
+    /// AI 拆卡 sheet 的手动编辑兜底：按 noteID + kind 直达详情页。
+    @ViewBuilder
+    private func noteEditorDestination(
+        noteID: UUID,
+        kind: KnowledgePointKind,
+        onUpdated: @escaping () async -> Void
+    ) -> some View {
+        switch kind {
+        case .vocabulary:
+            VocabularyDetailView(
+                noteID: noteID,
+                service: vocabularyService,
+                knowledgeService: knowledgePointService,
+                deckService: deckService,
+                contentCardService: contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
+        case .grammar:
+            GrammarDetailView(
+                noteID: noteID,
+                service: grammarService,
+                knowledgeService: knowledgePointService,
+                deckService: deckService,
+                contentCardService: contentCardService,
+                historyService: historyService,
+                speechService: speechService,
+                onUpdated: onUpdated
+            )
         }
     }
 }
@@ -1231,7 +1347,7 @@ private struct DeckMoveBeforeDeletionSheet: View {
             .navigationTitle("移动内容后删除")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
-                Text("将移动“\(sourceDeck.name)”中的 \(sourceDeck.noteCount) 个知识点和 \(sourceDeck.cardCount) 张卡片；卡片进度保留，评分历史仍记录原牌组。")
+                Text("将移动“\(sourceDeck.name)”中的 \(sourceDeck.noteCount) 个知识点和 \(sourceDeck.cardCount) 张卡片；已是目标牌组成员的知识点不重复移动，卡片进度保留，评分历史仍记录原牌组。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding()

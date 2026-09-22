@@ -212,12 +212,13 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
         ).setDailyNewCardLimit(4, at: instant, defaultTimeZoneID: "Asia/Shanghai")
 
         // 额度按词计：4 个词入选，双方向词的全部方向卡一起收录 → 5 张预约卡。
+        // 未显式设置主牌组时自动默认排序最前的 firstDeck：A 的词先占额度
+        // （3 张卡），B 的两个词占剩余 2 个名额。
         XCTAssertEqual(plan.reservedNoteCount, 4)
         XCTAssertEqual(plan.reservedCount, 5)
         XCTAssertEqual(plan.availableCount, 0)
-        XCTAssertEqual(plan.reservations.map(\.deckID), [
-            firstDeck, firstDeck, secondDeck, firstDeck, secondDeck
-        ])
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == firstDeck }.count, 3)
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == secondDeck }.count, 2)
         XCTAssertTrue(
             Set(dualCards).isSubset(of: Set(plan.reservations.map(\.cardID))),
             "双方向词的两张方向卡随词一起入选"
@@ -359,15 +360,16 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
             defaultTimeZoneID: "Asia/Shanghai"
         )
 
+        // 新牌组加入后 firstDeck 仍是自动默认主牌组且候选充足 → 独占额度。
         XCTAssertEqual(rebalanced.reservedCount, 10)
         XCTAssertEqual(
             rebalanced.reservations.filter { $0.deckID == secondDeck }.count,
-            3,
-            "新加入的牌组必须立即获得当日额度份额，而不是等明天"
+            0,
+            "自动默认主牌组候选充足时独占额度，新牌组只能等剩余名额"
         )
         XCTAssertEqual(
             rebalanced.reservations.filter { $0.deckID == firstDeck }.count,
-            7
+            10
         )
         for reservation in rebalanced.reservations where reservation.deckID == firstDeck {
             XCTAssertEqual(
@@ -377,13 +379,29 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
             )
         }
 
+        // 把新牌组设为主牌组后它立即获得份额：B 3 张全部入选，A 保留 7 张。
+        let promoted = try await prepare.setPrimaryDeck(
+            secondDeck,
+            at: instant.addingTimeInterval(90),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(
+            promoted.reservations.filter { $0.deckID == secondDeck }.count,
+            3,
+            "新加入的牌组设为主牌组后必须立即获得当日额度份额，而不是等明天"
+        )
+        XCTAssertEqual(
+            promoted.reservations.filter { $0.deckID == firstDeck }.count,
+            7
+        )
+
         let stable = try await prepare(
             at: instant.addingTimeInterval(120),
             defaultTimeZoneID: "Asia/Shanghai"
         )
         XCTAssertEqual(
             stable.reservations.map(\.cardID),
-            rebalanced.reservations.map(\.cardID),
+            promoted.reservations.map(\.cardID),
             "候选集不变时重算必须收敛到同一分配，不能反复换入换出"
         )
     }
@@ -415,11 +433,19 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
             at: instant,
             defaultTimeZoneID: "Asia/Shanghai"
         )
-        // 无主牌组时保持轮转公平：B 3 张全部入选，A 7 张。
-        XCTAssertEqual(initial.reservations.filter { $0.deckID == secondDeck }.count, 3)
-        XCTAssertEqual(initial.reservations.filter { $0.deckID == firstDeck }.count, 7)
+        // 未显式设置时自动默认排序最前的 firstDeck 为主牌组：A 独占额度。
+        XCTAssertEqual(initial.reservedCount, 10)
+        XCTAssertEqual(Set(initial.reservations.map(\.deckID)), [firstDeck])
+        let initialSettings = try await repository.loadOrCreateSettings(
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(
+            initialSettings.primaryDeckID,
+            firstDeck,
+            "存在牌组时必须给出有效主牌组（自动默认排序最前的牌组）"
+        )
 
-        // A 设为主牌组后重算：额度先满足 A 的 12 张候选，B 的预约让位。
+        // A 显式设为主牌组后分配不变：额度仍先满足 A 的 12 张候选。
         let primaryFirst = try await prepare.setPrimaryDeck(
             firstDeck,
             at: instant.addingTimeInterval(60),
@@ -447,13 +473,14 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(settings.primaryDeckID, secondDeck)
 
-        // 取消主牌组后回到纯轮转分配，分配结果不再变化。
+        // 写入 nil 后自动默认回落到排序最前的 firstDeck：A 重新独占。
         let cleared = try await prepare.setPrimaryDeck(
             nil,
             at: instant.addingTimeInterval(180),
             defaultTimeZoneID: "Asia/Shanghai"
         )
-        XCTAssertEqual(cleared.reservations.map(\.cardID), switched.reservations.map(\.cardID))
+        XCTAssertEqual(cleared.reservedCount, 10)
+        XCTAssertEqual(Set(cleared.reservations.map(\.deckID)), [firstDeck])
     }
 
     func testStarvedDeckReclaimsReservationAfterItsCardsBecomeEligible() async throws {
@@ -484,8 +511,18 @@ final class GRDBStudyDayPlanningRepositoryTests: XCTestCase {
             at: instant,
             defaultTimeZoneID: "Asia/Shanghai"
         )
-        XCTAssertEqual(plan.reservations.filter { $0.deckID == secondDeck }.count, 4)
-        XCTAssertEqual(plan.reservations.filter { $0.deckID == firstDeck }.count, 6)
+        // 自动默认主牌组 = firstDeck（候选 12 张充足）→ 独占额度，B 挨饿。
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == secondDeck }.count, 0)
+        XCTAssertEqual(plan.reservations.filter { $0.deckID == firstDeck }.count, 10)
+
+        // 挨饿牌组设为主牌组后立即取回份额：B 4 张全入，A 保留 6 张。
+        let promoted = try await prepare.setPrimaryDeck(
+            secondDeck,
+            at: instant.addingTimeInterval(60),
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertEqual(promoted.reservations.filter { $0.deckID == secondDeck }.count, 4)
+        XCTAssertEqual(promoted.reservations.filter { $0.deckID == firstDeck }.count, 6)
     }
 
     func testNewContentFillsRemainingSlotAndDeletingStudiedCardDoesNotRefundQuota() async throws {
@@ -687,6 +724,7 @@ private final class StudyPlanFixture: @unchecked Sendable {
                     baseMilliseconds + Int64(sequence)
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             for (index, template) in templates.enumerated() {
                 try db.execute(
                     sql: """

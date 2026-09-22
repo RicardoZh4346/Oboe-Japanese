@@ -1,0 +1,677 @@
+{
+  "formatVersion": 1,
+  "reviews": [
+    {
+      "exampleID": "example:39e1aba5de20709ee2ff3a94b75c42a01741a533a86dfba54119af9492144eb7",
+      "japanese": "水素の原子番号は1です。",
+      "english": "The atomic number of hydrogen is 1.",
+      "translationZh": "氢的原子序数是1。",
+      "reason": "修正术语遗漏。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:623232492d51a31a24627fa07e280b09c875a054b4ae02fef66a3fe8d6a2ffaf",
+      "japanese": "四月一日です。",
+      "english": "It's April first.",
+      "translationZh": "今天是四月一日。",
+      "reason": "修正日期序数误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:c1e68e84988c6e1c88b5683a979b3fbab50eea45616ed3dcf32df1e0fe5b8172",
+      "japanese": "私たちの先生は美人であったが、着飾るような人ではなかった。",
+      "english": "Our teacher was a beautiful lady, but was not the type of person who dressed up.",
+      "translationZh": "我们的老师很漂亮，但并不是爱打扮的人。",
+      "reason": "修正短语 dressed up 的字面误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:ae79ca96e6532a05959f902ab0ca59b5c4fdf8ac98606e6fe35272e3686a8288",
+      "japanese": "今じゃ、ボクのお料理レベルは、100点中45点くらい。スゴイだろ、赤点じゃないのさ!",
+      "english": "Right now my score in Cooking is about 45 out of 100. Great isn't it? That's not a fail!",
+      "translationZh": "我现在的烹饪水平大约是100分中的45分。很厉害吧？这可不是不及格！",
+      "reason": "补全模型漏译的否定句。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:73040bda188a3a8d22c7f8a01cf87ad63316d1245153e95913ab67e7020d2d59",
+      "japanese": "5は8より少ない。",
+      "english": "5 is less than 8.",
+      "translationZh": "5小于8。",
+      "reason": "修正数字比较关系。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6bfabfbc0afe6afdfd197049d605b6a9662f14af6e3b89275fcee3eca7ae34be",
+      "japanese": "口は禍の門。",
+      "english": "The tongue wounds more than a lance.",
+      "translationZh": "祸从口出。",
+      "reason": "改用与日文一致的中文惯用表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:9ca4b653c012e4975186c3b092193d4f935bcf6345514bd5086eed109539d6c7",
+      "japanese": "トムってね、メアリーが頬を赤らめ恥じらう姿に一目惚れしたらしいよ。",
+      "english": "Tom seems to have fallen in love with Mary at first sight looking embarrassed and blushing.",
+      "translationZh": "听说汤姆对面露羞涩、双颊泛红的玛丽一见钟情了。",
+      "reason": "消除英文修饰关系造成的歧义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:8bf6de6c1c7820e3f3bbda479736e8fd16086891785838b9055af130d751f415",
+      "japanese": "彼女はスタイルが悪い。",
+      "english": "She has no figure.",
+      "translationZh": "她身材不好。",
+      "reason": "修正英语惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:f3e6a1b4549717f08a3bbbe23edb05861c016c80945317a34de4646c51308db0",
+      "japanese": "僕はすぐに実行した。",
+      "english": "I lost no time in doing it.",
+      "translationZh": "我立刻就去做了。",
+      "reason": "修正英语惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:12fce307fc59fff535ba8dfccbdc8623f42225c7dd1937684de8c45053734add",
+      "japanese": "善は急げだ。",
+      "english": "There's no time like the present.",
+      "translationZh": "好事宜早不宜迟。",
+      "reason": "修正英语惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:ecdac6664671da439874d4e3fde73117a5cc24fe083f69de21e6f54f4a4ab608",
+      "japanese": "手段を択ばないよね。",
+      "english": "There is no means you won't stoop to, isn't that right.",
+      "translationZh": "为达目的，你真是不择手段，对吧。",
+      "reason": "修正双重否定语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:8daaedf037b9eb09aeebfca616998ce41128cd146570dc103e64959bdb07ce7c",
+      "japanese": "恩を仇で返すな。",
+      "english": "Never bite the hand that feeds you.",
+      "translationZh": "不要恩将仇报。",
+      "reason": "改用与日文一致的中文惯用表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:eee66743c1022fb34e2b6eb60e4bccd8d7b2cc4369d66368de8ba2279bcd3712",
+      "japanese": "人は見掛けによらぬもの。",
+      "english": "Men are not always what they seem to be.",
+      "translationZh": "人不可貌相。",
+      "reason": "改用与日文一致的中文惯用表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:32ab26ec6d2cd065fbaff5d2b846b9f90f404903b3d626319880d2af07fc5a01",
+      "japanese": "望んでも無駄だ。",
+      "english": "It is not good wishing.",
+      "translationZh": "再怎么希望也没有用。",
+      "reason": "修正否定句语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:31c16e315d8010155bff3f19cfb4cf44aecad5aa6e48df1060394705341b8ea8",
+      "japanese": "この写真は心を痛めることなしには見られない。",
+      "english": "I can't look at this photo without feeling very sad.",
+      "translationZh": "看到这张照片，我不禁感到非常悲伤。",
+      "reason": "修正双重否定语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e68b2024ba5d8eaef8f4b6de8b09058cbbd79c3a151b87cd19171fd7bfc5e6f5",
+      "japanese": "潜水艦は沈んで二度と浮上しなかった。",
+      "english": "The submarine sank, never to rise again.",
+      "translationZh": "潜水艇下沉后再也没有浮上来。",
+      "reason": "修正 rise 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:7aaa8e1519127ad0a4e7820ab7a0174eae78e1234a4dd5d0ff813cfc8ca19166",
+      "japanese": "弁解しても無駄だ。",
+      "english": "It is no use excusing yourself.",
+      "translationZh": "辩解也没有用。",
+      "reason": "修正 excuse 的词义误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:519c0d969b32d8a46cb509ae518bb8271326cf97aa25d65c2d33727b2e57efe6",
+      "japanese": "遅延便については、オリジナルの出発日に基づくシーズナリティを適用するため、マイル差額の払い戻しはいたしません。",
+      "english": "For delayed flights, seasonal adjustments are made on the basis of the original flight date and so refunds of air-mile difference will not be made.",
+      "translationZh": "对于延误航班，将按原定出发日期进行季节调整，因此不退还里程差额。",
+      "reason": "修正航空里程术语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:aef6052f4869e0d7f7c71faab3b6a9281d26e1642c69cba322f215fa08141820",
+      "japanese": "いや駄目です。",
+      "english": "No, you may not.",
+      "translationZh": "不，你不可以。",
+      "reason": "修正情态否定误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:5cce2a9db737cf8ffedefe1d968d91466f12bd0c71672c8757dca59aff63b141",
+      "japanese": "ゆうべ霜が降りた。",
+      "english": "It frosted last night.",
+      "translationZh": "昨晚下霜了。",
+      "reason": "修正天气表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:f49f00eae2e3dcaea56a0043fae09454a5a13d17e01e79c8cb91715a4f685d40",
+      "japanese": "収入を超過して支出をするな。",
+      "english": "Never spend in excess of your income.",
+      "translationZh": "支出绝不要超过收入。",
+      "reason": "补全 spend 的语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:759f979db3c628d336c0ae1b39a2672c98146a8336cb8e6fdd665cfe336eca55",
+      "japanese": "このバスは一区間90円です。",
+      "english": "The bus fare here is 90 yen a section.",
+      "translationZh": "这辆公交车每坐一段收费90日元。",
+      "reason": "修正计费单位误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:499f3c074b3ee01af4b5c4cecd516bc4e7719475b6e219d6529bdedb78605e28",
+      "japanese": "逆は必ずしも真ならず。",
+      "english": "The reverse is not always true.",
+      "translationZh": "反过来不一定成立。",
+      "reason": "修正 not always 的否定范围。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e9202468c983e863e907033a6a09095d0e60f28e71b1971ed72a52c85275421a",
+      "japanese": "違うってば。",
+      "english": "I said no.",
+      "translationZh": "我说了不行。",
+      "reason": "移除模型残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:85211c06b8c3e68467db0533ba8bdbd7f9c59f3c12273fc01f61935b3b9cb263",
+      "japanese": "去年の新人です。",
+      "english": "I was a freshman last year.",
+      "translationZh": "我是去年的新人。",
+      "reason": "避免将新人限定为大学一年级。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:9a39b02e856634ebbaaee4fd7aadf50dbe4e3517f6d06ad3a57687a0fa428353",
+      "japanese": "詩歌とは、詩や短歌のことです。",
+      "english": "Shika are verses and 31-syllable poems.",
+      "translationZh": "诗歌指的是诗和短歌。",
+      "reason": "修正术语与重复措辞。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:752239533da2cbed5498897773135aff95b4136d18d0feb5815e6b0cf998aa67",
+      "japanese": "トムは、六日間だけ迷子の犬を預かることにしました。",
+      "english": "Tom only looked after the stray for 6 days.",
+      "translationZh": "汤姆决定只照看这只走失的狗六天。",
+      "reason": "补回英语省略的 dog，修正 stray 误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:da51a2275c3a47529576eb32dad1246e19393991ace3432bf4b289fcc82f18bb",
+      "japanese": "ミスプリントのないような本はほとんどない。",
+      "english": "There are few books without misprints.",
+      "translationZh": "几乎没有完全不存在印刷错误的书。",
+      "reason": "修正 misprint 术语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:ae40f9c98e02c4bf5eeb0c0b9574c4d271434c08b55c56c5f49d7a397f05c07f",
+      "japanese": "先んずれば人を制す。",
+      "english": "First come, first served.",
+      "translationZh": "先到先得。",
+      "reason": "修正英语惯用语漏译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:757c0d96ad7e739c976bc79866c2cbda93ec9be1ed917bcb2af825e8bdca261b",
+      "japanese": "無重力で魚って泳げるのかな?",
+      "english": "I wonder if fish can swim without gravity?",
+      "translationZh": "我不知道鱼在无重力环境中能不能游泳。",
+      "reason": "修正 without gravity 的修饰关系。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:fe380aff1fdc8ed31a6aefc977a53ca12b996ac6b2ead4d54523d29bfc80bb55",
+      "japanese": "彼は医者として無能だ。",
+      "english": "He is no good as a doctor.",
+      "translationZh": "他不是个称职的医生。",
+      "reason": "修正 no good as 的惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:26bce1bdfcb8396c9492ec11d77187413e17892cd670678c9615ab7421ceca13",
+      "japanese": "彼女の蔵書は全部で3500冊で多くの初版が入ってる。",
+      "english": "Her library comprises 3500 and includes many first editions.",
+      "translationZh": "她共有3500册藏书，其中有许多初版书。",
+      "reason": "补回量词与藏书语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:a20ebe27bb6024ba97c946913a3cf9ae751f0c83708447dadb01675acf2bdaed",
+      "japanese": "英雄色を好む。",
+      "english": "Who loves not women, wine and song remains a fool his whole life long.",
+      "translationZh": "英雄也爱美色。",
+      "reason": "以日文例句为准修正谚语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:8dc3800206ed7400ed48364e33b9281c247a9abd5d9192b1eefc5e9e9542f01e",
+      "japanese": "核兵器はわが地球を滅ぼすと思う。",
+      "english": "We think nuclear weapons will destroy our earth.",
+      "translationZh": "我们认为核武器会毁灭我们的地球。",
+      "reason": "修正 earth 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:cd7d8085dba0cd4139f0fad83201be78c8cc69aa492647e2774a08d692225788",
+      "japanese": "木々を背景に写真を撮る。",
+      "english": "We take photos with the trees in the background.",
+      "translationZh": "我们以树木为背景拍照。",
+      "reason": "修正介词关系与中文语序。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:55ee88566a985aaa1deb1e715e2c1682a232e8ef71cbda3e24fec005543aadea",
+      "japanese": "私は勉強と遊びを兼ねている仕事につきたい。",
+      "english": "I want to get a job that mixes work and play.",
+      "translationZh": "我想找一份兼顾学习和娱乐的工作。",
+      "reason": "修正 work and play 的生硬误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:2ede2a45b87f7751b2079f45c8997ba38584189ccffa18dad6ff43d64fe8ad91",
+      "japanese": "バラは茎に刺がある。",
+      "english": "A rose has thorns on its stem.",
+      "translationZh": "玫瑰的茎上有刺。",
+      "reason": "修正 stem 的词义误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:5ba8ca5f2eb3015efc6d6740fe512438d3525e5ce3b5124f5383f927ae2be7d9",
+      "japanese": "湘南の海水浴場は日曜日にはとても混む。",
+      "english": "The beaches in Shonan are very crowded on Sunday.",
+      "translationZh": "湘南的海滩星期日非常拥挤。",
+      "reason": "修正专名湘南的音译错误。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:571a5141157762fc32f1a90ab6596dc37245a238a6becd24db74d156f53a355e",
+      "japanese": "吉野は桜の名所です。",
+      "english": "Yoshino is a place famous for its cherry blossoms.",
+      "translationZh": "吉野是著名的赏樱胜地。",
+      "reason": "修正专名吉野的音译错误。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:0930835465b6562aac74013ce6d479cbbeeb02bf48cd52e17f686e9699680104",
+      "japanese": "エレベーターにぎっしりいっぱいに乗った。",
+      "english": "We jammed into the elevator.",
+      "translationZh": "我们挤进了电梯。",
+      "reason": "修正 jammed 的词义误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:bde6cabf95c45a293c10e55a9dbaf3743b1cac48882153f20f93e92f2f9f6cae",
+      "japanese": "再来年、国へ帰ります。",
+      "english": "I'm returning to my home country the year after next.",
+      "translationZh": "后年我会回国。",
+      "reason": "修正时间表达 the year after next。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:48b5e2bbde67f7cc3ab6064f529c52d84ccb980bba0da8ced928a1b3916e4562",
+      "japanese": "彼の職業は大工です。",
+      "english": "He is a carpenter by trade.",
+      "translationZh": "他的职业是木匠。",
+      "reason": "修正 by trade 的惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6580b9c41f9ec8c57f0b6ead76234e9504f2446537132da0ad4d15156dfa7c16",
+      "japanese": "わがままね。",
+      "english": "You're selfish.",
+      "translationZh": "你真任性。",
+      "reason": "移除模型重复内容与残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6175d9306a1a45d09271fe484e8d861d35d58122f39334fea89adca0b758ab61",
+      "japanese": "法律ですから。",
+      "english": "It's the law.",
+      "translationZh": "因为法律就是这样规定的。",
+      "reason": "移除模型残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e139f7c288947a2fe5f051ebd759b498de3eaacf71c89ea5a8584e2eafab602a",
+      "japanese": "彼は不正行為をした。",
+      "english": "He cheated.",
+      "translationZh": "他作弊了。",
+      "reason": "修正 cheated 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:23206741ca98160587af0eb43bfcc5e451cee093f3401d3366d93755163cef7e",
+      "japanese": "彼は遂に仕事をやり遂げました。",
+      "english": "He carried on at his work eventually.",
+      "translationZh": "他终于完成了工作。",
+      "reason": "以日文例句为准修正完成体语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:7d90a6d2ac0a9ec56a7d623b2ecd19e0f19d6064e4531e1c414418ce20c0bc75",
+      "japanese": "火に油を注ぐだけだ。",
+      "english": "It only adds fuel to the fire.",
+      "translationZh": "这只会火上浇油。",
+      "reason": "改用中文惯用表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:ea8cbc86997b751cbd4aed7ad0fb597e0c0a72e14775f69bf8c4bb475f00b464",
+      "japanese": "彼はまだ40歳以下だ。",
+      "english": "He is still on the right side of forty.",
+      "translationZh": "他还不到40岁。",
+      "reason": "修正英语年龄惯用语。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:206b83a584bf17de4e024919381e935be677d50a53d2d31f6fec4404bb222877",
+      "japanese": "その品物は本物だ。",
+      "english": "The article is genuine.",
+      "translationZh": "那件商品是正品。",
+      "reason": "修正 article 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:45750b7695876b339ed957cb2f5599597feb536613f38dca89a0c21682ba2649",
+      "japanese": "しっかりしろ。",
+      "english": "Get a hold of yourself.",
+      "translationZh": "振作起来。",
+      "reason": "移除模型重复内容与残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:2362afbbadc177e73909b9428582038eca6a3cd5d80a6e893111b640c352be91",
+      "japanese": "牡丹餅で腰打つ。",
+      "english": "His bread is buttered on both sides.",
+      "translationZh": "福从天降。",
+      "reason": "以日文谚语语义替换英语字面误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:919f92c953803dfc89edb0db91ce1b427b050f5af465c9a2916a519a6cd5dbf2",
+      "japanese": "彼は教室だよ。",
+      "english": "He is in the classroom.",
+      "translationZh": "他在教室里。",
+      "reason": "修正 classroom 的地点语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:215ccb36239506519ff3505d19a4415c322189e9bbe948a0ec0c6f435cd2a990",
+      "japanese": "てるてる坊主、逆さまに吊るしてたら、あした雨になるかな?",
+      "english": "If you hang a teru teru bozu upside down, do you think it will bring rain tomorrow?",
+      "translationZh": "如果把晴天娃娃倒挂起来，明天会下雨吗？",
+      "reason": "修正日本文化词与句意。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:2731a363ad47615e184d6102aa6f8791241d5b6c0b9c5d7317e1d450e0faeacf",
+      "japanese": "1989年1月昭和天皇の没後、年号が「平成」と改まりました。",
+      "english": "The emperor passed away in January of 1989. Therefore, the name of the era changed from Showa to Heisei.",
+      "translationZh": "1989年1月昭和天皇去世后，年号改为“平成”。",
+      "reason": "修正日本年号与称谓。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:2d967570bc218aba784284f91b1f5bf81656eba7dcb88b9db414126c8c8b1ca0",
+      "japanese": "朝食はバイキング形式だって。",
+      "english": "Breakfast is a smorgasbord.",
+      "translationZh": "听说早餐是自助餐形式。",
+      "reason": "修正 smorgasbord 的语境译法。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:3323662b1cdad5768336e918db4475d0c234e903be40ebd73bc890a7ab820ad1",
+      "japanese": "タトエバ・コーパスの間違いを減らす一つの方法は、母国語へのみ翻訳するよう促すことだろう。",
+      "english": "One way to lower the number of errors in the Tatoeba Corpus would be to encourage people to only translate into their native languages.",
+      "translationZh": "减少Tatoeba语料库错误的一种方法，是鼓励人们只翻译成自己的母语。",
+      "reason": "修正专名拼写与中文语序。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:3332d689912adba0bc0ee92ff36afc2df14eb5f28bd1f1c8429f77e9a96ff6a7",
+      "japanese": "日本語を入力する時って、ひらがな入力してる?それともローマ字入力?",
+      "english": "When you type in Japanese, are you using hiragana input, or romaji input?",
+      "translationZh": "输入日语时，是用平假名输入，还是用罗马字输入？",
+      "reason": "修正日语输入法术语。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:5f318510569aa260ccc35e441bde2f158231813ea8e12fb6d3c5d942883fe300",
+      "japanese": "ああ悲しい。",
+      "english": "Ah, me!",
+      "translationZh": "唉，真伤心。",
+      "reason": "修正感叹语气并移除残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6006845b801ed7ed1b7df3cfaf6e4daa3f80940ae771e0dd20af6a0615663c64",
+      "japanese": "ああ悲しい。",
+      "english": "Ah, me!",
+      "translationZh": "唉，真伤心。",
+      "reason": "修正感叹语气并移除残留英文。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:74e8b929384dd951380c472c29a3a0d44718da883596c2b20953e3dc2e593417",
+      "japanese": "靖国神社参拝に関しては閣僚の自主的な判断に任せられている。",
+      "english": "The question of worshipping at the Yasukuni Shrine is left to the independent judgement of Cabinet ministers.",
+      "translationZh": "参拜靖国神社的问题由各阁僚自行判断。",
+      "reason": "修正专名与句法关系。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:775ba8287e6b79b60a776fdc0dc20075843a84ed5a543f558d7a3e5091d2f57f",
+      "japanese": "ああ、なるほど!",
+      "english": "Ah, gotcha!",
+      "translationZh": "啊，原来如此！",
+      "reason": "修正 I see 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:842d1f9ebd9ef702cbf52450cf5b1f67fc802c3d0e6943cff9652e42fec10ae8",
+      "japanese": "ああ、なるほど!",
+      "english": "Ah, gotcha!",
+      "translationZh": "啊，原来如此！",
+      "reason": "修正 I see 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:776c996be56dc44d32dd196e0c8497a48ea741f064c47c2585bbd597903c1faa",
+      "japanese": "toのつかない不定詞を原形不定詞と言う。",
+      "english": "An infinitive without a 'to' attached is called a bare infinitive.",
+      "translationZh": "不带“to”的不定式称为原形不定式。",
+      "reason": "修正语法术语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:85e2ace936b27cf052a2ff5407b848f163d73c4687aaf6c4fdb49cd5db5f9f54",
+      "japanese": "芳田氏は山形県に生まれ、日本大学芸術学部油絵科を卒業する。",
+      "english": "Mr Yoshida was born in Yamagata prefecture, and graduated from Nihon University College of Art with a degree in oil painting.",
+      "translationZh": "芳田先生出生于山形县，毕业于日本大学艺术系油画专业。",
+      "reason": "修正人名、地名与专业名。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:918dbe66698e85f3ce18750471377ed46a6b79ef0d8e6463f426f6af90bd9dbc",
+      "japanese": "彼がパチンコするなんて絶対にないよ。",
+      "english": "He wouldn't be caught dead playing pachinko.",
+      "translationZh": "他绝对不可能去打柏青哥。",
+      "reason": "修正柏青哥相关句意。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:a59124bdbfd8048b4a6ebbff2cbc289670bfed4325e42dfe74421f9eb99bcd61",
+      "japanese": "自習室はM2Fにあります。",
+      "english": "There is a study on Mezzanine Floor level 2.",
+      "translationZh": "自习室在M2F。",
+      "reason": "以日文位置标识为准修正误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:ad140732491bcc248c91d05580c463609d4b7d4c9dafc9b60267a89b4343f57f",
+      "japanese": "傾向を発見するため、1950年から1970年までのXYZ年鑑を調べた。",
+      "english": "The XYZ Almanacs from 1950 to 1970 were studied to discover the trend.",
+      "translationZh": "为了发现趋势，查阅了1950年至1970年的《XYZ年鉴》。",
+      "reason": "修正书名与被动句语序。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:b933ee772ec372a4d6ddd0f3da5c2daa691c4f37de6d41a644a90b74ec097671",
+      "japanese": "サミはレイラの星座を知りたかった。",
+      "english": "Sami wanted to know Layla's zodiac sign.",
+      "translationZh": "萨米想知道莱拉的星座。",
+      "reason": "修正人名与 zodiac sign 误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:bc9307ab22e70f51ee823a52c0d93f0810bf9591b603bdfc92697c5809dbe5e8",
+      "japanese": "役人への袖の下だよ。",
+      "english": "It's a sop to Cerberus.",
+      "translationZh": "这是给官员的贿赂。",
+      "reason": "以日文例句为准修正袖の下的惯用义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:c6523dce1c4f2b401c34d9301ad764a77e01ca8711b7b7a04979f4cbf85c1b82",
+      "japanese": "次の新幹線は9時ちょうどに出ます。",
+      "english": "The next Shinkansen train leaves at just nine o'clock.",
+      "translationZh": "下一班新干线列车九点整出发。",
+      "reason": "修正新干线名称与时间表达。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:d6e6102cd44844d9ca0d76fb6ae65f518b73cf44a29102424d31230b3e3cbb56",
+      "japanese": "四字熟語とは四文字の熟語のことです。",
+      "english": "A \"yo-ji-juku-go\" in Japanese is an idiom made from a compound of four characters.",
+      "translationZh": "四字熟语是由四个汉字组成的日语熟语。",
+      "reason": "修正模型截断与术语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e65178b2717728bc63edd7269e29caafc76b1782020254068eb20c3fbfba7436",
+      "japanese": "スタンはリズに昔から片思いしてきた。",
+      "english": "Stan has always carried a torch for Liz.",
+      "translationZh": "斯坦一直单恋着莉兹。",
+      "reason": "修正 carried a torch 的惯用语误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e6e5d81016e9285323d495f32d569d6373acd356e8a5f599b5935e85e2dc0c94",
+      "japanese": "ケネス・スターがまたしても権力を濫用し、私がインターネットを使う権利を剥奪したのです。",
+      "english": "Kenneth Starr abused his power again and took away my right to get on-line.",
+      "translationZh": "肯尼斯·斯塔尔再次滥用权力，剥夺了我使用互联网的权利。",
+      "reason": "修正人名与 get on-line 的语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:06df17d5dabd1e76cf9e37b37e978a9234fc5158bbf79fd7ed9276521d7dbf87",
+      "japanese": "時には弱音を吐くけど。",
+      "english": "Sometimes I will be weak.",
+      "translationZh": "有时我也会说泄气话。",
+      "reason": "以日文惯用表达弱音を吐く为准修正。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6bdb98fc2aed71097b5f13de30b7aca56b9f376e80cff9940e1785406c5921c6",
+      "japanese": "時には弱音を吐くけど。",
+      "english": "Sometimes I will be weak.",
+      "translationZh": "有时我也会说泄气话。",
+      "reason": "以日文惯用表达弱音を吐く为准修正。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:1136088c816284c7fbeadae386d827b71e750bb112bc625a5a67033d354cdd2e",
+      "japanese": "私の机は古い。",
+      "english": "My desk is old.",
+      "translationZh": "我的书桌很旧。",
+      "reason": "修正物品新旧的词义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:36bb0bf745224d9b5344c0081fddbd529747f60e25676aa55ead907df67b52bb",
+      "japanese": "彼女は走り高跳びの世界記録を樹立した。",
+      "english": "She set the world record for the high jump.",
+      "translationZh": "她创造了跳高世界纪录。",
+      "reason": "修正 high jump 术语。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:499c59d2e63734db53622079db2d20d0c0a0ba1042e9781627cb0d1fb8619e02",
+      "japanese": "音楽に国境なし。",
+      "english": "Music is universal.",
+      "translationZh": "音乐无国界。",
+      "reason": "以日文例句为准修正 universal 的语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:6e628a235040dc0947753a505e5a4bd2e0dfa9ca1579d519f7f6e737f0115d31",
+      "japanese": "私達は時たま彼女を訪ねる。",
+      "english": "We call on her now and again.",
+      "translationZh": "我们偶尔去看望她。",
+      "reason": "修正 call on 的语境误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:7066659f23067c4f67dd0dea0c163cfb7fb3b0d23378fbdb7120f7211d63cdea",
+      "japanese": "花壇は踏まないで。",
+      "english": "Don't step in the flower bed.",
+      "translationZh": "请不要踩进花坛。",
+      "reason": "修正 flower bed 术语。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:83bb38e88a4a051587192d74f3138036f2e543954816d085e0bcfd012ca617c9",
+      "japanese": "花壇は踏まないで。",
+      "english": "Don't step in the flower bed.",
+      "translationZh": "请不要踩进花坛。",
+      "reason": "修正 flower bed 术语。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:a552a51c6b0b89c3beb791c9c3371aa81625ddfde313592f240a26ff35ec65a8",
+      "japanese": "仕事を辞めるべき時間だ。",
+      "english": "It's time to leave off work.",
+      "translationZh": "是时候辞掉工作了。",
+      "reason": "以日文辞める为准修正为辞职语义。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:dc9e9f9af56e6b95e7637c1b59a70144bf530efe26e3cf32f8cb75f0b89124b7",
+      "japanese": "結婚の後、アランは黴だらけの小さいアパートを出て、生活が華美に流れた。",
+      "english": "After his wedding, Alain left his small, moldy apartment and led an extravagant life.",
+      "translationZh": "结婚后，阿兰离开了那间狭小、发霉的公寓，开始过奢华的生活。",
+      "reason": "修正 moldy 的模型误译。",
+      "replacesSource": "opus_mt_en_zh"
+    },
+    {
+      "exampleID": "example:e075d51be026ec881ee38ee125b6362db5a32cd5e4276f75e931e350a76a9a42",
+      "japanese": "彼は欠点だらけだ。",
+      "english": "He is a mass of faults.",
+      "translationZh": "他浑身都是缺点。",
+      "reason": "修正 a mass of faults 的生硬误译。",
+      "replacesSource": "opus_mt_en_zh"
+    }
+  ]
+}

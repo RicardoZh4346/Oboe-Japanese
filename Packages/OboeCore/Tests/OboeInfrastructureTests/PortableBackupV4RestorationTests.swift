@@ -408,6 +408,7 @@ private extension PortableBackupV4RestorationTests {
                     """,
                 arguments: [encode(seed.vocabularyNoteID), encode(seed.deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: seed.vocabularyNoteID, deckID: seed.deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO notes(
@@ -418,6 +419,7 @@ private extension PortableBackupV4RestorationTests {
                     """,
                 arguments: [encode(seed.grammarNoteID), encode(seed.deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: seed.grammarNoteID, deckID: seed.deckID, in: db)
             let parameters = String(
                 decoding: try JSONEncoder().encode(SchedulerProfile.fsrs6DefaultParameters),
                 as: UTF8.self
@@ -570,6 +572,8 @@ private extension PortableBackupV4RestorationTests {
             )
         }
     }
+
+    // （seedCurrent 的 Note 无 note_decks 行，验证导出 UNION 兜底路径。）
 
     func mutateRecord(
         _ objects: inout [[String: Any]],

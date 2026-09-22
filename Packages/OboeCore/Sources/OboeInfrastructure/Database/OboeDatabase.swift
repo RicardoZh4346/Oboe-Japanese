@@ -58,7 +58,8 @@ public enum OboeDatabaseSchema {
         "v9_listening_template",
         "v10_ai_repair_drafts",
         "v11_primary_deck",
-        "v12_fill_vocabulary_directions"
+        "v12_fill_vocabulary_directions",
+        "v13_note_deck_membership_and_pitch"
     ]
 
     public static let tableNames: Set<String> = [
@@ -78,7 +79,8 @@ public enum OboeDatabaseSchema {
         "inbox_items",
         "inbox_processing_contexts",
         "capture_import_receipts",
-        "inbox_commit_receipts"
+        "inbox_commit_receipts",
+        "note_decks"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -87,7 +89,7 @@ public enum OboeDatabaseSchema {
 
     /// Registering a strict prefix of the identifier list lets tests stage a
     /// database at an older schema version before exercising the upgrade path.
-    static func makeMigrator(applying identifiers: [String]) -> DatabaseMigrator {
+    public static func makeMigrator(applying identifiers: [String]) -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         // Deliberately keep eraseDatabaseOnSchemaChange at its safe false default.
         for identifier in identifiers {
@@ -144,11 +146,51 @@ public enum OboeDatabaseSchema {
                 }
             case "v12_fill_vocabulary_directions":
                 migrator.registerMigration(identifier, migrate: fillVocabularyDirections)
+            case "v13_note_deck_membership_and_pitch":
+                migrator.registerMigration(identifier, migrate: createNoteDeckMembershipAndPitch)
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")
             }
         }
         return migrator
+    }
+
+    /// v0.5 (设计 §4.2): `note_decks` 是牌组成员关系的权威来源；
+    /// `notes.deck_id` 保留为唯一归属牌组（home deck）。每个既有 Note
+    /// 按其当前 deck_id 回填恰好一个初始 membership；`pitch_accent`
+    /// 只加非负 CHECK，reading 依赖的完整校验在领域层执行。
+    private static func createNoteDeckMembershipAndPitch(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE note_decks (
+                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                added_at_ms INTEGER NOT NULL,
+                PRIMARY KEY (note_id, deck_id)
+            ) WITHOUT ROWID;
+
+            CREATE INDEX note_decks_on_deck_note ON note_decks(deck_id, note_id);
+
+            INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+            SELECT id, deck_id, created_at_ms FROM notes;
+
+            ALTER TABLE notes
+            ADD COLUMN pitch_accent INTEGER
+            CHECK (pitch_accent IS NULL OR pitch_accent >= 0);
+            """)
+        // 迁移内断言：每个 Note 恰好一个初始 membership，且 home deck ∈ membership。
+        let inconsistent = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM notes n
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM note_decks nd
+                    WHERE nd.note_id = n.id AND nd.deck_id = n.deck_id
+                )
+                """
+        ) ?? 0
+        guard inconsistent == 0 else {
+            throw DatabaseError(message: "v13 backfill left \(inconsistent) notes without home membership")
+        }
     }
 
     private static func rebuildNotesForBuiltinJLPT(_ db: Database) throws {

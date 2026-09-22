@@ -414,6 +414,7 @@ final class AdaptiveDatabaseFixture: @unchecked Sendable {
                     now
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
         }
     }
 

@@ -4,7 +4,9 @@ public struct StudyPlanningSettings: Codable, Equatable, Sendable {
     public let learningTimeZoneID: String
     public let dailyNewCardLimit: Int
     public let retentionPreset: RetentionPreset
-    /// 主牌组：每日新卡额度先分配给该牌组，剩余额度再分配给其他牌组。
+    /// 有效主牌组：每日新卡额度先分配给该牌组，剩余额度再分配给其他
+    /// 牌组。显式设置未生效（未设置/引用失效）且存在牌组时自动取牌组
+    /// 排序的第一个；仅在没有任何牌组时为 nil。
     public let primaryDeckID: UUID?
 
     public init(

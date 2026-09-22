@@ -31,10 +31,10 @@ final class ChatCompletionsAICardGenerationClientTests: XCTestCase {
         let bodyData = try XCTUnwrap(request.httpBody)
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
         XCTAssertEqual(body["model"] as? String, "fixture-model")
-        XCTAssertEqual(body["max_tokens"] as? Int, 1_000)
+        XCTAssertEqual(body["max_tokens"] as? Int, 1_200)
         XCTAssertEqual(body["stream"] as? Bool, false)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
-        XCTAssertTrue((messages[0]["content"] as? String)?.contains("oboe-card-generation-v1") == true)
+        XCTAssertTrue((messages[0]["content"] as? String)?.contains("oboe-card-generation-v2") == true)
         XCTAssertTrue((messages[0]["content"] as? String)?.contains("untrusted study material") == true)
         let userData = try XCTUnwrap((messages[1]["content"] as? String)?.data(using: .utf8))
         let userPayload = try XCTUnwrap(JSONSerialization.jsonObject(with: userData) as? [String: Any])
@@ -45,6 +45,9 @@ final class ChatCompletionsAICardGenerationClientTests: XCTestCase {
         let schemaContainer = try XCTUnwrap(responseFormat["json_schema"] as? [String: Any])
         let schema = try XCTUnwrap(schemaContainer["schema"] as? [String: Any])
         XCTAssertEqual(schema["additionalProperties"] as? Bool, false)
+        let properties = try XCTUnwrap(schema["properties"] as? [String: Any])
+        XCTAssertNotNil(properties["partsOfSpeech"])
+        XCTAssertNotNil(properties["pitchAccent"])
     }
 
     func testCapabilityModesAndResponseFailuresStayBounded() async throws {
@@ -181,7 +184,7 @@ final class ChatCompletionsAICardGenerationClientTests: XCTestCase {
 }
 
 private extension ChatCompletionsAICardGenerationClientTests {
-    static let vocabularyJSON = #"{"schemaVersion":1,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partOfSpeech":"一段动词","jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":[]}"#
+    static let vocabularyJSON = #"{"schemaVersion":2,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":[]}"#
 
     static func configuration(mode: AIResponseFormatMode) -> AIConfiguration {
         AIConfiguration(

@@ -15,6 +15,9 @@ public struct SubmitReviewRequest: Equatable, Sendable {
     public let rating: ReviewRating
     public let durationMilliseconds: Int
     public let studyDay: StudyDayContext
+    /// 发起本次复习的牌组 scope；为 nil（全部今日任务）时归因到 home
+    /// 牌组。非成员牌组不生效，回退 home（设计 §4.7）。
+    public let scopeDeckID: UUID?
 
     public init(
         eventID: UUID,
@@ -22,7 +25,8 @@ public struct SubmitReviewRequest: Equatable, Sendable {
         expectedStateVersion: Int,
         rating: ReviewRating,
         durationMilliseconds: Int,
-        studyDay: StudyDayContext
+        studyDay: StudyDayContext,
+        scopeDeckID: UUID? = nil
     ) {
         self.eventID = eventID
         self.cardID = cardID
@@ -30,6 +34,7 @@ public struct SubmitReviewRequest: Equatable, Sendable {
         self.rating = rating
         self.durationMilliseconds = durationMilliseconds
         self.studyDay = studyDay
+        self.scopeDeckID = scopeDeckID
     }
 }
 
@@ -121,7 +126,11 @@ public struct ReviewLogRecord: Codable, Equatable, Sendable {
 public struct ReviewSubmissionContext: Equatable, Sendable {
     public let card: PersistedSchedulingCard
     public let profile: SchedulerProfile
+    /// 归属（home）牌组。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；归因的 scope deck 必须属于此集合，
+    /// 否则回退 `deckID`（设计 §4.7）。
+    public let deckIDs: Set<UUID>
     public let contentVersion: Int
     public let algorithmVersion: String
 
@@ -130,11 +139,13 @@ public struct ReviewSubmissionContext: Equatable, Sendable {
         profile: SchedulerProfile,
         deckID: UUID,
         contentVersion: Int,
-        algorithmVersion: String
+        algorithmVersion: String,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.card = card
         self.profile = profile
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.contentVersion = contentVersion
         self.algorithmVersion = algorithmVersion
     }
@@ -258,11 +269,16 @@ public struct SubmitReview: Sendable {
             algorithmVersion: context.algorithmVersion,
             profileID: context.card.profileID
         )
+        // 历史归因（设计 §4.7）：scope 复习写 scope deck，全部任务写
+        // home；scope 不在成员集合时（并发移出）回退 home。
+        let deckIDAtReview = request.scopeDeckID.flatMap {
+            context.deckIDs.contains($0) ? $0 : nil
+        } ?? context.deckID
         return try await repository.commitReview(
             ReviewSubmissionMutation(
                 request: request,
                 noteID: context.card.noteID,
-                deckIDAtReview: context.deckID,
+                deckIDAtReview: deckIDAtReview,
                 reviewedAt: reviewedAt,
                 wasFirstStudy: wasFirstStudy,
                 previousState: previousState,

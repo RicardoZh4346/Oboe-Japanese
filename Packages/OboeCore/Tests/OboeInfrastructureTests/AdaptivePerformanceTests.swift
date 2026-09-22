@@ -198,6 +198,12 @@ final class AdaptivePerformanceTests: XCTestCase {
                               0, 0, 0, 8, ?, ?)
                     """
             )
+            let membershipStatement = try db.makeStatement(
+                sql: """
+                    INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+                    VALUES (?, ?, ?)
+                    """
+            )
             let logStatement = try db.makeStatement(
                 sql: """
                     INSERT INTO review_logs(
@@ -223,6 +229,13 @@ final class AdaptivePerformanceTests: XCTestCase {
                         "単語\(index)",
                         "词\(index)",
                         baseMilliseconds,
+                        baseMilliseconds
+                    ]
+                )
+                try membershipStatement.execute(
+                    arguments: [
+                        DatabaseValueCodec.encode(noteID),
+                        encodedDeck,
                         baseMilliseconds
                     ]
                 )

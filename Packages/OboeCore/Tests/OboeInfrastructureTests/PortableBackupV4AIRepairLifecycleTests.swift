@@ -499,7 +499,7 @@ final class PortableBackupV4AIRepairLifecycleTests: XCTestCase {
 
         print("""
         AI_QUALITY model=\(model) \
-        promptVersion=\(AIRepairPromptV1.promptVersion) \
+        promptVersion=\(AIRepairPromptV2.promptVersion) \
         contexts=\(contexts.count) \
         succeeded=\(contexts.count - failures.count) \
         failures=\(failures.joined(separator: " | "))
@@ -516,7 +516,7 @@ final class PortableBackupV4AIRepairLifecycleTests: XCTestCase {
         AIRepairDraftProvenance(
             providerID: "custom",
             modelID: "fixture-model",
-            promptVersion: AIRepairPromptV1.promptVersion
+            promptVersion: AIRepairPromptV2.promptVersion
         )
     }
 
@@ -671,7 +671,7 @@ private actor StubRepairClient: AIRepairClient {
 
     private static let responseJSON = #"""
     {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "problemTypes": ["example_too_complex", "similar_words_confusion"],
         "summary": "例句偏长，且与近形词混淆。",
         "suggestions": [
@@ -691,7 +691,12 @@ private actor StubRepairClient: AIRepairClient {
                         "headword": "戻る",
                         "reading": "もどる",
                         "meaningZH": "返回（场所）",
-                        "partOfSpeech": "动词",
+                        "partsOfSpeech": ["五段动词", "自动词"],
+                        "pitchAccent": 0,
+                        "jlpt": null,
+                        "usage": null,
+                        "connection": null,
+                        "notes": null,
                         "examples": [
                             {"japanese": "家に戻る", "translationZH": "回家"}
                         ]
@@ -701,7 +706,12 @@ private actor StubRepairClient: AIRepairClient {
                         "headword": "戻る",
                         "reading": "もどる",
                         "meaningZH": "恢复（状态）",
-                        "partOfSpeech": "动词",
+                        "partsOfSpeech": ["五段动词", "自动词"],
+                        "pitchAccent": 0,
+                        "jlpt": null,
+                        "usage": null,
+                        "connection": null,
+                        "notes": null,
                         "examples": [
                             {"japanese": "元に戻る", "translationZH": "恢复原状"}
                         ]

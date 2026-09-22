@@ -658,6 +658,7 @@ private final class ProgressFixture: @unchecked Sendable {
                     sourceRef
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
         }
         return noteID
     }

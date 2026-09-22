@@ -222,6 +222,15 @@ public actor PortableBackupRestorationPreparer {
                     into: db,
                     limits: limits
                 )
+                // v1–v5 备份没有 noteDeck 记录：导入后按 home deck 合成
+                // 每个 Note 的初始 membership（设计 §9）。v6 文件必须自带
+                // 完整成员关系，由 validateNoteDeckData 严格校验。
+                if manifest.sourceFormatVersion < 6 {
+                    try db.execute(sql: """
+                        INSERT OR IGNORE INTO note_decks(note_id, deck_id, added_at_ms)
+                        SELECT id, deck_id, created_at_ms FROM notes
+                        """)
+                }
                 try Self.finalizeImportedInboxData(
                     in: db,
                     resourceExists: inboxImageResourceExists
@@ -398,7 +407,8 @@ private extension PortableBackupRestorationPreparer {
         "inbox_processing_contexts.id", "inbox_processing_contexts.inbox_item_id",
         "inbox_processing_contexts.draft_id",
         "capture_import_receipts.capture_id", "capture_import_receipts.inbox_item_id",
-        "inbox_commit_receipts.operation_id", "inbox_commit_receipts.processing_context_id"
+        "inbox_commit_receipts.operation_id", "inbox_commit_receipts.processing_context_id",
+        "note_decks.note_id", "note_decks.deck_id"
     ]
 
     static func fileSize(at url: URL) throws -> Int64 {
@@ -429,6 +439,7 @@ private extension PortableBackupRestorationPreparer {
         case 3: sourceSpecifications = PortableBackupFormatV3.tableSpecifications
         case 4: sourceSpecifications = PortableBackupFormatV4.tableSpecifications
         case 5: sourceSpecifications = PortableBackupFormatV5.tableSpecifications
+        case 6: sourceSpecifications = PortableBackupFormatV6.tableSpecifications
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(
                 manifest.sourceFormatVersion
@@ -480,7 +491,7 @@ private extension PortableBackupRestorationPreparer {
             }
 
             guard let sourceSpecification = sourceSpecificationByType[recordType],
-                  let currentSpecification = PortableBackupFormatV5.specificationByRecordType[recordType],
+                  let currentSpecification = PortableBackupFormatV6.specificationByRecordType[recordType],
                   let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
                 throw PortableBackupPreparationError.unexpectedRecordType(
                     line: lineNumber,
@@ -596,6 +607,7 @@ private extension PortableBackupRestorationPreparer {
         case 3: expectedRecordTypes = PortableBackupFormatV3.recordTypes
         case 4: expectedRecordTypes = PortableBackupFormatV4.recordTypes
         case 5: expectedRecordTypes = PortableBackupFormatV5.recordTypes
+        case 6: expectedRecordTypes = PortableBackupFormatV6.recordTypes
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(version)
         }
@@ -664,6 +676,10 @@ private extension PortableBackupRestorationPreparer {
         if sourceVersion == 1, migrated["recordType"] as? String == "note" {
             migrated["source_ref"] = NSNull()
         }
+        if sourceVersion < 6, migrated["recordType"] as? String == "note" {
+            // v1–v5 备份没有音调列；v6 起 `pitch_accent` 是必填字段位。
+            migrated["pitch_accent"] = NSNull()
+        }
         if sourceVersion < 5, migrated["recordType"] as? String == "settings" {
             migrated["primary_deck_id"] = NSNull()
         }
@@ -726,7 +742,7 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        for specification in PortableBackupFormatV5.tableSpecifications {
+        for specification in PortableBackupFormatV6.tableSpecifications {
             let rows = try Row.fetchAll(
                 db,
                 sql: "PRAGMA table_info(\(specification.tableName))"
@@ -868,7 +884,63 @@ private extension PortableBackupRestorationPreparer {
         try validateInboxData(in: db)
         try validateDraftData(in: db)
         try validateCardTemplates(in: db)
+        try validateNoteDeckData(in: db)
         return try summarizeDatabase(db)
+    }
+
+    /// v6 invariants (设计 §9): every note has at least one membership and
+    /// its home deck (`notes.deck_id`) is among them; `pitch_accent` is
+    /// NULL or consistent with the reading's mora count. FK/PK violations
+    /// (dangling or duplicate noteDeck rows) are already caught by
+    /// `pragma_foreign_key_check` and the insert itself.
+    static func validateNoteDeckData(in db: Database) throws {
+        let withoutMembership = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM notes n
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM note_decks nd WHERE nd.note_id = n.id
+                )
+                """
+        ) ?? 0
+        guard withoutMembership == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(withoutMembership) 条没有牌组成员关系的笔记。"
+            )
+        }
+        let homeMissing = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM notes n
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM note_decks nd
+                    WHERE nd.note_id = n.id AND nd.deck_id = n.deck_id
+                )
+                """
+        ) ?? 0
+        guard homeMissing == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(homeMissing) 条笔记的归属牌组不在其成员关系中。"
+            )
+        }
+        let pitchRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, reading, pitch_accent FROM notes
+                WHERE pitch_accent IS NOT NULL
+                """
+        )
+        for row in pitchRows {
+            let id: String = row["id"]
+            let reading: String? = row["reading"]
+            let pitch: Int = row["pitch_accent"]
+            guard pitch >= 0,
+                  PitchAccent(rawValue: pitch)?.isConsistent(withReading: reading) == true else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "笔记 \(id) 的音调值与读音不匹配或越界。"
+                )
+            }
+        }
     }
 
     /// v3 Inbox records carry semantic payloads the column-level checks cannot
@@ -1204,7 +1276,7 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        for specification in PortableBackupFormatV5.tableSpecifications {
+        for specification in PortableBackupFormatV6.tableSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(specification.tableName)"

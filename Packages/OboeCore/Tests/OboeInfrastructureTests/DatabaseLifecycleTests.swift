@@ -290,6 +290,7 @@ final class DatabaseLifecycleTests: XCTestCase {
                     DatabaseValueCodec.encode(sourceDeckID)
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: sourceNoteID, deckID: sourceDeckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO app_settings(

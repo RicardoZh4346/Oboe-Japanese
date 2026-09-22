@@ -6,9 +6,21 @@
 
 Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料采集、AI 辅助整理、制卡和 FSRS-6 间隔复习放在同一个本地工作流里；没有账号、业务后端或云同步，AI 默认关闭。
 
-当前版本为 **v0.4.0（构建号 45）**，最低支持 iOS 17，仅支持 iPhone。
+当前版本为 **v0.5.0（构建号 47）**，最低支持 iOS 17，仅支持 iPhone。
 
 > GitHub Release 提供 arm64 未签名 IPA。安装前需要使用你自己的证书重新签名；项目不包含开发团队、证书、描述文件或 App Store 上传配置。
+
+## v0.5 新增
+
+- **一卡多牌组**：Note 可同时归属多个牌组而不复制卡片或评分记录；新建、编辑、JLPT 导入和句子分析均可多选牌组；牌组删除只移除成员关系，删除共享内容前会说明各牌组影响。
+- **受控词性**：词性改为固定集合的多选下拉（名词、动词、形容词等），应用于手动编辑、AI 生成/修卡、句子分析和 JLPT 导入；旧自由文本自动映射到受控集合。
+- **真实音调**：词汇编辑按假名读音的 mora 数提供 0–N 音调选项，详情页显示音调位置；JLPT 词库与已导入词条回填可追溯来源的词典音调。
+- **JLPT 词库 schema v2**：内置库重建为 8,334 词携带 UniDic/kanjium 音调与 14,362 条中文例句翻译；v0.4 已导入词条仅回填空字段，不覆盖用户编辑。
+- **首页 Hero**：首屏「开始学习」主行动点整合今日进度、等待态与主牌组；首页不再提供逐牌组学习入口，牌组详情保留「学习此牌组」。
+- **主牌组自动默认**：未手动指定时自动使用排序最前的牌组，仅无牌组时显示未设置。
+- **schema v13 与备份 v6**：新增 `note_decks` 成员关系表与 `notes.pitch_accent` 列；备份新增 `noteDeck` 记录与音调列，继续兼容 v1～v5 恢复；迁移失败自动回滚并保留迁移前快照。
+
+> 已知限制（在 v0.4 限制基础上新增）：音调来自词典来源（UniDic/kanjium），202 个无法可靠匹配的词保持未设置，系统 TTS 仍不提供真人重音；202 条残余 NULL 不做人工覆盖；免费 Apple ID 签名无法注册 App Group，分享扩展在该环境下可能不可用。
 
 ## v0.4 新增
 
@@ -53,14 +65,14 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 ### 本地资料与数据安全
 
 - 日文、假名、平/片假名、半角及中文本地搜索；
-- 内置 8,334 个社区 JLPT N5–N1 参考词汇，可离线浏览、搜索、朗读并幂等导入；
+- 内置 8,334 个社区 JLPT N5–N1 参考词汇，带可追溯音调与中文例句翻译，可离线浏览、搜索、朗读并幂等导入；
 - 明文 `.oboe-backup` 全量导出、严格预检、完整替换恢复和三份本机滚动快照；
 - API Key 仅保存在 iOS Keychain，不写入 SQLite、日志或可携带备份；
 - 跟随系统、浅色和深色外观，支持辅助功能字号和 VoiceOver 语义。
 
 ## 获取与安装
 
-可在 [v0.4.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.4.0) 下载 `Oboe-v0.4.0.ipa`。该文件是 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
+可在 [v0.5.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.5.0) 下载 `Oboe-v0.5.0.ipa`。该文件是 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
 
 > iLoader、LocalDevVPN 和 SideStore 均为第三方项目，不属于 Oboe，也不受本项目维护或担保。请只从其官方页面下载，不要向他人发送 Apple Account 验证信息或设备配对文件。
 
@@ -88,7 +100,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 
 ### 2. 使用 SideStore 安装 Oboe
 
-1. 在 iPhone 上从 [v0.4.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.4.0) 下载 `Oboe-v0.4.0.ipa`，并保存到“文件”App。
+1. 在 iPhone 上从 [v0.5.0 Release](https://github.com/RicardoZh4346/Oboe-Japanese/releases/tag/v0.5.0) 下载 `Oboe-v0.5.0.ipa`，并保存到“文件”App。
 2. 确认 iPhone 已连接 Wi-Fi，且 LocalDevVPN 处于 **Connected** 状态。
 3. 打开 SideStore，进入 **My Apps**，点按右上角 **+**，选择刚下载的 IPA。
 4. 等待 SideStore 完成签名与安装，然后从主屏幕启动 Oboe。
@@ -137,7 +149,7 @@ AI 服务的数据保留、移动端直连限制和地区政策由对应服务�
 
 ## 备份与恢复
 
-`.oboe-backup` v5 是未压缩、未加密的 UTF-8 NDJSON，使用固定记录顺序和 SHA-256 footer。它包含学习数据、设置及以下 v0.3 收集箱记录：
+`.oboe-backup` v6 是未压缩、未加密的 UTF-8 NDJSON，使用固定记录顺序和 SHA-256 footer。它包含学习数据、设置、`note_decks` 成员关系记录及以下 v0.3 收集箱记录：
 
 - `inboxItem`；
 - `inboxProcessingContext`；
@@ -146,13 +158,56 @@ AI 服务的数据保留、移动端直连限制和地区政策由对应服务�
 
 备份不包含 API Key、AI 连接配置、内置只读词库、搜索派生索引、本机快照、图片附件文件或尚未导入的共享队列文件；Leech/易错与趋势属派生数据，恢复后由评分日志重建。跨设备恢复后，收集箱正文会保留，缺失的图片引用会安全降级。
 
-恢复前 App 会检查格式版本、UTF-8/LF、记录顺序、数量、SHA-256、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入，替换前会创建回滚快照，失败或进程中断时恢复到已验证的数据库。Oboe 可恢复 v1～v5 备份（v4 及更早的设置记录自动补齐 v0.4 新增列），并明确拒绝未来格式和未知调度算法。
+恢复前 App 会检查格式版本、UTF-8/LF、记录顺序、数量、SHA-256、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入，替换前会创建回滚快照，失败或进程中断时恢复到已验证的数据库。Oboe 可恢复 v1～v6 备份（v5 及更早的记录自动补齐 v0.4/v0.5 新增列，无 `noteDeck` 记录的备份按 `notes.deck_id` 重建成员关系），并明确拒绝未来格式和未知调度算法。
 
 ## 内置 JLPT 词汇库
 
 Oboe 随 App 提供只读 SQLite 衍生数据库，共 8,334 个社区整理的 JLPT N5–N1 参考词汇：N5 662、N4 632、N3 1,784、N2 1,793、N1 3,463。这不是 JLPT 官方固定词表。
 
-数据集版本为 `2026.09.13-1`，来源包括 [OpenJLPT](https://github.com/evanclan/OpenJLPT) 与 [Tomoshi Dictionary Open Data](https://github.com/tomoshi-app/tomoshi-dict-data)。衍生数据库整体按 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode) 提供；Tatoeba 例句适用 [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/)。完整版本锁定、署名和许可见 `OboeApp/Resources/JLPT/NOTICE.txt`。
+当前随 App 提交的数据集为 schema v2 / `2026.09.21-2`，已为 8,132 个词补充可追溯音调（另 202 个无法可靠匹配的词合法保持 NULL），并为全部 14,362 条既有例句补充非空简体中文翻译。来源包括 [OpenJLPT](https://github.com/evanclan/OpenJLPT)、[Tomoshi Dictionary Open Data](https://github.com/tomoshi-app/tomoshi-dict-data)、UniDic CWJ、kanjium、Tatoeba 和构建期离线 OPUS-MT。衍生数据库整体按 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/legalcode) 提供；Tatoeba 文本适用 [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/)，OPUS-MT 模型适用 Apache 2.0。完整版本锁定、署名和许可见 `OboeApp/Resources/JLPT/NOTICE.txt`。
+
+v0.5 的 schema v2 离线构建边界由 `Scripts/jlpt_sources_v2.json` 锁定：OpenJLPT、Tomoshi、UniDic CWJ 3.1.0、kanjium 和 2026-09-19 Tatoeba 日中导出的每个实际输入都记录版本、下载地址、字节数、SHA-256、许可与署名。构建脚本**不会下载网络内容**，只读取命令行明确传入的本地文件；任一文件缺失、大小/哈希不符或许可元数据缺失都会在创建输出前失败。UniDic、Tomoshi 和 Tatoeba 原始大文件不得放入 `OboeApp`，也不随 App 分发。
+
+已审核翻译覆盖位于 `Scripts/JLPTData/example-translations-zh.jsonl`，模型、运行时和 Tatoeba 英文补充输入由 `Scripts/jlpt_translation_model_v1.json` 固定。若需要重新生成覆盖文件，先在隔离 Python 3.9 环境安装 manifest 中锁定的依赖，并执行：
+
+```sh
+python Scripts/generate_jlpt_translations.py \
+  --jlpt /path/to/base-jlpt-library.sqlite \
+  --tatoeba-jpn /path/to/jpn_sentences.tsv.bz2 \
+  --tatoeba-cmn /path/to/cmn_sentences.tsv.bz2 \
+  --tatoeba-links /path/to/jpn-cmn_links.tsv.bz2 \
+  --tatoeba-eng /path/to/eng_sentences.tsv.bz2 \
+  --tatoeba-eng-cmn-links /path/to/eng-cmn_links.tsv.bz2 \
+  --model /path/to/opus-mt-en-zh \
+  --model-manifest Scripts/jlpt_translation_model_v1.json \
+  --review-overrides Scripts/JLPTData/example-translations-zh-overrides.json \
+  --generated-at 2026-09-21T00:00:00+00:00 \
+  --output /tmp/example-translations-zh.jsonl \
+  --report /tmp/translation-quality-report.json
+```
+
+使用锁定输入和已审核覆盖重建 schema v2（路径按本机下载/解压位置替换，`--generated-at` 必须显式固定）：
+
+```sh
+python3 Scripts/build_jlpt_library.py \
+  --source-manifest Scripts/jlpt_sources_v2.json \
+  --openjlpt /path/to/OpenJLPT \
+  --tomoshi /path/to/tomoshi-dict-open.db \
+  --unidic-cwj /path/to/unidic-cwj-3.1.0-full/lex_3_1.csv \
+  --kanjium /path/to/kanjium/accents.txt \
+  --tatoeba-jpn /path/to/jpn_sentences.tsv.bz2 \
+  --tatoeba-cmn /path/to/cmn_sentences.tsv.bz2 \
+  --tatoeba-links /path/to/jpn-cmn_links.tsv.bz2 \
+  --translation-coverage Scripts/JLPTData/example-translations-zh.jsonl \
+  --translation-model-manifest Scripts/jlpt_translation_model_v1.json \
+  --quality-report-dir /tmp/jlpt-pitch-quality \
+  --generated-at 2026-09-21T00:00:00+00:00 \
+  --output /tmp/jlpt-library-v2.sqlite \
+  --notice /tmp/JLPT-NOTICE.txt \
+  --report /tmp/jlpt-build-report.json
+```
+
+T11 质量报告已通过并替换仓库内置 SQLite；相同锁定输入连续两次重建的数据库 SHA-256 均为 `45e20e715c1ceaa2594fca08377b3dcce0829016867e9aba3e9633f9bcc3f45c`。
 
 校验已提交的数据库：
 
@@ -172,6 +227,25 @@ OboeUITests/               导航、布局与端到端 UI 测试
 Scripts/                   JLPT 词库生成与校验工具
 .github/workflows/ci.yml   持续集成
 ```
+
+## v0.5 验证与已知限制
+
+v0.5 发布候选（b47）已完成：
+
+- 656 项 Swift 包测试，0 失败（5 项按门控跳过）；覆盖 schema v1～v13 迁移、v1～v6 备份恢复、多牌组成员关系不复制 Card/日志、共享内容删除保护、词性受控集合映射、音调 mora 校验、AI v2 协议、JLPT schema v2 解码/导入/只补空值回填与主牌组自动默认；
+- 42 项模拟器 UI 测试，0 失败（iPhone 17 与 iPhone SE 第 3 代），覆盖 Hero 三态、多牌组勾选、音调选择器、共享删除提示、v12→v13 真实升级冒烟、无障碍审计、最大辅助字号与 Reduce Motion；
+- 无障碍审计发现并修复进度条误报为可交互、Hero 白字渐变对比度不足、卡片次级文本对比度临界三处问题；
+- 内置词库通过 `--validate-existing`（8334 词、8132 音调、14362 中文例句翻译、来源哈希全部锁定）；
+- iPhone 15 Pro（iOS 27）真机侧载验收通过（v0.4 → v0.5 覆盖升级、JLPT 回填、Hero、日语键盘、VoiceOver、Reduce Motion 与备份回滚；一轮反馈修复了导入按钮布局、主牌组默认与音调选择器提示后由用户确认）。
+
+升级前请在 设置 → 备份 导出 `.oboe-backup` 存档；恢复为完整替换，替换前自动创建回滚快照。升级异常时：先在 App 内恢复快照或 v0.5 备份；需回到旧版则重装 v0.4 IPA 并恢复升级前导出的 v5 备份（v6 备份无法在 v0.4 读取）。
+
+当前限制（在 v0.4 限制基础上新增）：
+
+- 音调来自 UniDic/kanjium 词典标注，202 个无法可靠匹配的词保持未设置，不做 AI 猜测；
+- 音调选择器取值范围由假名读音的 mora 数决定，需先填写读音；
+- 系统 TTS 不提供真人重音或音调曲线展示；
+- 免费 Apple ID 重签无法注册 App Group，分享扩展在该环境下可能不可用（主 App 功能不受影响）。
 
 ## v0.4 验证与已知限制
 

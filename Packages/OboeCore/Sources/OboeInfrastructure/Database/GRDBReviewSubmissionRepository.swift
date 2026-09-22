@@ -95,8 +95,10 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
                 algorithmVersion: context.card.algorithmVersion,
                 profileID: context.card.profileID
             )
+            // 归因牌组必须是该 Note 的当前成员（scope 或 home），
+            // 防止提交方写入任意外部牌组（设计 §4.7）。
             guard mutation.noteID == context.card.noteID,
-                  mutation.deckIDAtReview == context.deckID,
+                  context.deckIDs.contains(mutation.deckIDAtReview),
                   mutation.contentVersion == context.contentVersion,
                   mutation.previousState == persistedPreviousState,
                   mutation.nextState.stateVersion == context.card.stateVersion + 1,
@@ -272,8 +274,13 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             [Double].self,
             from: Data(parameterJSON.utf8)
         )
+        let card = try GRDBSchedulingCardRepository.decode(row)
+        let memberDeckIDValues = try GRDBNoteDeckMemberships.fetchDeckIDMap(
+            noteIDs: [DatabaseValueCodec.encode(card.noteID)],
+            in: db
+        )
         return try ReviewSubmissionContext(
-            card: GRDBSchedulingCardRepository.decode(row),
+            card: card,
             profile: SchedulerProfile(
                 configurationVersion: row["review_configuration_version"],
                 targetRetention: row["review_desired_retention"],
@@ -282,7 +289,10 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             ),
             deckID: DatabaseValueCodec.decodeUUID(row["review_deck_id"]),
             contentVersion: row["review_content_version"],
-            algorithmVersion: row["review_algorithm_version"]
+            algorithmVersion: row["review_algorithm_version"],
+            deckIDs: memberDeckIDValues.values.first.map {
+                try Set($0.map(DatabaseValueCodec.decodeUUID))
+            }
         )
     }
 

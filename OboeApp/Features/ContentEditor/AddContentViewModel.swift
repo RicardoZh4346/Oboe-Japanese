@@ -51,6 +51,7 @@ final class AddContentViewModel {
     private let aiCardGenerationService: AICardGenerationService
     private let sentenceAnalysisService: SentenceAnalysisService
     private let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+    private let studyService: StudySessionService?
     private var didLoad = false
     @ObservationIgnored private var generationTask: Task<Void, Never>?
     @ObservationIgnored private var generationGate = AIGenerationRequestGate()
@@ -68,11 +69,14 @@ final class AddContentViewModel {
     var captureIsManualEdit = false
     var captureStaleNotice: String?
     var decks: [DeckSummary] = []
+    /// 归属（home）牌组；`vocabularyDeckIDs` 为全部成员牌组，始终包含 home。
     var vocabularyDeckID: UUID?
+    var vocabularyDeckIDs: Set<UUID> = []
     var vocabularyForm = VocabularyFormData()
     var vocabularyDraftID: UUID?
     var vocabularyStatusMessage: String?
     var grammarDeckID: UUID?
+    var grammarDeckIDs: Set<UUID> = []
     var grammarForm = GrammarFormData()
     var grammarDraftID: UUID?
     var grammarStatusMessage: String?
@@ -102,7 +106,10 @@ final class AddContentViewModel {
     var sentenceCardDrafts: [SentenceAnalysisCardDraft] = []
     var sentenceCardDuplicates: [UUID: [KnowledgePointSummary]] = [:]
     var sentenceAnalysisDeckID: UUID?
+    var sentenceAnalysisDeckIDs: Set<UUID> = []
     var sentenceCardStatusMessage: String?
+    /// 当前主牌组（`load` 时读取）：新选择默认把主牌组作为 home。
+    var primaryDeckID: UUID?
     var errorMessage: String?
     var isLoading = true
     var isSaving = false
@@ -149,6 +156,7 @@ final class AddContentViewModel {
         aiCardGenerationService: AICardGenerationService,
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        studyService: StudySessionService? = nil,
         capture: CaptureEditorSession? = nil
     ) {
         self.deckService = deckService
@@ -159,6 +167,7 @@ final class AddContentViewModel {
         self.aiCardGenerationService = aiCardGenerationService
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
+        self.studyService = studyService
         inboxService = capture?.inboxService
         captureSession = capture
         if let capture {
@@ -209,6 +218,105 @@ final class AddContentViewModel {
         }
     }
 
+    private var captureTargetDeckIDs: Set<UUID> {
+        switch kind {
+        case .vocabulary: vocabularyDeckIDs
+        case .grammar: grammarDeckIDs
+        case .sentenceAnalysis: sentenceAnalysisDeckIDs
+        }
+    }
+
+    /// 当前类型的多牌组选择（home + 成员集合）。赋值时归一化并持久化
+    /// 到 capture 续编载荷。
+    var currentMembershipSelection: DeckMembershipSelection {
+        get {
+            switch kind {
+            case .vocabulary:
+                DeckMembershipSelection(
+                    homeDeckID: vocabularyDeckID,
+                    deckIDs: vocabularyDeckIDs
+                )
+            case .grammar:
+                DeckMembershipSelection(
+                    homeDeckID: grammarDeckID,
+                    deckIDs: grammarDeckIDs
+                )
+            case .sentenceAnalysis:
+                DeckMembershipSelection(
+                    homeDeckID: sentenceAnalysisDeckID,
+                    deckIDs: sentenceAnalysisDeckIDs
+                )
+            }
+        }
+        set {
+            let normalized = newValue.normalized(
+                decks: decks,
+                preferredHomeID: primaryDeckID
+            )
+            applyMembership(normalized, for: kind)
+            persistCaptureResume()
+        }
+    }
+
+    private func applyMembership(
+        _ selection: DeckMembershipSelection,
+        for kind: AddContentKind
+    ) {
+        switch kind {
+        case .vocabulary:
+            vocabularyDeckID = selection.homeDeckID
+            vocabularyDeckIDs = selection.deckIDs
+        case .grammar:
+            grammarDeckID = selection.homeDeckID
+            grammarDeckIDs = selection.deckIDs
+        case .sentenceAnalysis:
+            sentenceAnalysisDeckID = selection.homeDeckID
+            sentenceAnalysisDeckIDs = selection.deckIDs
+        }
+    }
+
+    /// 新建内容的默认选择：主牌组（若存在）否则列表首个牌组。
+    private func defaultMembership() -> DeckMembershipSelection {
+        guard let fallback = primaryDeckID.flatMap({ id in
+            decks.contains(where: { $0.id == id }) ? id : nil
+        }) ?? decks.first?.id else {
+            return DeckMembershipSelection()
+        }
+        return DeckMembershipSelection(single: fallback)
+    }
+
+    /// 牌组列表或选择集变化后调用：剔除失效牌组、补齐默认选择。
+    private func normalizeMemberships() {
+        for kind in AddContentKind.allCases {
+            let current: DeckMembershipSelection
+            switch kind {
+            case .vocabulary:
+                current = DeckMembershipSelection(
+                    homeDeckID: vocabularyDeckID,
+                    deckIDs: vocabularyDeckIDs
+                )
+            case .grammar:
+                current = DeckMembershipSelection(
+                    homeDeckID: grammarDeckID,
+                    deckIDs: grammarDeckIDs
+                )
+            case .sentenceAnalysis:
+                current = DeckMembershipSelection(
+                    homeDeckID: sentenceAnalysisDeckID,
+                    deckIDs: sentenceAnalysisDeckIDs
+                )
+            }
+            var normalized = current.normalized(
+                decks: decks,
+                preferredHomeID: primaryDeckID
+            )
+            if normalized.deckIDs.isEmpty {
+                normalized = defaultMembership()
+            }
+            applyMembership(normalized, for: kind)
+        }
+    }
+
     /// Hint shown when the fragment exceeds the current kind's AI input limit;
     /// the user must trim the selection instead of a silent cut. Manual-edit
     /// sessions hold user content (headword/grammar form), not AI input —
@@ -242,15 +350,15 @@ final class AddContentViewModel {
         guard !isLoading, !isSaving, !isCommitting else { return false }
         switch kind {
         case .vocabulary:
-            return vocabularyDeckID != nil
+            return vocabularyDeckID.map({ vocabularyDeckIDs.contains($0) }) == true
                 && (try? vocabularyForm.validatedContent()) != nil
                 && tagsAreValid(vocabularyTagsText)
         case .grammar:
-            return grammarDeckID != nil
+            return grammarDeckID.map({ grammarDeckIDs.contains($0) }) == true
                 && (try? grammarForm.validatedContent()) != nil
                 && tagsAreValid(grammarTagsText)
         case .sentenceAnalysis:
-            return sentenceAnalysisDeckID != nil
+            return sentenceAnalysisDeckID.map({ sentenceAnalysisDeckIDs.contains($0) }) == true
                 && !sentenceCardDraftsForCommit.isEmpty
                 && (try? sentenceAnalysisCardCreationService.validate(
                     sentenceCardDraftsForCommit
@@ -330,6 +438,7 @@ final class AddContentViewModel {
         CaptureResumePayload(
             selection: captureSelectionRange(),
             targetDeckID: captureTargetDeckID,
+            targetDeckIDs: captureTargetDeckIDs,
             vocabularyDirections: vocabularyDirections,
             grammarFormToExplanation: grammarFormToExplanation,
             selectedAnalysisItemIDs: selectedSentenceAnalysisItemIDs.sorted {
@@ -531,6 +640,7 @@ final class AddContentViewModel {
             let drafts = sentenceCardDraftsForCommit
             let result = try await sentenceAnalysisCardCreationService.commit(
                 deckID: sentenceAnalysisDeckID,
+                deckIDs: sentenceAnalysisDeckIDs,
                 drafts: drafts,
                 capture: capture
             )
@@ -724,6 +834,7 @@ final class AddContentViewModel {
                 let draft = try await vocabularyService.saveDraft(
                     id: vocabularyDraftID,
                     deckID: vocabularyDeckID,
+                    deckIDs: vocabularyDeckIDs,
                     formData: form
                 )
                 vocabularyDraftID = draft.id
@@ -735,6 +846,7 @@ final class AddContentViewModel {
                 let draft = try await grammarService.saveDraft(
                     id: grammarDraftID,
                     deckID: grammarDeckID,
+                    deckIDs: grammarDeckIDs,
                     formData: form
                 )
                 grammarDraftID = draft.id
@@ -777,15 +889,8 @@ final class AddContentViewModel {
         if didLoad {
             do {
                 decks = try await deckService.fetchDecks()
-                if !decks.contains(where: { $0.id == vocabularyDeckID }) {
-                    vocabularyDeckID = decks.first?.id
-                }
-                if !decks.contains(where: { $0.id == grammarDeckID }) {
-                    grammarDeckID = decks.first?.id
-                }
-                if !decks.contains(where: { $0.id == sentenceAnalysisDeckID }) {
-                    sentenceAnalysisDeckID = decks.first?.id
-                }
+                await loadPrimaryDeckID()
+                normalizeMemberships()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -795,18 +900,30 @@ final class AddContentViewModel {
 
         do {
             decks = try await deckService.fetchDecks()
+            await loadPrimaryDeckID()
             if let captureSession {
                 try await restoreCaptureSession(captureSession)
             } else {
                 try await restoreVocabularyDraft()
                 try await restoreGrammarDraft()
                 try await restoreSentenceAnalysisDraft()
-                sentenceAnalysisDeckID = decks.first?.id
             }
+            normalizeMemberships()
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func loadPrimaryDeckID() async {
+        guard let studyService else { return }
+        do {
+            primaryDeckID = try await studyService.loadLearningSettings(
+                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+            ).primaryDeckID
+        } catch {
+            primaryDeckID = nil
+        }
     }
 
     /// Restores a capture session: the linked draft by ID (never the global
@@ -817,14 +934,12 @@ final class AddContentViewModel {
         if let payload = session.payload {
             // 方向不再可选：忽略旧草稿载荷中的方向子集，固定全部方向。
             grammarFormToExplanation = true
-            if let deckID = payload.targetDeckID,
-               decks.contains(where: { $0.id == deckID }) {
-                applyCaptureDeckSelection(deckID)
-            }
+            applyCaptureDeckSelection(
+                homeDeckID: payload.targetDeckID,
+                deckIDs: payload.targetDeckIDs
+            )
         }
-        if vocabularyDeckID == nil { vocabularyDeckID = decks.first?.id }
-        if grammarDeckID == nil { grammarDeckID = decks.first?.id }
-        if sentenceAnalysisDeckID == nil { sentenceAnalysisDeckID = decks.first?.id }
+        normalizeMemberships()
 
         if session.isAnalysisStale {
             captureStaleNotice = "原文已修改，之前的分析结果已失效，请重新分析。"
@@ -842,12 +957,15 @@ final class AddContentViewModel {
         prefillCaptureFragment(captureFragmentText(from: session) ?? context.inputText)
     }
 
-    private func applyCaptureDeckSelection(_ deckID: UUID) {
-        switch kind {
-        case .vocabulary: vocabularyDeckID = deckID
-        case .grammar: grammarDeckID = deckID
-        case .sentenceAnalysis: sentenceAnalysisDeckID = deckID
-        }
+    /// 恢复续编载荷中的牌组选择：已删除的牌组被剔除，home 不在成员中时
+    /// 回退主牌组或首个有效成员；载荷为空则保持现状由归一化补默认值。
+    private func applyCaptureDeckSelection(homeDeckID: UUID?, deckIDs: Set<UUID>) {
+        let selection = DeckMembershipSelection(
+            homeDeckID: homeDeckID,
+            deckIDs: deckIDs
+        ).normalized(decks: decks, preferredHomeID: primaryDeckID)
+        guard !selection.deckIDs.isEmpty else { return }
+        applyMembership(selection, for: kind)
     }
 
     /// The fragment recorded as a UTF-16 selection range inside the captured
@@ -894,9 +1012,7 @@ final class AddContentViewModel {
         case .vocabulary:
             if let draft = try await vocabularyService.fetchDraft(id: id) {
                 vocabularyDraftID = draft.id
-                if let deckID = draft.deckID, decks.contains(where: { $0.id == deckID }) {
-                    vocabularyDeckID = deckID
-                }
+                restoreDeckSelection(draft.deckID, draft.deckIDs, for: .vocabulary)
                 vocabularyForm = draft.formData
                 vocabularyStatusMessage = "已恢复处理中的草稿"
                 return true
@@ -905,9 +1021,7 @@ final class AddContentViewModel {
                let draft = try await grammarService.fetchDraft(id: id) {
                 kind = .grammar
                 grammarDraftID = draft.id
-                if let deckID = draft.deckID, decks.contains(where: { $0.id == deckID }) {
-                    grammarDeckID = deckID
-                }
+                restoreDeckSelection(draft.deckID, draft.deckIDs, for: .grammar)
                 grammarForm = draft.formData
                 grammarStatusMessage = "已恢复处理中的草稿"
                 return true
@@ -916,9 +1030,7 @@ final class AddContentViewModel {
         case .grammar:
             guard let draft = try await grammarService.fetchDraft(id: id) else { return false }
             grammarDraftID = draft.id
-            if let deckID = draft.deckID, decks.contains(where: { $0.id == deckID }) {
-                grammarDeckID = deckID
-            }
+            restoreDeckSelection(draft.deckID, draft.deckIDs, for: .grammar)
             grammarForm = draft.formData
             grammarStatusMessage = "已恢复处理中的草稿"
             return true
@@ -978,6 +1090,7 @@ final class AddContentViewModel {
                 let draft = try await vocabularyService.saveDraft(
                     id: vocabularyDraftID,
                     deckID: vocabularyDeckID,
+                    deckIDs: vocabularyDeckIDs,
                     formData: vocabularyForm
                 )
                 vocabularyDraftID = draft.id
@@ -987,6 +1100,7 @@ final class AddContentViewModel {
                 let draft = try await grammarService.saveDraft(
                     id: grammarDraftID,
                     deckID: grammarDeckID,
+                    deckIDs: grammarDeckIDs,
                     formData: grammarForm
                 )
                 grammarDraftID = draft.id
@@ -1025,7 +1139,7 @@ final class AddContentViewModel {
                 self.vocabularyDraftID = nil
                 detachCaptureDraft()
                 vocabularyForm = VocabularyFormData()
-                vocabularyDeckID = decks.first?.id
+                applyMembership(defaultMembership(), for: .vocabulary)
                 vocabularyStatusMessage = "草稿已清除"
             case .grammar:
                 guard let grammarDraftID else { return }
@@ -1033,7 +1147,7 @@ final class AddContentViewModel {
                 self.grammarDraftID = nil
                 detachCaptureDraft()
                 grammarForm = GrammarFormData()
-                grammarDeckID = decks.first?.id
+                applyMembership(defaultMembership(), for: .grammar)
                 grammarStatusMessage = "草稿已清除"
             case .sentenceAnalysis:
                 guard let sentenceAnalysisDraftID else { return }
@@ -1071,7 +1185,8 @@ final class AddContentViewModel {
                     directions: vocabularyDirections,
                     rawTagNames: parsedTags(vocabularyTagsText),
                     origin: captureCommitOrigin,
-                    capture: capture
+                    capture: capture,
+                    deckIDs: vocabularyDeckIDs
                 )
                 vocabularyDraftID = nil
                 vocabularyForm = VocabularyFormData()
@@ -1085,7 +1200,8 @@ final class AddContentViewModel {
                     includesDirection: grammarFormToExplanation,
                     rawTagNames: parsedTags(grammarTagsText),
                     origin: captureCommitOrigin,
-                    capture: capture
+                    capture: capture,
+                    deckIDs: grammarDeckIDs
                 )
                 grammarDraftID = nil
                 grammarForm = GrammarFormData()
@@ -1127,25 +1243,36 @@ final class AddContentViewModel {
         }
     }
 
+    /// 恢复草稿中的多牌组选择：过滤已删除牌组；草稿没有有效成员时不动
+    /// 当前选择（由 `normalizeMemberships` 兜底默认值）。
+    private func restoreDeckSelection(
+        _ homeDeckID: UUID?,
+        _ deckIDs: Set<UUID>,
+        for kind: AddContentKind
+    ) {
+        let selection = DeckMembershipSelection(
+            homeDeckID: homeDeckID,
+            deckIDs: deckIDs
+        ).normalized(decks: decks, preferredHomeID: primaryDeckID)
+        guard !selection.deckIDs.isEmpty else { return }
+        applyMembership(selection, for: kind)
+    }
+
     private func restoreVocabularyDraft() async throws {
         if let draft = try await vocabularyService.fetchLatestDraft() {
             vocabularyDraftID = draft.id
-            vocabularyDeckID = decks.contains { $0.id == draft.deckID } ? draft.deckID : nil
+            restoreDeckSelection(draft.deckID, draft.deckIDs, for: .vocabulary)
             vocabularyForm = draft.formData
             vocabularyStatusMessage = "已恢复上次草稿"
-        } else {
-            vocabularyDeckID = decks.first?.id
         }
     }
 
     private func restoreGrammarDraft() async throws {
         if let draft = try await grammarService.fetchLatestDraft() {
             grammarDraftID = draft.id
-            grammarDeckID = decks.contains { $0.id == draft.deckID } ? draft.deckID : nil
+            restoreDeckSelection(draft.deckID, draft.deckIDs, for: .grammar)
             grammarForm = draft.formData
             grammarStatusMessage = "已恢复上次草稿"
-        } else {
-            grammarDeckID = decks.first?.id
         }
     }
 

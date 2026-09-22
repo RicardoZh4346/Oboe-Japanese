@@ -918,7 +918,7 @@ final class AIRepairServiceTests: XCTestCase {
             headword: "受ける",
             reading: "うける",
             meaningZH: "接受；遭受",
-            partOfSpeech: "动词",
+            partOfSpeech: "一段动词 / 他动词",
             jlpt: .n3,
             notes: "原注释",
             contentVersion: 3,
@@ -931,7 +931,8 @@ final class AIRepairServiceTests: XCTestCase {
                     translationZH: "参加考试",
                     sortOrder: 0
                 )
-            ]
+            ],
+            pitchAccent: PitchAccent(rawValue: 2)
         ))
 
         let contentCardRepository = StubContentCardRepository(directions: [
@@ -1004,7 +1005,7 @@ final class AIRepairServiceTests: XCTestCase {
 
     private static let validResponseJSON = """
     {
-      "schemaVersion": 1,
+      "schemaVersion": 2,
       "problemTypes": ["too_many_meanings"],
       "summary": "释义覆盖多个语境。",
       "suggestions": [
@@ -1024,10 +1025,10 @@ final class AIRepairServiceTests: XCTestCase {
           "clearFields": null,
           "splitNotes": [
             {"kind": "vocabulary", "headword": "試験を受ける", "reading": "しけんをうける",
-             "meaningZH": "参加考试", "partOfSpeech": null, "jlpt": null,
+             "meaningZH": "参加考试", "partsOfSpeech": [], "pitchAccent": null, "jlpt": null,
              "usage": null, "connection": null, "notes": null, "examples": null},
             {"kind": "vocabulary", "headword": "影響を受ける", "reading": "えいきょうをうける",
-             "meaningZH": "受到影响", "partOfSpeech": null, "jlpt": null,
+             "meaningZH": "受到影响", "partsOfSpeech": [], "pitchAccent": null, "jlpt": null,
              "usage": null, "connection": null, "notes": null, "examples": null}
           ]
         }
@@ -1054,7 +1055,8 @@ extension AIRepairServiceTests {
             contentVersion: current.contentVersion + 1,
             createdAt: current.createdAt,
             updatedAt: Date(),
-            examples: current.examples
+            examples: current.examples,
+            pitchAccent: current.pitchAccent
         ))
     }
 }

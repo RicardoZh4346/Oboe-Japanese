@@ -19,10 +19,37 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
                 sql: """
                     SELECT id, deck_id, kind, headword, reading, meaning_zh, usage, is_favorite
                     FROM notes
-                    WHERE deck_id = ?
+                    WHERE EXISTS (
+                        SELECT 1 FROM note_decks nd
+                        WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                    )
                     ORDER BY created_at_ms, id
                     """,
                 arguments: [DatabaseValueCodec.encode(deckID)],
+                in: db
+            )
+        }
+    }
+
+    public func fetchDeckMembership(noteID: UUID) async throws -> NoteDeckMembership? {
+        try await pool.read { db in
+            try GRDBNoteDeckMemberships.fetchMembership(noteID: noteID, in: db)
+        }
+    }
+
+    public func replaceDeckMembership(
+        noteID: UUID,
+        deckIDs: Set<UUID>,
+        homeDeckID: UUID,
+        at date: Date
+    ) async throws -> NoteDeckMembership {
+        let updatedAtMilliseconds = try DatabaseValueCodec.encode(date)
+        return try await pool.write { db in
+            try GRDBNoteDeckMemberships.replaceMembership(
+                noteID: noteID,
+                deckIDs: deckIDs,
+                homeDeckID: homeDeckID,
+                atMilliseconds: updatedAtMilliseconds,
                 in: db
             )
         }
@@ -163,6 +190,8 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
         }
     }
 
+    /// 兼容 facade：移动语义等价于把成员关系原子替换为仅含目标牌组，
+    /// 并将 home 切到目标牌组。共享 Note 的旧成员关系一并移除。
     public func moveKnowledgePoint(
         noteID: UUID,
         to destinationDeckID: UUID,
@@ -170,21 +199,20 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
     ) async throws -> KnowledgePointMoveResult {
         let updatedAtMilliseconds = try DatabaseValueCodec.encode(date)
         return try await pool.write { db in
-            guard let sourceDeckValue = try String.fetchOne(
-                db,
-                sql: "SELECT deck_id FROM notes WHERE id = ?",
-                arguments: [DatabaseValueCodec.encode(noteID)]
+            guard let membership = try GRDBNoteDeckMemberships.fetchMembership(
+                noteID: noteID,
+                in: db
             ) else {
                 return .noteNotFound
             }
-            let destinationValue = DatabaseValueCodec.encode(destinationDeckID)
-            guard sourceDeckValue != destinationValue else {
+            guard membership.deckIDs != [destinationDeckID]
+                    || membership.homeDeckID != destinationDeckID else {
                 return .alreadyInDestination
             }
             guard try Bool.fetchOne(
                 db,
                 sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",
-                arguments: [destinationValue]
+                arguments: [DatabaseValueCodec.encode(destinationDeckID)]
             ) == true else {
                 return .destinationNotFound
             }
@@ -193,9 +221,12 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
                 sql: "SELECT COUNT(*) FROM cards WHERE note_id = ?",
                 arguments: [DatabaseValueCodec.encode(noteID)]
             ) ?? 0
-            try db.execute(
-                sql: "UPDATE notes SET deck_id = ?, updated_at_ms = ? WHERE id = ?",
-                arguments: [destinationValue, updatedAtMilliseconds, DatabaseValueCodec.encode(noteID)]
+            try GRDBNoteDeckMemberships.replaceMembership(
+                noteID: noteID,
+                deckIDs: [destinationDeckID],
+                homeDeckID: destinationDeckID,
+                atMilliseconds: updatedAtMilliseconds,
+                in: db
             )
             return .moved(cardCount: cardCount)
         }
@@ -225,7 +256,13 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
         arguments: StatementArguments,
         in db: Database
     ) throws -> [KnowledgePointSummary] {
-        try Row.fetchAll(db, sql: sql, arguments: arguments).map { row in
+        let rows = try Row.fetchAll(db, sql: sql, arguments: arguments)
+        let noteIDValues = rows.map { $0["id"] as String }
+        let membershipMap = try GRDBNoteDeckMemberships.fetchDeckIDMap(
+            noteIDs: noteIDValues,
+            in: db
+        )
+        return try rows.map { row in
             let idValue: String = row["id"]
             let deckIDValue: String = row["deck_id"]
             let kindValue: String = row["kind"]
@@ -237,15 +274,19 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
             let meaningZH: String = row["meaning_zh"]
             let usage: String? = row["usage"]
             let favorite: Int = row["is_favorite"]
-            return KnowledgePointSummary(
-                id: try DatabaseValueCodec.decodeUUID(idValue),
-                deckID: try DatabaseValueCodec.decodeUUID(deckIDValue),
+            let deckIDs = try Set(
+                (membershipMap[idValue] ?? [deckIDValue]).map { try DatabaseValueCodec.decodeUUID($0) }
+            )
+            return try KnowledgePointSummary(
+                id: DatabaseValueCodec.decodeUUID(idValue),
+                deckID: DatabaseValueCodec.decodeUUID(deckIDValue),
                 kind: kind,
                 headword: headword,
                 reading: reading,
                 meaningZH: meaningZH,
                 usage: usage,
-                isFavorite: favorite != 0
+                isFavorite: favorite != 0,
+                deckIDs: deckIDs
             )
         }
     }

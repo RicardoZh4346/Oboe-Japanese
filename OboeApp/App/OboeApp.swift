@@ -2,6 +2,7 @@ import Observation
 import OboeDomain
 import OboeInfrastructure
 import OboeSharedCapture
+import OSLog
 import SwiftUI
 
 @main
@@ -48,6 +49,7 @@ private struct UITestTraitOverrideModifier: ViewModifier {
         default: return nil
         }
     }
+
     #endif
 
     @ViewBuilder
@@ -101,6 +103,15 @@ final class AppDependencies {
     private(set) var jlptProgressService: JLPTProgressService?
     private(set) var jlptLibraryService: JLPTLibraryService?
     private(set) var jlptImporter: (any JLPTImporting)?
+    /// T12 已导入 JLPT 内容的幂等回填（设计 §7.4）。服务随数据库
+    /// 重建；任务句柄保证启动/进入词库/恢复等触发合并为同一次运行。
+    private(set) var jlptEnrichmentService: JLPTLibraryEnrichmentService?
+    private(set) var jlptEnrichmentStatus: JLPTEnrichmentStatus = .idle
+    private var jlptEnrichmentTask: Task<Void, Never>?
+    /// `configureServices` 完成时的 `databaseGeneration`——恢复流程中
+    /// 服务已换新但操作标记未复位时仍允许调度，世代不一致（服务还
+    /// 绑着旧库）则拒绝。
+    private var jlptEnrichmentServiceGeneration = -1
     private(set) var inboxService: InboxService?
     /// On-device OCR — independent of the database, so it survives restores.
     /// UI tests substitute a deterministic stub via `OBOE_UI_TEST_OCR_STUB`.
@@ -151,6 +162,12 @@ final class AppDependencies {
         didStart = true
 
         do {
+            #if DEBUG
+            // T16 UI-test seam: stage a v0.4-shaped (schema v12) file so the
+            // real open path exercises the v13 migration + pre-migration
+            // snapshot before launch-time enrichment backfills NULL fields.
+            try stageLegacySchemaV12DatabaseIfRequested()
+            #endif
             let database = try await databaseLifecycle.open()
             configureServices(database: database)
             #if DEBUG
@@ -201,6 +218,7 @@ final class AppDependencies {
             try? await aiRepairService?.restoreDraftsForLaunch()
             await drainSharedCaptures()
             await sweepOrphanedInboxImages()
+            scheduleJLPTEnrichment()
         } catch {
             launchErrorMessage = "无法打开本地数据库：\(error.localizedDescription)"
         }
@@ -242,6 +260,51 @@ final class AppDependencies {
         sharedCapturesAwaitingImport = nil
         await drainSharedCaptures()
     }
+
+    /// T12 幂等回填调度（设计 §7.4）：启动、进入词库、备份恢复后触发，
+    /// 全部合并到同一次后台运行。失败不阻塞主界面——状态经
+    /// `jlptEnrichmentStatus` 暴露给词库页做可重试提示；日志只记计数
+    /// 与错误类别，不含用户正文。
+    func scheduleJLPTEnrichment() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_JLPT_ENRICHMENT_DISABLED"] != nil {
+            return
+        }
+        #endif
+        guard jlptEnrichmentTask == nil,
+              jlptEnrichmentServiceGeneration == databaseGeneration,
+              let service = jlptEnrichmentService else { return }
+        jlptEnrichmentStatus = .running(processed: 0, total: 0)
+        jlptEnrichmentTask = Task {
+            defer { jlptEnrichmentTask = nil }
+            do {
+                let report = try await service.enrich { progress in
+                    await MainActor.run { [weak self] in
+                        self?.jlptEnrichmentStatus = .running(
+                            processed: progress.processed,
+                            total: progress.total
+                        )
+                    }
+                }
+                jlptEnrichmentStatus = .idle
+                Self.enrichmentLogger.log(
+                    "JLPT enrichment finished: candidates=\(report.candidateCount, privacy: .public) pitch=\(report.pitchFilled, privacy: .public) examples=\(report.examplesFilled, privacy: .public) missing=\(report.missingEntries, privacy: .public) skippedInconsistent=\(report.pitchSkippedInconsistent, privacy: .public)"
+                )
+            } catch is CancellationError {
+                jlptEnrichmentStatus = .idle
+            } catch {
+                jlptEnrichmentStatus = .failed(message: error.localizedDescription)
+                Self.enrichmentLogger.error(
+                    "JLPT enrichment failed: \(String(describing: type(of: error)), privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private static let enrichmentLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.oboe.app",
+        category: "JLPTEnrichment"
+    )
 
     /// Synchronous on purpose: it must run in the same un-interleaved stretch
     /// as `configureServices`, so no drain can slip between building the
@@ -287,6 +350,7 @@ final class AppDependencies {
             try await reloadAppearancePreference()
             try? await aiRepairService?.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
+            scheduleJLPTEnrichment()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
                 configureServices(database: restoredCurrent)
@@ -323,6 +387,7 @@ final class AppDependencies {
             try await reloadAppearancePreference()
             try? await aiRepairService?.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
+            scheduleJLPTEnrichment()
         } catch {
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
                 configureServices(database: restoredCurrent)
@@ -365,6 +430,12 @@ final class AppDependencies {
         // Epoch bump before the swap: any adaptive snapshot still in flight
         // from the outgoing database is tagged with a dead generation.
         await adaptiveCardService?.invalidate()
+        // Enrichment writes go through the outgoing pool — cancel and wait
+        // so no batch can land on a closed database mid-swap.
+        jlptEnrichmentTask?.cancel()
+        await jlptEnrichmentTask?.value
+        jlptEnrichmentTask = nil
+        jlptEnrichmentStatus = .idle
         await captureImportCoordinator?.pauseAndWait()
         await Task.yield()
     }
@@ -429,10 +500,15 @@ final class AppDependencies {
                 associationRepository: GRDBJLPTNoteAssociationRepository(database: database),
                 adaptiveRepository: GRDBAdaptiveRepository(database: database)
             )
+            jlptEnrichmentService = JLPTLibraryEnrichmentService(
+                source: repository,
+                store: GRDBJLPTEnrichmentRepository(database: database)
+            )
         } else {
             jlptProgressService = nil
             jlptLibraryService = nil
             jlptImporter = nil
+            jlptEnrichmentService = nil
             launchErrorMessage = "无法载入内置 JLPT 词库。"
         }
         studySessionService = Self.makeStudySessionService(database: database)
@@ -538,6 +614,7 @@ final class AppDependencies {
             }
         )
         databaseGeneration &+= 1
+        jlptEnrichmentServiceGeneration = databaseGeneration
     }
 
     /// UI tests inject an isolated queue directory; production resolves the
@@ -707,9 +784,9 @@ private struct UITestAICardGenerationClient: AICardGenerationClient {
         try await Task.sleep(for: .seconds(5))
         switch input.kind {
         case .vocabulary:
-            return #"{"schemaVersion":1,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partOfSpeech":"一段动词","jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":[]}"#
+            return #"{"schemaVersion":2,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":[]}"#
         case .grammar:
-            return #"{"schemaVersion":1,"kind":"grammar","grammarForm":"～たことがある","meaningZH":"曾经……过","usage":"表示过去的经历","connection":"动词た形＋ことがある","jlpt":"N4","examples":[{"japanese":"日本へ行ったことがあります。","translationZH":"我去过日本。"}],"notes":"","warnings":[]}"#
+            return #"{"schemaVersion":2,"kind":"grammar","grammarForm":"～たことがある","meaningZH":"曾经……过","usage":"表示过去的经历","connection":"动词た形＋ことがある","jlpt":"N4","examples":[{"japanese":"日本へ行ったことがあります。","translationZH":"我去过日本。"}],"notes":"","warnings":[]}"#
         }
     }
 }
@@ -727,7 +804,7 @@ private struct UITestAIRepairClient: AIRepairClient {
             throw AIConnectionError.serviceUnavailable(statusCode: 503)
         }
         try await Task.sleep(for: .milliseconds(3_000))
-        return #"{"schemaVersion":1,"problemTypes":["similar_words_confusion","example_too_complex"],"summary":"这张卡可能因近形词混淆而难记，例句也偏复杂。","suggestions":[{"type":"add_disambiguation","title":"补充辨析说明","reason":"与近形词区分度不足","replacement":{"notes":"注意与「受け取る」区分：受ける偏被动接受。"}},{"type":"split_card","title":"拆为两张卡","reason":"义项跨语境，合并回忆目标过宽","splitNotes":[{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"接受（考试、治疗等）","partOfSpeech":"动词","jlpt":"N3","examples":[{"japanese":"試験を受ける","translationZH":"参加考试"}]},{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"遭受（损失、攻击等）","partOfSpeech":"动词","jlpt":"N3","examples":[{"japanese":"被害を受ける","translationZH":"遭受损失"}]}]}]}"#
+        return #"{"schemaVersion":2,"problemTypes":["similar_words_confusion","example_too_complex"],"summary":"这张卡可能因近形词混淆而难记，例句也偏复杂。","suggestions":[{"type":"add_disambiguation","title":"补充辨析说明","reason":"与近形词区分度不足","replacement":{"notes":"注意与「受け取る」区分：受ける偏被动接受。"}},{"type":"split_card","title":"拆为两张卡","reason":"义项跨语境，合并回忆目标过宽","splitNotes":[{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"接受（考试、治疗等）","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N3","usage":null,"connection":null,"notes":null,"examples":[{"japanese":"試験を受ける","translationZH":"参加考试"}]},{"kind":"vocabulary","headword":"受ける","reading":"うける","meaningZH":"遭受（损失、攻击等）","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N3","usage":null,"connection":null,"notes":null,"examples":[{"japanese":"被害を受ける","translationZH":"遭受损失"}]}]}]}"#
     }
 }
 
@@ -738,7 +815,7 @@ private struct UITestSentenceAnalysisClient: SentenceAnalysisClient {
         credential: String
     ) async throws -> String {
         try await Task.sleep(for: .seconds(1))
-        return #"{"schemaVersion":1,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示移动的目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"に","meaningZH":"表示移动目的地","partOfSpeech":"","usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"动词「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partOfSpeech":"五段动词","usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partOfSpeech":"","usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}},{"kind":"expression","surface":"未对齐项目","canonicalForm":"未对齐项目","reading":"","meaningZH":"即使定位失败，解释仍然可读","roleZH":"验证安全降级","spans":[{"text":"存在しない","occurrence":1}],"cardDraft":null}],"warnings":["请核对语境后再用于学习"]}"#
+        return #"{"schemaVersion":2,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示移动的目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"","meaningZH":"表示移动目的地","partsOfSpeech":[],"pitchAccent":null,"usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"动词「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partsOfSpeech":["五段动词","自动词"],"pitchAccent":0,"usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partsOfSpeech":[],"pitchAccent":null,"usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}},{"kind":"expression","surface":"未对齐项目","canonicalForm":"未对齐项目","reading":"","meaningZH":"即使定位失败，解释仍然可读","roleZH":"验证安全降级","spans":[{"text":"存在しない","occurrence":1}],"cardDraft":null}],"warnings":["请核对语境后再用于学习"]}"#
     }
 }
 

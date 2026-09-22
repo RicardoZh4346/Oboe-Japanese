@@ -17,18 +17,27 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
         pool = database.pool
     }
 
+    /// 牌组内容列表按 `note_decks` 成员关系过滤（设计 §4.4/§4.5）。
     public func fetchVocabularySummaries(deckID: UUID) async throws -> [VocabularyNoteSummary] {
         try await pool.read { db in
-            try Row.fetchAll(
+            let rows = try Row.fetchAll(
                 db,
                 sql: """
                     SELECT id, deck_id, headword, reading, meaning_zh
                     FROM notes
-                    WHERE deck_id = ? AND kind = 'vocabulary'
+                    WHERE EXISTS (
+                        SELECT 1 FROM note_decks nd
+                        WHERE nd.note_id = notes.id AND nd.deck_id = ?
+                    ) AND kind = 'vocabulary'
                     ORDER BY created_at_ms, id
                     """,
                 arguments: [DatabaseValueCodec.encode(deckID)]
-            ).map(Self.decodeSummary)
+            )
+            let membershipMap = try GRDBNoteDeckMemberships.fetchDeckIDMap(
+                noteIDs: rows.map { $0["id"] as String },
+                in: db
+            )
+            return try rows.map { try Self.decodeSummary($0, membershipMap: membershipMap) }
         }
     }
 
@@ -39,7 +48,7 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
     }
 
     public func saveVocabularyDraft(_ draft: VocabularyDraft) async throws {
-        let payload = DraftPayload(deckID: draft.deckID, formData: draft.formData)
+        let payload = DraftPayload(draft: draft)
         let data = try JSONEncoder().encode(payload)
         guard let payloadJSON = String(data: data, encoding: .utf8) else {
             throw GRDBVocabularyRepositoryError.invalidDraftPayload
@@ -145,6 +154,7 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
                         part_of_speech = ?,
                         jlpt = ?,
                         notes = ?,
+                        pitch_accent = ?,
                         content_version = content_version + 1,
                         updated_at_ms = ?
                     WHERE id = ? AND kind = 'vocabulary'
@@ -156,6 +166,7 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
                     content.partOfSpeech,
                     content.jlpt?.rawValue,
                     content.notes,
+                    content.pitchAccent?.rawValue,
                     updatedAtMilliseconds,
                     DatabaseValueCodec.encode(id)
                 ]
@@ -235,8 +246,8 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
             sql: """
                 SELECT
                     id, deck_id, headword, reading, meaning_zh,
-                    part_of_speech, jlpt, notes, content_version,
-                    created_at_ms, updated_at_ms
+                    part_of_speech, jlpt, notes, pitch_accent,
+                    content_version, created_at_ms, updated_at_ms
                 FROM notes
                 WHERE id = ? AND kind = 'vocabulary'
                 """,
@@ -275,6 +286,7 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
         let partOfSpeech: String? = row["part_of_speech"]
         let jlptValue: String? = row["jlpt"]
         let notes: String? = row["notes"]
+        let pitchAccentValue: Int? = row["pitch_accent"]
         let contentVersion: Int = row["content_version"]
         let createdAtMilliseconds: Int64 = row["created_at_ms"]
         let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
@@ -291,7 +303,12 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
             contentVersion: contentVersion,
             createdAt: DatabaseValueCodec.decodeDate(milliseconds: createdAtMilliseconds),
             updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds),
-            examples: examples
+            examples: examples,
+            pitchAccent: pitchAccentValue.flatMap(PitchAccent.init(rawValue:)),
+            deckIDs: try Set(
+                (GRDBNoteDeckMemberships.fetchDeckIDMap(noteIDs: [idValue], in: db)[idValue]
+                    ?? [deckIDValue]).map { try DatabaseValueCodec.decodeUUID($0) }
+            )
         )
     }
 
@@ -315,24 +332,32 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
         let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
         return VocabularyDraft(
             id: try DatabaseValueCodec.decodeUUID(idValue),
-            deckID: payload.deckID,
+            deckID: payload.resolvedHomeDeckID,
+            deckIDs: payload.resolvedDeckIDs,
             formData: payload.formData,
             updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
         )
     }
 
-    private static func decodeSummary(_ row: Row) throws -> VocabularyNoteSummary {
+    private static func decodeSummary(
+        _ row: Row,
+        membershipMap: [String: Set<String>]
+    ) throws -> VocabularyNoteSummary {
         let idValue: String = row["id"]
         let deckIDValue: String = row["deck_id"]
         let headword: String = row["headword"]
         let reading: String? = row["reading"]
         let meaningZH: String = row["meaning_zh"]
-        return VocabularyNoteSummary(
-            id: try DatabaseValueCodec.decodeUUID(idValue),
-            deckID: try DatabaseValueCodec.decodeUUID(deckIDValue),
+        let deckIDs = try Set(
+            (membershipMap[idValue] ?? [deckIDValue]).map { try DatabaseValueCodec.decodeUUID($0) }
+        )
+        return try VocabularyNoteSummary(
+            id: DatabaseValueCodec.decodeUUID(idValue),
+            deckID: DatabaseValueCodec.decodeUUID(deckIDValue),
             headword: headword,
             reading: reading,
-            meaningZH: meaningZH
+            meaningZH: meaningZH,
+            deckIDs: deckIDs
         )
     }
 
@@ -347,7 +372,23 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
     }
 }
 
+/// v1 payload 只有 `deckID`；v0.5 起写 `homeDeckID` + `deckIDs`（设计 §4.4）。
+/// payload_version 保持 1：新键可选解码，旧单 deck payload 自动迁移为单元素集合。
 private struct DraftPayload: Codable {
     let deckID: UUID?
+    let homeDeckID: UUID?
+    let deckIDs: [UUID]?
     let formData: VocabularyFormData
+
+    init(draft: VocabularyDraft) {
+        deckID = nil
+        homeDeckID = draft.deckID
+        deckIDs = draft.deckIDs.isEmpty ? nil : Array(draft.deckIDs)
+        formData = draft.formData
+    }
+
+    var resolvedHomeDeckID: UUID? { homeDeckID ?? deckID }
+    var resolvedDeckIDs: Set<UUID> {
+        Set(deckIDs ?? []).union(resolvedHomeDeckID.map { [$0] } ?? [])
+    }
 }

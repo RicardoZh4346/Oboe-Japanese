@@ -25,7 +25,7 @@ final class OboeSchemaV8V10MigrationTests: XCTestCase {
             ("daily_tasks", 1), ("review_logs", 1), ("drafts", 1),
             ("inbox_items", 1), ("inbox_processing_contexts", 1),
             ("capture_import_receipts", 1), ("inbox_commit_receipts", 1),
-            ("search_documents", 1)
+            ("search_documents", 1), ("note_decks", 1)
         ]
         try database.pool.read { db in
             for (table, expected) in expectedCounts {
@@ -129,6 +129,7 @@ final class OboeSchemaV8V10MigrationTests: XCTestCase {
                     """,
                 arguments: [encode(noteID), encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO notes(
@@ -138,6 +139,7 @@ final class OboeSchemaV8V10MigrationTests: XCTestCase {
                     """,
                 arguments: [encode(grammarNoteID), encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: grammarNoteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO scheduler_profiles(
@@ -442,6 +444,7 @@ private extension OboeSchemaV8V10MigrationTests {
                     """,
                 arguments: [encode(noteID), encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: """
                     INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order)

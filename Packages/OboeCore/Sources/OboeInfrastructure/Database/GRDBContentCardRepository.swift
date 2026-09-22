@@ -45,7 +45,9 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     wasCreated: false
                 )
             }
-            try Self.requireDeck(commit.deckID, in: db)
+            for memberDeckID in commit.deckIDs {
+                try Self.requireDeck(memberDeckID, in: db)
+            }
             let profileID = try GRDBSchedulerProfileStore.ensureConfiguredProfile(
                 candidateID: commit.schedulerProfileID,
                 createdAtMilliseconds: timestamp,
@@ -56,8 +58,8 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     INSERT INTO notes(
                         id, deck_id, kind, headword, reading, meaning_zh,
                         part_of_speech, jlpt, notes, origin, source_ref, source_text,
-                        content_version, created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                        pitch_accent, content_version, created_at_ms, updated_at_ms
+                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(commit.noteID),
@@ -71,9 +73,16 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     commit.origin.rawValue,
                     commit.sourceRef,
                     commit.sourceText,
+                    commit.content.pitchAccent?.rawValue,
                     timestamp,
                     timestamp
                 ]
+            )
+            try Self.insertMemberships(
+                noteID: commit.noteID,
+                deckIDs: commit.deckIDs,
+                atMilliseconds: timestamp,
+                in: db
             )
             if let example = commit.content.example {
                 try Self.insertExample(
@@ -136,7 +145,9 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     )
                 }
             }
-            try Self.requireDeck(commit.deckID, in: db)
+            for memberDeckID in commit.deckIDs {
+                try Self.requireDeck(memberDeckID, in: db)
+            }
             guard commit.card.templateKind == .grammarFormToExplanation else {
                 throw ContentCardError.invalidTemplateForKnowledgePoint
             }
@@ -167,6 +178,12 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     timestamp,
                     timestamp
                 ]
+            )
+            try Self.insertMemberships(
+                noteID: commit.noteID,
+                deckIDs: commit.deckIDs,
+                atMilliseconds: timestamp,
+                in: db
             )
             if let example = commit.content.example {
                 try Self.insertExample(
@@ -448,6 +465,44 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             noteID: stored.noteID,
             cardCount: stored.cardCount,
             wasCreated: false
+        )
+    }
+
+    /// v13 不变量：每个 Note 的归属牌组必须同时是 `note_decks` 成员。
+    /// 所有 notes 写入路径在同一事务内调用它（设计 §4.2）。
+    static func insertMemberships(
+        noteID: UUID,
+        deckIDs: Set<UUID>,
+        atMilliseconds: Int64,
+        in db: Database
+    ) throws {
+        for deckID in deckIDs {
+            try insertHomeMembership(
+                noteID: noteID,
+                deckID: deckID,
+                atMilliseconds: atMilliseconds,
+                in: db
+            )
+        }
+    }
+
+    static func insertHomeMembership(
+        noteID: UUID,
+        deckID: UUID,
+        atMilliseconds: Int64,
+        in db: Database
+    ) throws {
+        try db.execute(
+            sql: """
+                INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+                VALUES (?, ?, ?)
+                ON CONFLICT(note_id, deck_id) DO NOTHING
+                """,
+            arguments: [
+                DatabaseValueCodec.encode(noteID),
+                DatabaseValueCodec.encode(deckID),
+                atMilliseconds
+            ]
         )
     }
 

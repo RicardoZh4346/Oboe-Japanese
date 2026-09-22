@@ -105,7 +105,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
             "messages": [
                 [
                     "role": "system",
-                    "content": AIRepairPromptV1.systemInstruction()
+                    "content": AIRepairPromptV2.systemInstruction()
                 ],
                 ["role": "user", "content": userContent]
             ],
@@ -117,7 +117,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
             body["response_format"] = [
                 "type": "json_schema",
                 "json_schema": [
-                    "name": "oboe_ai_repair_v1",
+                    "name": "oboe_ai_repair_v2",
                     "strict": true,
                     "schema": outputSchema()
                 ]
@@ -130,11 +130,39 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }
 
-    /// Strict JSON-schema mirror of the v1 response contract — every property
+    /// Strict JSON-schema mirror of the v2 response contract — every property
     /// listed is required (optional slots use `anyOf` with null), matching
     /// what `AIRepairOutputDecoder` accepts.
     private static func outputSchema() -> [String: Any] {
         let stringOrNull: [String: Any] = ["anyOf": [["type": "string"], ["type": "null"]]]
+        let partsOfSpeech: [String: Any] = [
+            "type": "array",
+            "uniqueItems": true,
+            "items": [
+                "type": "string",
+                "enum": VocabularyPartOfSpeech.allCases.map(\.rawValue)
+            ]
+        ]
+        let partsOfSpeechOrNull: [String: Any] = [
+            "anyOf": [
+                [
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": [
+                        "type": "string",
+                        "enum": VocabularyPartOfSpeech.allCases.map(\.rawValue)
+                    ]
+                ],
+                ["type": "null"]
+            ]
+        ]
+        let pitchAccentOrNull: [String: Any] = [
+            "anyOf": [
+                ["type": "integer", "minimum": 0],
+                ["type": "null"]
+            ]
+        ]
         let example: [String: Any] = [
             "type": "object",
             "properties": [
@@ -154,7 +182,8 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
             "headword": stringOrNull,
             "reading": stringOrNull,
             "meaningZH": stringOrNull,
-            "partOfSpeech": stringOrNull,
+            "partsOfSpeech": partsOfSpeechOrNull,
+            "pitchAccent": pitchAccentOrNull,
             "usage": stringOrNull,
             "connection": stringOrNull,
             "notes": stringOrNull,
@@ -191,7 +220,8 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
             "headword": ["type": "string"],
             "reading": stringOrNull,
             "meaningZH": ["type": "string"],
-            "partOfSpeech": stringOrNull,
+            "partsOfSpeech": partsOfSpeech,
+            "pitchAccent": pitchAccentOrNull,
             "jlpt": [
                 "anyOf": [
                     ["type": "string", "enum": JLPTLevel.allCases.map(\.rawValue)],
@@ -237,7 +267,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
         return [
             "type": "object",
             "properties": [
-                "schemaVersion": ["type": "integer", "const": AIRepairPromptV1.schemaVersion],
+                "schemaVersion": ["type": "integer", "const": AIRepairPromptV2.schemaVersion],
                 "problemTypes": [
                     "type": "array",
                     "items": [

@@ -24,7 +24,7 @@ public struct GRDBGrammarRepository: GrammarRepository, Sendable {
     }
 
     public func saveGrammarDraft(_ draft: GrammarDraft) async throws {
-        let payload = DraftPayload(deckID: draft.deckID, formData: draft.formData)
+        let payload = DraftPayload(draft: draft)
         let data = try JSONEncoder().encode(payload)
         guard let payloadJSON = String(data: data, encoding: .utf8) else {
             throw GRDBGrammarRepositoryError.invalidDraftPayload
@@ -275,7 +275,11 @@ public struct GRDBGrammarRepository: GrammarRepository, Sendable {
             contentVersion: contentVersion,
             createdAt: DatabaseValueCodec.decodeDate(milliseconds: createdAtMilliseconds),
             updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds),
-            examples: examples
+            examples: examples,
+            deckIDs: try Set(
+                (GRDBNoteDeckMemberships.fetchDeckIDMap(noteIDs: [idValue], in: db)[idValue]
+                    ?? [deckIDValue]).map { try DatabaseValueCodec.decodeUUID($0) }
+            )
         )
     }
 
@@ -299,7 +303,8 @@ public struct GRDBGrammarRepository: GrammarRepository, Sendable {
         let updatedAtMilliseconds: Int64 = row["updated_at_ms"]
         return GrammarDraft(
             id: try DatabaseValueCodec.decodeUUID(idValue),
-            deckID: payload.deckID,
+            deckID: payload.resolvedHomeDeckID,
+            deckIDs: payload.resolvedDeckIDs,
             formData: payload.formData,
             updatedAt: DatabaseValueCodec.decodeDate(milliseconds: updatedAtMilliseconds)
         )
@@ -316,7 +321,23 @@ public struct GRDBGrammarRepository: GrammarRepository, Sendable {
     }
 }
 
+/// v1 payload 只有 `deckID`；v0.5 起写 `homeDeckID` + `deckIDs`（设计 §4.4）。
+/// payload_version 保持 1：新键可选解码，旧单 deck payload 自动迁移为单元素集合。
 private struct DraftPayload: Codable {
     let deckID: UUID?
+    let homeDeckID: UUID?
+    let deckIDs: [UUID]?
     let formData: GrammarFormData
+
+    init(draft: GrammarDraft) {
+        deckID = nil
+        homeDeckID = draft.deckID
+        deckIDs = draft.deckIDs.isEmpty ? nil : Array(draft.deckIDs)
+        formData = draft.formData
+    }
+
+    var resolvedHomeDeckID: UUID? { homeDeckID ?? deckID }
+    var resolvedDeckIDs: Set<UUID> {
+        Set(deckIDs ?? []).union(resolvedHomeDeckID.map { [$0] } ?? [])
+    }
 }

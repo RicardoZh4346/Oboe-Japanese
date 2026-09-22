@@ -268,4 +268,5 @@ private func insertP07ANote(
             headword
         ]
     )
+    try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
 }

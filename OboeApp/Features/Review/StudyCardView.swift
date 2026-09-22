@@ -123,6 +123,7 @@ struct StudyCardView: View {
             switch content.templateKind {
             case .vocabularyJapaneseToChinese:
                 fact("假名", content.reading, font: .kana, secondary: true)
+                optionalFact("音调", pitchAccentDisplayValue(content.pitchAccent))
                 fact("中文", content.meaningZH, font: .meaningZH)
                 optionalFact("词性", content.partOfSpeech)
                 exampleFacts
@@ -135,6 +136,7 @@ struct StudyCardView: View {
                     action: onPrimarySpeech
                 )
                 fact("假名", content.reading, font: .kana, secondary: true)
+                optionalFact("音调", pitchAccentDisplayValue(content.pitchAccent))
                 exampleFacts
                 optionalFact("说明", content.notes)
             case .vocabularyListening:
@@ -145,6 +147,7 @@ struct StudyCardView: View {
                     action: onPrimarySpeech
                 )
                 fact("假名", content.reading, font: .kana, secondary: true)
+                optionalFact("音调", pitchAccentDisplayValue(content.pitchAccent))
                 fact("中文", content.meaningZH, font: .meaningZH)
                 optionalFact("词性", content.partOfSpeech)
                 exampleFacts

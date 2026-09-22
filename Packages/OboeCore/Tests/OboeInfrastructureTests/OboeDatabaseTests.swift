@@ -271,6 +271,7 @@ private extension OboeDatabaseTests {
                 """,
             arguments: [DatabaseValueCodec.encode(id), DatabaseValueCodec.encode(deckID)]
         )
+        try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
     }
 
     static func insertProfile(id: UUID, in db: Database) throws {

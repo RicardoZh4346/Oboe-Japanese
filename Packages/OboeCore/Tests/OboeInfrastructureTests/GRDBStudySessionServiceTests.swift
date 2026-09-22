@@ -878,6 +878,7 @@ private final class StudySessionFixture: @unchecked Sendable {
                     DatabaseValueCodec.encode(deckID)
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: "INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order) VALUES (?, ?, '魚を食べる。', '吃鱼。', 0)",
                 arguments: [
@@ -906,6 +907,7 @@ private final class StudySessionFixture: @unchecked Sendable {
                     DatabaseValueCodec.encode(deckID)
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: "INSERT INTO examples(id, note_id, japanese, translation_zh, sort_order) VALUES (?, ?, '日本へ行ったことがある。', '去过日本。', 0)",
                 arguments: [

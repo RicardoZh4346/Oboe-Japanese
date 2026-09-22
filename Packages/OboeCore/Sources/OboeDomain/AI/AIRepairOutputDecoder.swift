@@ -25,11 +25,11 @@ public enum AIRepairOutputDecoder {
     ]
     private static let requiredSuggestionKeys: Set<String> = ["type", "title", "reason"]
     private static let patchKeys: Set<String> = [
-        "headword", "reading", "meaningZH", "partOfSpeech",
+        "headword", "reading", "meaningZH", "partsOfSpeech", "pitchAccent",
         "usage", "connection", "notes", "examples"
     ]
     private static let candidateKeys: Set<String> = [
-        "kind", "headword", "reading", "meaningZH", "partOfSpeech",
+        "kind", "headword", "reading", "meaningZH", "partsOfSpeech", "pitchAccent",
         "jlpt", "usage", "connection", "notes", "examples"
     ]
     private static let exampleKeys: Set<String> = ["japanese", "translationZH"]
@@ -41,7 +41,6 @@ public enum AIRepairOutputDecoder {
         "headword": 200,
         "reading": 100,
         "meaningZH": 1_000,
-        "partOfSpeech": 100,
         "usage": 2_000,
         "connection": 1_000,
         "notes": 2_000,
@@ -66,7 +65,7 @@ public enum AIRepairOutputDecoder {
         guard let schemaVersion = object["schemaVersion"] as? Int else {
             throw AIRepairError.invalidJSON
         }
-        guard schemaVersion == AIRepairPromptV1.schemaVersion else {
+        guard schemaVersion == AIRepairPromptV2.schemaVersion else {
             throw AIRepairError.unsupportedSchemaVersion(schemaVersion)
         }
         guard let rawProblemTypes = object["problemTypes"] as? [String] else {
@@ -171,11 +170,12 @@ public enum AIRepairOutputDecoder {
             headword: patchField("headword"),
             reading: patchField("reading"),
             meaningZH: patchField("meaningZH"),
-            partOfSpeech: patchField("partOfSpeech"),
+            partOfSpeech: try decodePartsOfSpeech(object["partsOfSpeech"], allowEmpty: false),
             usage: patchField("usage"),
             connection: patchField("connection"),
             notes: patchField("notes"),
-            examples: decodeExamples(object["examples"])
+            examples: decodeExamples(object["examples"]),
+            pitchAccent: try decodePitchAccent(object["pitchAccent"])
         )
     }
 
@@ -223,7 +223,7 @@ public enum AIRepairOutputDecoder {
     private static func decodeSplitCandidate(
         _ object: [String: Any]
     ) throws -> AIRepairNoteCandidate {
-        guard Set(object.keys).isSubset(of: candidateKeys) else {
+        guard Set(object.keys) == candidateKeys else {
             throw AIRepairError.unexpectedFields
         }
         guard let rawKind = object["kind"] as? String else {
@@ -235,7 +235,8 @@ public enum AIRepairOutputDecoder {
         let headword = try requiredString(object["headword"], field: "headword")
         let meaningZH = try requiredString(object["meaningZH"], field: "meaningZH")
         let reading = try optionalString(object["reading"], field: "reading")
-        let partOfSpeech = try optionalString(object["partOfSpeech"], field: "partOfSpeech")
+        let partOfSpeech = try decodePartsOfSpeech(object["partsOfSpeech"], allowEmpty: true)
+        let pitchAccent = try decodePitchAccent(object["pitchAccent"])
         let usage = try optionalString(object["usage"], field: "usage")
         let connection = try optionalString(object["connection"], field: "connection")
         let notes = try optionalString(object["notes"], field: "notes")
@@ -252,7 +253,8 @@ public enum AIRepairOutputDecoder {
             usage: usage,
             connection: connection,
             notes: notes,
-            examples: examples
+            examples: examples,
+            pitchAccent: pitchAccent
         )
         try validateCandidate(candidate)
         return candidate
@@ -273,6 +275,9 @@ public enum AIRepairOutputDecoder {
             for field in ["reading", "partOfSpeech"]
             where (field == "reading" ? candidate.reading : candidate.partOfSpeech) != nil {
                 throw AIRepairError.fieldNotApplicableForKind(field)
+            }
+            guard candidate.pitchAccent == nil else {
+                throw AIRepairError.fieldNotApplicableForKind("pitchAccent")
             }
         }
         if let jlpt = candidate.jlpt, JLPTLevel(rawValue: jlpt) == nil {
@@ -301,6 +306,32 @@ public enum AIRepairOutputDecoder {
             throw AIRepairError.invalidJLPT(string)
         }
         return level
+    }
+
+    private static func decodePartsOfSpeech(
+        _ value: Any?,
+        allowEmpty: Bool
+    ) throws -> String? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let rawValues = value as? [String], allowEmpty || !rawValues.isEmpty else {
+            throw AIRepairError.invalidJSON
+        }
+        var parts: [VocabularyPartOfSpeech] = []
+        for rawValue in rawValues {
+            guard let part = VocabularyPartOfSpeech(rawValue: rawValue), !parts.contains(part) else {
+                throw AIRepairError.invalidCandidate("无效或重复的词性：\(rawValue)")
+            }
+            parts.append(part)
+        }
+        return VocabularyPartOfSpeech.format(parts)
+    }
+
+    private static func decodePitchAccent(_ value: Any?) throws -> PitchAccent? {
+        guard let value, !(value is NSNull) else { return nil }
+        guard let rawValue = value as? Int, let pitch = PitchAccent(rawValue: rawValue) else {
+            throw AIRepairError.invalidCandidate("音调必须是非负整数")
+        }
+        return pitch
     }
 
     private static func decodeExamples(
@@ -369,6 +400,7 @@ extension AIRepairFieldPatch {
         if reading != nil { names.insert("reading") }
         if meaningZH != nil { names.insert("meaningZH") }
         if partOfSpeech != nil { names.insert("partOfSpeech") }
+        if pitchAccent != nil { names.insert("pitchAccent") }
         if usage != nil { names.insert("usage") }
         if connection != nil { names.insert("connection") }
         if notes != nil { names.insert("notes") }
@@ -391,7 +423,8 @@ extension AIRepairNoteCandidate {
             jlpt: jlpt.flatMap { JLPTLevel(rawValue: $0) },
             exampleJapanese: examples?.first?.japanese ?? "",
             exampleTranslationZH: examples?.first?.translationZH ?? "",
-            notes: notes ?? ""
+            notes: notes ?? "",
+            pitchAccent: pitchAccent
         )
     }
 

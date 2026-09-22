@@ -186,7 +186,7 @@ final class PortableBackupExporterTests: XCTestCase {
 
 private extension PortableBackupExporterTests {
     static let recordTypes = [
-        "deck", "note", "example", "tag", "noteTag", "profile", "card",
+        "deck", "note", "noteDeck", "example", "tag", "noteTag", "profile", "card",
         "studyDay", "dailyTask", "review", "draft",
         "inboxItem", "inboxProcessingContext", "captureImportReceipt",
         "inboxCommitReceipt", "settings"
@@ -269,6 +269,7 @@ private extension PortableBackupExporterTests {
                     """,
                 arguments: [encode(noteID), encode(deckID)]
             )
+            try insertHomeMembershipIfSupported(noteID: noteID, deckID: deckID, in: db)
             try db.execute(
                 sql: "INSERT INTO examples VALUES (?, ?, '魚を食べる。', '吃鱼。', 0)",
                 arguments: [encode(exampleID), encode(noteID)]

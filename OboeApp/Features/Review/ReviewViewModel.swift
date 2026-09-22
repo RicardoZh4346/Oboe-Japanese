@@ -354,7 +354,8 @@ final class ReviewViewModel {
                 rating: pendingSubmission.rating,
                 studyDay: pendingSubmission.studyDay,
                 eventID: pendingSubmission.eventID,
-                durationMilliseconds: pendingSubmission.durationMilliseconds
+                durationMilliseconds: pendingSubmission.durationMilliseconds,
+                scopeDeckID: scope.deckID
             )
             lastSubmission = LastSubmission(
                 eventID: submitted.eventID,
@@ -466,11 +467,15 @@ final class ReviewViewModel {
     }
 
     func scopedNowItems(in plan: TodayPlan) -> [TodayQueueItem] {
-        plan.availableNow.filter { scope.deckID == nil || $0.deckID == scope.deckID }
+        plan.availableNow.filter { item in
+            scope.deckID.map { item.deckIDs.contains($0) } ?? true
+        }
     }
 
     func scopedLaterItems(in plan: TodayPlan) -> [TodayQueueItem] {
-        plan.availableLater.filter { scope.deckID == nil || $0.deckID == scope.deckID }
+        plan.availableLater.filter { item in
+            scope.deckID.map { item.deckIDs.contains($0) } ?? true
+        }
     }
 
     func scopedRemainingCount(in plan: TodayPlan) -> Int {
@@ -592,7 +597,9 @@ final class ReviewViewModel {
         guard let plan else { return skippedListeningIDs.count }
         let inScope = Set(
             (plan.availableNow + plan.availableLater)
-                .filter { scope.deckID == nil || $0.deckID == scope.deckID }
+                .filter { item in
+                    scope.deckID.map { item.deckIDs.contains($0) } ?? true
+                }
                 .map(\.cardID)
         )
         return skippedListeningIDs.intersection(inScope).count

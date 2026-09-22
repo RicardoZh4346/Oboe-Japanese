@@ -6,6 +6,7 @@ public enum AIRepairPreviewField: String, CaseIterable, Codable, Hashable, Senda
     case reading
     case meaningZH
     case partOfSpeech
+    case pitchAccent
     case usage
     case connection
     case notes
@@ -141,7 +142,12 @@ public enum AIRepairPreviewBuilder {
                 jlpt: note.jlpt,
                 exampleJapanese: example?.japanese ?? "",
                 exampleTranslationZH: example?.translationZH ?? "",
-                notes: merged(patch?.notes, cleared: clear.contains(.notes), fallback: note.notes)
+                notes: merged(patch?.notes, cleared: clear.contains(.notes), fallback: note.notes),
+                pitchAccent: mergedPitchAccent(
+                    patch?.pitchAccent,
+                    cleared: clear.contains(.pitchAccent),
+                    fallback: note.pitchAccent
+                )
             )
             do {
                 return .vocabulary(try form.validatedContent())
@@ -149,11 +155,17 @@ public enum AIRepairPreviewBuilder {
                 throw AIRepairError.invalidCandidate(String(describing: error))
             }
         case .grammar:
+            if patch?.pitchAccent != nil {
+                throw AIRepairError.fieldNotApplicableForKind("pitchAccent")
+            }
             for field in ["reading", "partOfSpeech"] where patchValue(patch, field) != nil {
                 throw AIRepairError.fieldNotApplicableForKind(field)
             }
             for field in [AIRepairClearableField.reading, .partOfSpeech] where clear.contains(field) {
                 throw AIRepairError.fieldNotApplicableForKind(field.rawValue)
+            }
+            if clear.contains(.pitchAccent) {
+                throw AIRepairError.fieldNotApplicableForKind("pitchAccent")
             }
             let example = mergedExample(patch: patch, note: note)
             let form = GrammarFormData(
@@ -188,6 +200,15 @@ public enum AIRepairPreviewBuilder {
     ) -> String {
         if cleared { return "" }
         return patchValue ?? fallback ?? ""
+    }
+
+    private static func mergedPitchAccent(
+        _ patchValue: PitchAccent?,
+        cleared: Bool,
+        fallback: PitchAccent?
+    ) -> PitchAccent? {
+        if cleared { return nil }
+        return patchValue ?? fallback
     }
 
     /// `patch.examples` replaces the whole example list; absent keeps the
@@ -254,6 +275,7 @@ public enum AIRepairPreviewBuilder {
                 (.reading, note.reading ?? ""),
                 (.meaningZH, note.meaningZH),
                 (.partOfSpeech, note.partOfSpeech ?? ""),
+                (.pitchAccent, render(note.pitchAccent)),
                 (.notes, note.notes ?? ""),
                 (.examples, render(note.examples))
             ]
@@ -280,6 +302,7 @@ public enum AIRepairPreviewBuilder {
             case .reading: return value.reading ?? ""
             case .meaningZH: return value.meaningZH
             case .partOfSpeech: return value.partOfSpeech ?? ""
+            case .pitchAccent: return render(value.pitchAccent)
             case .notes: return value.notes ?? ""
             case .examples:
                 return value.example.map {
@@ -316,5 +339,9 @@ public enum AIRepairPreviewBuilder {
             }
             return example.japanese
         }.joined(separator: "\n")
+    }
+
+    private static func render(_ pitchAccent: PitchAccent?) -> String {
+        pitchAccent.map { String($0.rawValue) } ?? ""
     }
 }

@@ -117,6 +117,90 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         XCTAssertEqual(importedRefs, [vocabulary.id])
     }
 
+    /// T07: 单词导入支持多牌组——home 写 notes.deck_id，全部成员写
+    /// note_decks；成员牌组缺失时整体失败、无部分写入。
+    func testSingleImportWritesEveryMembershipDeck() async throws {
+        let location = try JLPTTestLocation()
+        defer { location.remove() }
+        let database = try OboeDatabase(path: location.userDatabaseURL.path)
+        let importer = GRDBJLPTImporter(database: database)
+        let homeDeck = UUID()
+        let memberDeck = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "INSERT INTO decks VALUES (?, '归属牌组', 0, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(homeDeck)]
+            )
+            try db.execute(
+                sql: "INSERT INTO decks VALUES (?, '成员牌组', 1, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(memberDeck)]
+            )
+        }
+        let vocabulary = Self.vocabulary(id: "openjlpt:N5:000101", headword: "飲む")
+
+        let result = try await importer.importVocabulary(
+            vocabulary,
+            deckID: homeDeck,
+            deckIDs: [homeDeck, memberDeck],
+            meaningZH: "喝",
+            directions: [.japaneseToChinese]
+        )
+        XCTAssertEqual(result.imported, 1)
+        XCTAssertEqual(result.deckID, homeDeck)
+
+        let rows = try await database.pool.read { db in
+            (
+                try Row.fetchAll(
+                    db,
+                    sql: "SELECT deck_id FROM note_decks"
+                ).compactMap { try? DatabaseValueCodec.decodeUUID($0["deck_id"]) },
+                try String.fetchOne(
+                    db,
+                    sql: "SELECT deck_id FROM notes WHERE source_ref = ?",
+                    arguments: [vocabulary.id]
+                ).flatMap { try? DatabaseValueCodec.decodeUUID($0) }
+            )
+        }
+        XCTAssertEqual(Set(rows.0), [homeDeck, memberDeck])
+        XCTAssertEqual(rows.1, homeDeck)
+    }
+
+    func testSingleImportMissingMemberDeckWritesNothing() async throws {
+        let location = try JLPTTestLocation()
+        defer { location.remove() }
+        let database = try OboeDatabase(path: location.userDatabaseURL.path)
+        let importer = GRDBJLPTImporter(database: database)
+        let homeDeck = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "INSERT INTO decks VALUES (?, '归属牌组', 0, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(homeDeck)]
+            )
+        }
+        let vocabulary = Self.vocabulary(id: "openjlpt:N5:000102", headword: "見る")
+
+        do {
+            _ = try await importer.importVocabulary(
+                vocabulary,
+                deckID: homeDeck,
+                deckIDs: [homeDeck, UUID()],
+                meaningZH: "看",
+                directions: [.japaneseToChinese]
+            )
+            XCTFail("Expected missing member deck to abort the import")
+        } catch {
+            XCTAssertEqual(error as? JLPTImportError, .deckNotFound)
+        }
+        let counts = try await database.pool.read { db in
+            (
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? -1,
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM note_decks") ?? -1
+            )
+        }
+        XCTAssertEqual(counts.0, 0)
+        XCTAssertEqual(counts.1, 0)
+    }
+
     func testLevelImportUsesBatchesCreatesOneDeckAndCanResumeWithoutDuplicates() async throws {
         let location = try JLPTTestLocation()
         defer { location.remove() }

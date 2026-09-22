@@ -571,6 +571,7 @@ private final class TodayQueueFixture: @unchecked Sendable {
                     "Queue \(sequence)", sequence, sequence
                 ]
             )
+            try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
         }
         return id
     }
@@ -632,6 +633,23 @@ private final class TodayQueueFixture: @unchecked Sendable {
                 sql: "UPDATE notes SET deck_id = ? WHERE id = (SELECT note_id FROM cards WHERE id = ?)",
                 arguments: [DatabaseValueCodec.encode(deckID), DatabaseValueCodec.encode(cardID)]
             )
+            // 移动语义 = 成员关系折叠为目标牌组（home∈membership）。
+            if try db.tableExists("note_decks") {
+                try db.execute(
+                    sql: """
+                        DELETE FROM note_decks
+                        WHERE note_id = (SELECT note_id FROM cards WHERE id = ?)
+                        """,
+                    arguments: [DatabaseValueCodec.encode(cardID)]
+                )
+                try db.execute(
+                    sql: """
+                        INSERT INTO note_decks(note_id, deck_id, added_at_ms)
+                        VALUES ((SELECT note_id FROM cards WHERE id = ?), ?, 1)
+                        """,
+                    arguments: [DatabaseValueCodec.encode(cardID), DatabaseValueCodec.encode(deckID)]
+                )
+            }
         }
     }
 

@@ -410,6 +410,7 @@ private func insertLifecycleNote(
             reading
         ]
     )
+    try insertHomeMembershipIfSupported(noteID: id, deckID: deckID, in: db)
 }
 
 private func insertLifecyclePrerequisites(

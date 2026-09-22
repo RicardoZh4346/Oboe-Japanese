@@ -7,7 +7,10 @@ public enum KnowledgePointKind: String, Codable, Hashable, Sendable {
 
 public struct KnowledgePointSummary: Equatable, Identifiable, Sendable {
     public let id: UUID
+    /// 归属（home）牌组；成员全集见 `deckIDs`。
     public let deckID: UUID
+    /// 该 Note 的全部成员牌组；始终包含 `deckID`。
+    public let deckIDs: Set<UUID>
     public let kind: KnowledgePointKind
     public let headword: String
     public let reading: String?
@@ -23,10 +26,12 @@ public struct KnowledgePointSummary: Equatable, Identifiable, Sendable {
         reading: String?,
         meaningZH: String,
         usage: String?,
-        isFavorite: Bool
+        isFavorite: Bool,
+        deckIDs: Set<UUID>? = nil
     ) {
         self.id = id
         self.deckID = deckID
+        self.deckIDs = (deckIDs ?? [deckID]).union([deckID])
         self.kind = kind
         self.headword = headword
         self.reading = reading
@@ -115,6 +120,17 @@ public enum KnowledgeTagValidationError: Error, Equatable, Sendable {
 
 public protocol KnowledgePointRepository: Sendable {
     func fetchKnowledgePointSummaries(deckID: UUID) async throws -> [KnowledgePointSummary]
+    /// 读取 Note 的成员关系（home + 全部成员牌组）；Note 不存在时返回 nil。
+    func fetchDeckMembership(noteID: UUID) async throws -> NoteDeckMembership?
+    /// 原子替换成员关系：校验 Note/牌组存在性与 home∈members，同事务内
+    /// 插入缺失成员、删除移除成员、更新 `notes.deck_id` 与 `updated_at_ms`。
+    /// 任一步失败时整体回滚。
+    func replaceDeckMembership(
+        noteID: UUID,
+        deckIDs: Set<UUID>,
+        homeDeckID: UUID,
+        at date: Date
+    ) async throws -> NoteDeckMembership
     func fetchFavoriteSummaries() async throws -> [KnowledgePointSummary]
     func fetchDuplicateSummaries(
         kind: KnowledgePointKind,
@@ -151,6 +167,25 @@ public struct KnowledgePointService: Sendable {
 
     public func fetchSummaries(deckID: UUID) async throws -> [KnowledgePointSummary] {
         try await repository.fetchKnowledgePointSummaries(deckID: deckID)
+    }
+
+    public func fetchMembership(noteID: UUID) async throws -> NoteDeckMembership? {
+        try await repository.fetchDeckMembership(noteID: noteID)
+    }
+
+    /// 以给定成员集合与 home 牌组原子替换 Note 的成员关系。
+    @discardableResult
+    public func replaceMembership(
+        noteID: UUID,
+        deckIDs: Set<UUID>,
+        homeDeckID: UUID
+    ) async throws -> NoteDeckMembership {
+        try await repository.replaceDeckMembership(
+            noteID: noteID,
+            deckIDs: deckIDs,
+            homeDeckID: homeDeckID,
+            at: now()
+        )
     }
 
     public func fetchFavorites() async throws -> [KnowledgePointSummary] {

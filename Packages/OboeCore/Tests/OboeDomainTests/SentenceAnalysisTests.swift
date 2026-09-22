@@ -20,13 +20,15 @@ final class SentenceAnalysisTests: XCTestCase {
             }
         )
 
-        XCTAssertEqual(result.promptVersion, "oboe-sentence-analysis-v1")
+        XCTAssertEqual(result.promptVersion, "oboe-sentence-analysis-v2")
         XCTAssertEqual(result.translationZH, "你去过日本吗？")
         XCTAssertEqual(result.items.map(\.kind), [.particle, .vocabulary, .grammar])
         XCTAssertEqual(result.items[0].surface, "に")
         XCTAssertEqual(result.items[0].alignedRanges, [.init(lowerBound: 2, upperBound: 3)])
         XCTAssertEqual(result.items[1].canonicalForm, "行く")
         XCTAssertEqual(result.items[1].suggestedCard?.headword, "行く")
+        XCTAssertEqual(result.items[1].suggestedCard?.partOfSpeech, "五段动词 / 自动词")
+        XCTAssertEqual(result.items[1].suggestedCard?.pitchAccent, PitchAccent(rawValue: 0))
         XCTAssertEqual(
             result.items[2].alignedRanges,
             [.init(lowerBound: 3, upperBound: 6), .init(lowerBound: 6, upperBound: 13)]
@@ -35,7 +37,7 @@ final class SentenceAnalysisTests: XCTestCase {
 
     func testRepeatedCrossFragmentAndUnalignedItemsRemainReadableWithoutFalseRanges() throws {
         let sentence = "雨が降ると、雨が好きになる。"
-        let json = #"{"schemaVersion":1,"sentence":"雨が降ると、雨が好きになる。","translationZH":"下雨时会变得喜欢雨。","explanationZH":"用于验证重复片段。","items":[{"kind":"vocabulary","surface":"雨","canonicalForm":"雨","reading":"あめ","meaningZH":"雨","roleZH":"第一次出现","spans":[{"text":"雨","occurrence":1}],"cardDraft":null},{"kind":"vocabulary","surface":"雨","canonicalForm":"雨","reading":"あめ","meaningZH":"雨","roleZH":"第二次出现","spans":[{"text":"雨","occurrence":2}],"cardDraft":null},{"kind":"grammar","surface":"～と～なる","canonicalForm":"～と～なる","reading":"","meaningZH":"一……就变得……","roleZH":"跨片段结构","spans":[{"text":"と","occurrence":1},{"text":"になる","occurrence":1}],"cardDraft":null},{"kind":"expression","surface":"未对齐表达","canonicalForm":"未对齐表达","reading":"","meaningZH":"仍可阅读","roleZH":"模型片段不存在","spans":[{"text":"雪","occurrence":1}],"cardDraft":null}],"warnings":[]}"#
+        let json = #"{"schemaVersion":2,"sentence":"雨が降ると、雨が好きになる。","translationZH":"下雨时会变得喜欢雨。","explanationZH":"用于验证重复片段。","items":[{"kind":"vocabulary","surface":"雨","canonicalForm":"雨","reading":"あめ","meaningZH":"雨","roleZH":"第一次出现","spans":[{"text":"雨","occurrence":1}],"cardDraft":null},{"kind":"vocabulary","surface":"雨","canonicalForm":"雨","reading":"あめ","meaningZH":"雨","roleZH":"第二次出现","spans":[{"text":"雨","occurrence":2}],"cardDraft":null},{"kind":"grammar","surface":"～と～なる","canonicalForm":"～と～なる","reading":"","meaningZH":"一……就变得……","roleZH":"跨片段结构","spans":[{"text":"と","occurrence":1},{"text":"になる","occurrence":1}],"cardDraft":null},{"kind":"expression","surface":"未对齐表达","canonicalForm":"未对齐表达","reading":"","meaningZH":"仍可阅读","roleZH":"模型片段不存在","spans":[{"text":"雪","occurrence":1}],"cardDraft":null}],"warnings":[]}"#
         let result = try SentenceAnalysisDecoder.decode(
             json,
             sourceInput: .init(sentence: sentence)
@@ -53,7 +55,7 @@ final class SentenceAnalysisTests: XCTestCase {
         let input = SentenceAnalysisInput(sentence: Self.sentence)
         let failures: [(String, SentenceAnalysisError)] = [
             (Self.fixedJSON.replacingOccurrences(of: #""warnings":[]}"#, with: #""warnings":[],"extra":1}"#), .unexpectedFields),
-            (Self.fixedJSON.replacingOccurrences(of: #""schemaVersion":1"#, with: #""schemaVersion":2"#), .unsupportedSchemaVersion),
+            (Self.fixedJSON.replacingOccurrences(of: #""schemaVersion":2"#, with: #""schemaVersion":1"#), .unsupportedSchemaVersion),
             (Self.fixedJSON.replacingOccurrences(of: Self.sentence, with: "日本へ行きますか。"), .sentenceMismatch),
             (Self.fixedJSON.replacingOccurrences(of: #""kind":"particle""#, with: #""kind":"unknown""#), .invalidItemKind),
             (Self.fixedJSON.replacingOccurrences(of: #""occurrence":1"#, with: #""occurrence":0"#), .invalidOccurrence),
@@ -67,6 +69,21 @@ final class SentenceAnalysisTests: XCTestCase {
         XCTAssertThrowsError(
             try SentenceAnalysisDecoder.validated(.init(sentence: String(repeating: "日", count: 1_001)))
         ) { XCTAssertEqual($0 as? SentenceAnalysisError, .sentenceTooLong) }
+    }
+
+    func testV2RejectsUnknownPartsInvalidPitchAndGrammarPitch() throws {
+        let input = SentenceAnalysisInput(sentence: Self.sentence)
+        let failures: [(String, SentenceAnalysisError)] = [
+            (Self.fixedJSON.replacingOccurrences(of: #"["五段动词","自动词"]"#, with: #"["未知词性"]"#), .invalidPartOfSpeech("未知词性")),
+            (Self.fixedJSON.replacingOccurrences(of: #""pitchAccent":0"#, with: #""pitchAccent":-1"#), .invalidPitchAccent),
+            (Self.fixedJSON.replacingOccurrences(of: #""pitchAccent":0"#, with: #""pitchAccent":3"#), .invalidPitchAccent),
+            (Self.fixedJSON.replacingOccurrences(of: #""partsOfSpeech":[],"pitchAccent":null,"usage":"接在地点后""#, with: #""partsOfSpeech":[],"pitchAccent":0,"usage":"接在地点后""#), .invalidPitchAccent)
+        ]
+        for (json, expected) in failures {
+            XCTAssertThrowsError(try SentenceAnalysisDecoder.decode(json, sourceInput: input)) {
+                XCTAssertEqual($0 as? SentenceAnalysisError, expected)
+            }
+        }
     }
 
     func testServiceUsesCurrentBindingAndPersistsOnlyExplicitDraft() async throws {
@@ -124,7 +141,7 @@ final class SentenceAnalysisTests: XCTestCase {
 
 private extension SentenceAnalysisTests {
     static let sentence = "日本に行ったことがありますか。"
-    static let fixedJSON = #"{"schemaVersion":1,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"目的地を示す助词","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"に","meaningZH":"表示移动目的地","partOfSpeech":"","usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"谓语「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partOfSpeech":"五段动词","usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partOfSpeech":"","usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}}],"warnings":[]}"#
+    static let fixedJSON = #"{"schemaVersion":2,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"目的地を示す助词","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"","meaningZH":"表示移动目的地","partsOfSpeech":[],"pitchAccent":null,"usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"谓语「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partsOfSpeech":["五段动词","自动词"],"pitchAccent":0,"usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partsOfSpeech":[],"pitchAccent":null,"usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}}],"warnings":[]}"#
 }
 
 private actor FixedSentenceAnalysisClient: SentenceAnalysisClient {
