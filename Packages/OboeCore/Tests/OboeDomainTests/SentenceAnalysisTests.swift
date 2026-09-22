@@ -134,7 +134,7 @@ final class SentenceAnalysisTests: XCTestCase {
         XCTAssertEqual(restoredDraft, draft)
         let captured = await client.captured()
         XCTAssertEqual(captured?.0.sentence, Self.sentence)
-        XCTAssertEqual(captured?.1, configuration)
+        XCTAssertEqual(captured?.1, configuration.resolved)
         XCTAssertEqual(captured?.2, "fixture-key")
     }
 }
@@ -146,20 +146,20 @@ private extension SentenceAnalysisTests {
 
 private actor FixedSentenceAnalysisClient: SentenceAnalysisClient {
     let response: String
-    private var lastCaptured: (SentenceAnalysisInput, AIConfiguration, String)?
+    private var lastCaptured: (SentenceAnalysisInput, ResolvedAIConfiguration, String)?
 
     init(response: String) { self.response = response }
 
     func analyze(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) -> String {
         lastCaptured = (input, configuration, credential)
         return response
     }
 
-    func captured() -> (SentenceAnalysisInput, AIConfiguration, String)? { lastCaptured }
+    func captured() -> (SentenceAnalysisInput, ResolvedAIConfiguration, String)? { lastCaptured }
 }
 
 private actor MemorySentenceDraftRepository: SentenceAnalysisDraftRepository {

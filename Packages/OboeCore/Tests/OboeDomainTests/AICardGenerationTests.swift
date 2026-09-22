@@ -168,7 +168,7 @@ final class AICardGenerationTests: XCTestCase {
         XCTAssertEqual(candidate.requestID, input.requestID)
         let captured = await client.captured()
         XCTAssertEqual(captured?.0, try AICardOutputDecoder.validated(input))
-        XCTAssertEqual(captured?.1, configuration)
+        XCTAssertEqual(captured?.1, configuration.resolved)
         XCTAssertEqual(captured?.2, "fixture-key")
     }
 }
@@ -199,7 +199,7 @@ private struct FixedCredentialStore: AICredentialStore {
 
 private actor FixedCardClient: AICardGenerationClient {
     let content: String
-    private var lastCaptured: (AICardGenerationInput, AIConfiguration, String)?
+    private var lastCaptured: (AICardGenerationInput, ResolvedAIConfiguration, String)?
 
     init(content: String) {
         self.content = content
@@ -207,12 +207,12 @@ private actor FixedCardClient: AICardGenerationClient {
 
     func generate(
         input: AICardGenerationInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         lastCaptured = (input, configuration, credential)
         return content
     }
 
-    func captured() -> (AICardGenerationInput, AIConfiguration, String)? { lastCaptured }
+    func captured() -> (AICardGenerationInput, ResolvedAIConfiguration, String)? { lastCaptured }
 }

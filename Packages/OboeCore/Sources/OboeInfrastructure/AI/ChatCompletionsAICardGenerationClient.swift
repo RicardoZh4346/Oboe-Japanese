@@ -17,7 +17,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
 
     public func generate(
         input: AICardGenerationInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         let request = try makeRequest(
@@ -66,7 +66,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
 
     private func makeRequest(
         input: AICardGenerationInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) throws -> URLRequest {
         guard !credential.isEmpty,
@@ -92,7 +92,7 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
 
     static func requestBody(
         input: AICardGenerationInput,
-        configuration: AIConfiguration
+        configuration: ResolvedAIConfiguration
     ) throws -> Data {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [

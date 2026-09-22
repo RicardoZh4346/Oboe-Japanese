@@ -17,7 +17,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
 
     public func analyze(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         let request = try makeRequest(
@@ -60,7 +60,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
 
     private func makeRequest(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) throws -> URLRequest {
         guard !credential.isEmpty,
@@ -86,7 +86,7 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
 
     static func requestBody(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration
+        configuration: ResolvedAIConfiguration
     ) throws -> Data {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [

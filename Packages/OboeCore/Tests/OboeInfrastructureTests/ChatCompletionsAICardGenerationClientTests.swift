@@ -186,8 +186,8 @@ final class ChatCompletionsAICardGenerationClientTests: XCTestCase {
 private extension ChatCompletionsAICardGenerationClientTests {
     static let vocabularyJSON = #"{"schemaVersion":2,"kind":"vocabulary","headword":"食べる","reading":"たべる","meaningZH":"吃","partsOfSpeech":["一段动词","他动词"],"pitchAccent":2,"jlpt":"N5","examples":[{"japanese":"毎朝パンを食べます。","translationZH":"我每天早上吃面包。"}],"notes":"","warnings":[]}"#
 
-    static func configuration(mode: AIResponseFormatMode) -> AIConfiguration {
-        AIConfiguration(
+    static func configuration(mode: AIResponseFormatMode) -> ResolvedAIConfiguration {
+        ResolvedAIConfiguration(
             isEnabled: true,
             serviceKind: .custom,
             serviceName: "Fixture",

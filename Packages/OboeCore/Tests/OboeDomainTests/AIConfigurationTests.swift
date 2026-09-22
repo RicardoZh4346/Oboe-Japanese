@@ -67,6 +67,7 @@ final class AIConfigurationTests: XCTestCase {
 
         var deepSeek = AIConfigurationDraft.deepSeekDefault
         deepSeek.isEnabled = true
+        deepSeek.modelID = "deepseek-v4-pro"
         let configured = try await service.save(
             deepSeek,
             apiKey: "  sk-private-value  ",
@@ -141,6 +142,7 @@ final class AIConfigurationTests: XCTestCase {
         )
         var draft = AIConfigurationDraft.deepSeekDefault
         draft.isEnabled = true
+        draft.modelID = "deepseek-v4-pro"
         let configured = try await service.save(
             draft,
             apiKey: "secret",
@@ -156,6 +158,120 @@ final class AIConfigurationTests: XCTestCase {
             for: configured.configuration.credentialReference
         )
         XCTAssertNil(deletedKey)
+    }
+
+    func testDraftWithoutModelIsValidButNotExecutable() throws {
+        var draft = AIConfigurationDraft.deepSeekDefault
+        draft.isEnabled = false
+
+        let configuration = try AIConfigurationValidator.validate(draft, credentialID: UUID())
+        XCTAssertNil(configuration.modelID)
+        XCTAssertNil(configuration.resolved)
+        XCTAssertThrowsError(try configuration.requireResolved()) {
+            XCTAssertEqual($0 as? AIConfigurationError, .modelIDRequired)
+        }
+        XCTAssertThrowsError(
+            try AIConfigurationValidator.resolve(draft, credentialID: UUID())
+        ) {
+            XCTAssertEqual($0 as? AIConfigurationError, .modelIDRequired)
+        }
+
+        draft.modelID = "   "
+        let stillEmpty = try AIConfigurationValidator.validate(draft, credentialID: UUID())
+        XCTAssertNil(stillEmpty.modelID)
+
+        draft.modelID = "deepseek-v4-pro"
+        let resolved = try AIConfigurationValidator.resolve(draft, credentialID: UUID())
+        XCTAssertEqual(resolved.modelID, "deepseek-v4-pro")
+        XCTAssertEqual(resolved.serviceKind, .deepSeek)
+    }
+
+    func testSaveAllowsDisabledDraftWithoutModelButRejectsEnabledOne() async throws {
+        let initial = try AIConfigurationValidator.validate(
+            .deepSeekDefault,
+            credentialID: UUID()
+        )
+        let repository = FakeAIConfigurationRepository(configuration: initial)
+        let credentials = FakeAICredentialStore()
+        let service = AIConfigurationService(
+            repository: repository,
+            credentialStore: credentials
+        )
+
+        // 禁用状态下保存「供应商已选、模型未选」是合法的。
+        let disabled = try await service.save(
+            .deepSeekDefault,
+            apiKey: "sk-x",
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertNil(disabled.configuration.modelID)
+        XCTAssertTrue(disabled.hasAPIKey)
+
+        var enabledNoModel = AIConfigurationDraft.deepSeekDefault
+        enabledNoModel.isEnabled = true
+        do {
+            _ = try await service.save(
+                enabledNoModel,
+                apiKey: nil,
+                defaultTimeZoneID: "Asia/Shanghai"
+            )
+            XCTFail("启用 AI 必须先选择模型")
+        } catch let error as AIConfigurationError {
+            XCTAssertEqual(error, .modelIDRequired)
+        }
+    }
+
+    func testHostChangeRebindsCredentialEvenWithinSameServiceKind() async throws {
+        let initial = try AIConfigurationValidator.validate(
+            .deepSeekDefault,
+            credentialID: UUID()
+        )
+        let repository = FakeAIConfigurationRepository(configuration: initial)
+        let credentials = FakeAICredentialStore()
+        let service = AIConfigurationService(
+            repository: repository,
+            credentialStore: credentials
+        )
+
+        let hostA = AIConfigurationDraft(
+            isEnabled: true,
+            serviceKind: .custom,
+            serviceName: "服务A",
+            baseURL: "https://a.example/v1",
+            modelID: "m"
+        )
+        let configured = try await service.save(
+            hostA,
+            apiKey: "key-a",
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+
+        var hostB = hostA
+        hostB.baseURL = "https://b.example/v1"
+        do {
+            _ = try await service.save(
+                hostB,
+                apiKey: nil,
+                defaultTimeZoneID: "Asia/Shanghai"
+            )
+            XCTFail("host 变化必须要求重新输入 Key")
+        } catch let error as AIConfigurationError {
+            XCTAssertEqual(error, .apiKeyRequired)
+        }
+
+        let switched = try await service.save(
+            hostB,
+            apiKey: "key-b",
+            defaultTimeZoneID: "Asia/Shanghai"
+        )
+        XCTAssertNotEqual(
+            switched.configuration.credentialReference.id,
+            configured.configuration.credentialReference.id
+        )
+        let oldKey = await credentials.credential(
+            for: configured.configuration.credentialReference
+        )
+        XCTAssertNil(oldKey)
     }
 }
 
