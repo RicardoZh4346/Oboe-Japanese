@@ -6,18 +6,24 @@ import OboeDomain
 /// credentials live in the Authorization header, never in the payload. The
 /// raw model output is returned untouched; `AIRepairOutputDecoder` is the
 /// only consumer allowed to type it.
+///
+/// 线协议差异由 adapter 收敛（Anthropic Messages / OpenAI Chat Completions）；
+/// 共享的发送、状态码、取消与响应上限语义在 `AIRequestExecutor`。
 public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
-    static let maximumResponseBytes = 256 * 1_024
+    static let maximumResponseBytes = AIHTTPSupport.defaultMaximumResponseBytes
     static let maximumOutputTokens = 4_000
 
-    private let transport: any AIHTTPTransport
+    private let executor: AIRequestExecutor
 
     public init() {
-        transport = URLSessionAIHTTPTransport(timeout: ChatCompletionsAIConnectionClient.timeout)
+        self.init(transport: URLSessionAIHTTPTransport(timeout: AIHTTPSupport.executionTimeout))
     }
 
     init(transport: any AIHTTPTransport) {
-        self.transport = transport
+        executor = AIRequestExecutor(
+            transport: transport,
+            maximumResponseBytes: Self.maximumResponseBytes
+        )
     }
 
     public func analyze(
@@ -25,109 +31,39 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
         configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
-        let request = try makeRequest(
-            context: context,
+        try await executor.run(
+            Self.exchange(for: context, configuration: configuration),
             configuration: configuration,
             credential: credential
         )
-        let response: AIHTTPResponse
-        do {
-            try Task.checkCancellation()
-            response = try await transport.send(request)
-            try Task.checkCancellation()
-        } catch is CancellationError {
-            throw AIConnectionError.cancelled
-        } catch let error as AIConnectionError {
-            throw error
-        } catch let error as URLError {
-            throw ChatCompletionsAIConnectionClient.map(error)
-        } catch {
-            throw AIConnectionError.connectionFailed
-        }
-
-        try ChatCompletionsAIConnectionClient.validateStatus(response)
-        guard response.body.count <= Self.maximumResponseBytes else {
-            throw AIConnectionError.responseTooLarge
-        }
-        let envelope: ChatCompletionEnvelope
-        do {
-            envelope = try JSONDecoder().decode(ChatCompletionEnvelope.self, from: response.body)
-        } catch {
-            throw AIConnectionError.malformedResponse
-        }
-        guard let choice = envelope.choices.first else {
-            throw AIConnectionError.emptyResponse
-        }
-        if choice.finishReason == "length" {
-            throw AIConnectionError.truncatedResponse
-        }
-        guard choice.finishReason == "stop" else {
-            throw AIConnectionError.malformedResponse
-        }
-        let content = choice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { throw AIConnectionError.emptyResponse }
-        return content
     }
 
-    private func makeRequest(
-        context: AIRepairRequestContext,
-        configuration: ResolvedAIConfiguration,
-        credential: String
-    ) throws -> URLRequest {
-        guard !credential.isEmpty,
-              credential.unicodeScalars.allSatisfy({
-                  !CharacterSet.controlCharacters.contains($0)
-              }) else {
-            throw AIConnectionError.invalidCredential
-        }
-        var request = URLRequest(
-            url: ChatCompletionsAIConnectionClient.chatCompletionsEndpoint(
-                baseURL: configuration.baseURL
-            ),
-            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-            timeoutInterval: ChatCompletionsAIConnectionClient.timeout
+    /// 协议无关的修卡请求描述：白名单上下文 JSON + v2 提示词契约。
+    static func exchange(
+        for context: AIRepairRequestContext,
+        configuration: ResolvedAIConfiguration
+    ) throws -> AIMessageExchange {
+        AIMessageExchange(
+            systemPrompt: AIRepairPromptV2.systemInstruction(),
+            userPrompt: try AIRepairRequestEncoder.encode(context),
+            maximumOutputTokens: maximumOutputTokens,
+            outputContract: AIOutputContract(
+                mode: configuration.responseFormatMode,
+                schemaName: "oboe_ai_repair_v2",
+                schema: outputSchema()
+            )
         )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try Self.requestBody(context: context, configuration: configuration)
-        return request
     }
 
+    /// OpenAI Chat Completions 线格式的请求体（既有测试/调试入口）。
     static func requestBody(
         context: AIRepairRequestContext,
         configuration: ResolvedAIConfiguration
     ) throws -> Data {
-        let userContent = try AIRepairRequestEncoder.encode(context)
-        var body: [String: Any] = [
-            "model": configuration.modelID,
-            "messages": [
-                [
-                    "role": "system",
-                    "content": AIRepairPromptV2.systemInstruction()
-                ],
-                ["role": "user", "content": userContent]
-            ],
-            "max_tokens": maximumOutputTokens,
-            "stream": false
-        ]
-        switch configuration.responseFormatMode {
-        case .jsonSchema:
-            body["response_format"] = [
-                "type": "json_schema",
-                "json_schema": [
-                    "name": "oboe_ai_repair_v2",
-                    "strict": true,
-                    "schema": outputSchema()
-                ]
-            ]
-        case .jsonObject:
-            body["response_format"] = ["type": "json_object"]
-        case .promptedJSON:
-            break
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        try OpenAIChatCompletionsAdapter().requestBody(
+            for: exchange(for: context, configuration: configuration),
+            configuration: configuration
+        )
     }
 
     /// Strict JSON-schema mirror of the v2 response contract — every property

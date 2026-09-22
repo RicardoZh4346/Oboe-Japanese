@@ -1,18 +1,24 @@
 import Foundation
 import OboeDomain
 
+/// 句子分析入口。共享管线（adapter 分发、发送、状态码、响应上限、取消）
+/// 在 `AIRequestExecutor`；本类型只负责把输入翻译成 `AIMessageExchange`，
+/// 原始模型文本交给 `SentenceAnalysisDecoder`。
 public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sendable {
-    static let maximumResponseBytes = 256 * 1_024
+    static let maximumResponseBytes = AIHTTPSupport.defaultMaximumResponseBytes
     static let maximumOutputTokens = 4_000
 
-    private let transport: any AIHTTPTransport
+    private let executor: AIRequestExecutor
 
     public init() {
-        transport = URLSessionAIHTTPTransport(timeout: ChatCompletionsAIConnectionClient.timeout)
+        self.init(transport: URLSessionAIHTTPTransport(timeout: AIHTTPSupport.executionTimeout))
     }
 
     init(transport: any AIHTTPTransport) {
-        self.transport = transport
+        executor = AIRequestExecutor(
+            transport: transport,
+            maximumResponseBytes: Self.maximumResponseBytes
+        )
     }
 
     public func analyze(
@@ -20,74 +26,18 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
         configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
-        let request = try makeRequest(
-            input: input,
+        try await executor.run(
+            Self.exchange(for: input, configuration: configuration),
             configuration: configuration,
             credential: credential
         )
-        let response: AIHTTPResponse
-        do {
-            try Task.checkCancellation()
-            response = try await transport.send(request)
-            try Task.checkCancellation()
-        } catch is CancellationError {
-            throw AIConnectionError.cancelled
-        } catch let error as AIConnectionError {
-            throw error
-        } catch let error as URLError {
-            throw ChatCompletionsAIConnectionClient.map(error)
-        } catch {
-            throw AIConnectionError.connectionFailed
-        }
-
-        try ChatCompletionsAIConnectionClient.validateStatus(response)
-        guard response.body.count <= Self.maximumResponseBytes else {
-            throw AIConnectionError.responseTooLarge
-        }
-        let envelope: ChatCompletionEnvelope
-        do {
-            envelope = try JSONDecoder().decode(ChatCompletionEnvelope.self, from: response.body)
-        } catch {
-            throw AIConnectionError.malformedResponse
-        }
-        guard let choice = envelope.choices.first else { throw AIConnectionError.emptyResponse }
-        if choice.finishReason == "length" { throw AIConnectionError.truncatedResponse }
-        guard choice.finishReason == "stop" else { throw AIConnectionError.malformedResponse }
-        let content = choice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { throw AIConnectionError.emptyResponse }
-        return content
     }
 
-    private func makeRequest(
-        input: SentenceAnalysisInput,
-        configuration: ResolvedAIConfiguration,
-        credential: String
-    ) throws -> URLRequest {
-        guard !credential.isEmpty,
-              credential.unicodeScalars.allSatisfy({
-                  !CharacterSet.controlCharacters.contains($0)
-              }) else {
-            throw AIConnectionError.invalidCredential
-        }
-        var request = URLRequest(
-            url: ChatCompletionsAIConnectionClient.chatCompletionsEndpoint(
-                baseURL: configuration.baseURL
-            ),
-            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-            timeoutInterval: ChatCompletionsAIConnectionClient.timeout
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try Self.requestBody(input: input, configuration: configuration)
-        return request
-    }
-
-    static func requestBody(
-        input: SentenceAnalysisInput,
+    /// 协议无关的句子分析请求描述。
+    static func exchange(
+        for input: SentenceAnalysisInput,
         configuration: ResolvedAIConfiguration
-    ) throws -> Data {
+    ) throws -> AIMessageExchange {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [
                 "schemaVersion": SentenceAnalysisPromptV2.schemaVersion,
@@ -98,31 +48,27 @@ public struct ChatCompletionsSentenceAnalysisClient: SentenceAnalysisClient, Sen
         guard let userContent = String(data: userPayload, encoding: .utf8) else {
             throw SentenceAnalysisError.invalidJSON
         }
-        var body: [String: Any] = [
-            "model": configuration.modelID,
-            "messages": [
-                ["role": "system", "content": SentenceAnalysisPromptV2.systemInstruction],
-                ["role": "user", "content": userContent]
-            ],
-            "max_tokens": maximumOutputTokens,
-            "stream": false
-        ]
-        switch configuration.responseFormatMode {
-        case .jsonSchema:
-            body["response_format"] = [
-                "type": "json_schema",
-                "json_schema": [
-                    "name": "oboe_sentence_analysis_v2",
-                    "strict": true,
-                    "schema": outputSchema()
-                ]
-            ]
-        case .jsonObject:
-            body["response_format"] = ["type": "json_object"]
-        case .promptedJSON:
-            break
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        return AIMessageExchange(
+            systemPrompt: SentenceAnalysisPromptV2.systemInstruction,
+            userPrompt: userContent,
+            maximumOutputTokens: maximumOutputTokens,
+            outputContract: AIOutputContract(
+                mode: configuration.responseFormatMode,
+                schemaName: "oboe_sentence_analysis_v2",
+                schema: outputSchema()
+            )
+        )
+    }
+
+    /// OpenAI Chat Completions 线格式的请求体（既有测试/调试入口）。
+    static func requestBody(
+        input: SentenceAnalysisInput,
+        configuration: ResolvedAIConfiguration
+    ) throws -> Data {
+        try OpenAIChatCompletionsAdapter().requestBody(
+            for: exchange(for: input, configuration: configuration),
+            configuration: configuration
+        )
     }
 
     private static func outputSchema() -> [String: Any] {

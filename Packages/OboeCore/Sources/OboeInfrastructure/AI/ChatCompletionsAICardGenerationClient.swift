@@ -1,18 +1,24 @@
 import Foundation
 import OboeDomain
 
+/// AI 制卡入口。共享管线（adapter 分发、发送、状态码、响应上限、取消）
+/// 在 `AIRequestExecutor`；本类型只负责把制卡输入翻译成
+/// `AIMessageExchange`，原始模型文本原样返回给 `AICardOutputDecoder`。
 public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sendable {
-    static let maximumResponseBytes = 256 * 1_024
+    static let maximumResponseBytes = AIHTTPSupport.defaultMaximumResponseBytes
     static let maximumOutputTokens = 1_200
 
-    private let transport: any AIHTTPTransport
+    private let executor: AIRequestExecutor
 
     public init() {
-        transport = URLSessionAIHTTPTransport(timeout: ChatCompletionsAIConnectionClient.timeout)
+        self.init(transport: URLSessionAIHTTPTransport(timeout: AIHTTPSupport.executionTimeout))
     }
 
     init(transport: any AIHTTPTransport) {
-        self.transport = transport
+        executor = AIRequestExecutor(
+            transport: transport,
+            maximumResponseBytes: Self.maximumResponseBytes
+        )
     }
 
     public func generate(
@@ -20,80 +26,18 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
         configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
-        let request = try makeRequest(
-            input: input,
+        try await executor.run(
+            Self.exchange(for: input, configuration: configuration),
             configuration: configuration,
             credential: credential
         )
-        let response: AIHTTPResponse
-        do {
-            try Task.checkCancellation()
-            response = try await transport.send(request)
-            try Task.checkCancellation()
-        } catch is CancellationError {
-            throw AIConnectionError.cancelled
-        } catch let error as AIConnectionError {
-            throw error
-        } catch let error as URLError {
-            throw ChatCompletionsAIConnectionClient.map(error)
-        } catch {
-            throw AIConnectionError.connectionFailed
-        }
-
-        try ChatCompletionsAIConnectionClient.validateStatus(response)
-        guard response.body.count <= Self.maximumResponseBytes else {
-            throw AIConnectionError.responseTooLarge
-        }
-        let envelope: ChatCompletionEnvelope
-        do {
-            envelope = try JSONDecoder().decode(ChatCompletionEnvelope.self, from: response.body)
-        } catch {
-            throw AIConnectionError.malformedResponse
-        }
-        guard let choice = envelope.choices.first else {
-            throw AIConnectionError.emptyResponse
-        }
-        if choice.finishReason == "length" {
-            throw AIConnectionError.truncatedResponse
-        }
-        guard choice.finishReason == "stop" else {
-            throw AIConnectionError.malformedResponse
-        }
-        let content = choice.message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty else { throw AIConnectionError.emptyResponse }
-        return content
     }
 
-    private func makeRequest(
-        input: AICardGenerationInput,
-        configuration: ResolvedAIConfiguration,
-        credential: String
-    ) throws -> URLRequest {
-        guard !credential.isEmpty,
-              credential.unicodeScalars.allSatisfy({
-                  !CharacterSet.controlCharacters.contains($0)
-              }) else {
-            throw AIConnectionError.invalidCredential
-        }
-        var request = URLRequest(
-            url: ChatCompletionsAIConnectionClient.chatCompletionsEndpoint(
-                baseURL: configuration.baseURL
-            ),
-            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
-            timeoutInterval: ChatCompletionsAIConnectionClient.timeout
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(credential)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try Self.requestBody(input: input, configuration: configuration)
-        return request
-    }
-
-    static func requestBody(
-        input: AICardGenerationInput,
+    /// 协议无关的制卡请求描述：schemaVersioned 用户负载 + v2 提示词契约。
+    static func exchange(
+        for input: AICardGenerationInput,
         configuration: ResolvedAIConfiguration
-    ) throws -> Data {
+    ) throws -> AIMessageExchange {
         let userPayload = try JSONSerialization.data(
             withJSONObject: [
                 "schemaVersion": AICardPromptV2.schemaVersion,
@@ -106,34 +50,27 @@ public struct ChatCompletionsAICardGenerationClient: AICardGenerationClient, Sen
         guard let userContent = String(data: userPayload, encoding: .utf8) else {
             throw AICardGenerationError.invalidJSON
         }
-        var body: [String: Any] = [
-            "model": configuration.modelID,
-            "messages": [
-                [
-                    "role": "system",
-                    "content": AICardPromptV2.systemInstruction(for: input.kind)
-                ],
-                ["role": "user", "content": userContent]
-            ],
-            "max_tokens": maximumOutputTokens,
-            "stream": false
-        ]
-        switch configuration.responseFormatMode {
-        case .jsonSchema:
-            body["response_format"] = [
-                "type": "json_schema",
-                "json_schema": [
-                    "name": "oboe_\(input.kind.rawValue)_card_v2",
-                    "strict": true,
-                    "schema": outputSchema(for: input.kind)
-                ]
-            ]
-        case .jsonObject:
-            body["response_format"] = ["type": "json_object"]
-        case .promptedJSON:
-            break
-        }
-        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+        return AIMessageExchange(
+            systemPrompt: AICardPromptV2.systemInstruction(for: input.kind),
+            userPrompt: userContent,
+            maximumOutputTokens: maximumOutputTokens,
+            outputContract: AIOutputContract(
+                mode: configuration.responseFormatMode,
+                schemaName: "oboe_\(input.kind.rawValue)_card_v2",
+                schema: outputSchema(for: input.kind)
+            )
+        )
+    }
+
+    /// OpenAI Chat Completions 线格式的请求体（既有测试/调试入口）。
+    static func requestBody(
+        input: AICardGenerationInput,
+        configuration: ResolvedAIConfiguration
+    ) throws -> Data {
+        try OpenAIChatCompletionsAdapter().requestBody(
+            for: exchange(for: input, configuration: configuration),
+            configuration: configuration
+        )
     }
 
     private static func outputSchema(for kind: AICardGenerationKind) -> [String: Any] {
