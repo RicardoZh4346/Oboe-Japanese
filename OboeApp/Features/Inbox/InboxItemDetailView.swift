@@ -54,6 +54,7 @@ struct InboxItemDetailView: View {
         }
         .background(OboeTheme.Colors.pageBackground)
         .navigationTitle("收集条目")
+        .secondaryPage()
         .sheet(isPresented: $isEditorPresented) {
             NavigationStack {
                 InboxItemEditView(item: item, service: service) { updated in

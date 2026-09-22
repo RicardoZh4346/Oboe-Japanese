@@ -193,6 +193,7 @@ struct VocabularyDetailView: View {
                 ContentUnavailableView("单词已不存在", systemImage: "text.book.closed")
             }
         }
+        .secondaryPage()
         .alert(
             "无法载入单词",
             isPresented: Binding(
@@ -952,6 +953,7 @@ private struct CardHistoryView: View {
         }
         .navigationTitle(history.templateKind.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
     }
 
     private func historyDuration(_ milliseconds: Int) -> String {
@@ -1172,6 +1174,7 @@ struct GrammarDetailView: View {
                 ContentUnavailableView("语法已不存在", systemImage: "text.book.closed")
             }
         }
+        .secondaryPage()
         .alert(
             "无法载入语法",
             isPresented: Binding(

@@ -71,6 +71,7 @@ struct DailyStatisticsView: View {
         }
         .navigationTitle("每日统计")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("刷新", systemImage: "arrow.clockwise") {

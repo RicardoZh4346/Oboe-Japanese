@@ -82,26 +82,7 @@ struct TodayView: View {
                 if model.isLoading, model.plan == nil {
                     ProgressView("正在生成今日计划…")
                 } else if let plan = model.plan {
-                    ScrollView {
-                        VStack(spacing: 18) {
-                            heroCard(plan)
-                            summary(plan.summary)
-                            if let item = pendingContinueItem {
-                                continueCaptureEntry(item)
-                            }
-                            inboxEntry
-                            if model.showsAdaptiveEntry {
-                                adaptiveEntry
-                            }
-                            if let statistics = model.statistics {
-                                todayStatistics(statistics, studyDay: plan.studyDay)
-                            }
-                        }
-                        .padding()
-                    }
-                    .refreshable {
-                        await model.load()
-                    }
+                    home(plan)
                 } else {
                     ContentUnavailableView(
                         "无法载入今日计划",
@@ -175,122 +156,229 @@ struct TodayView: View {
         }
     }
 
-    private func summary(_ summary: TodayStudySummary) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
+    // MARK: - 首页固定布局（v0.5.5 Step 7）
+
+    /// 常规字号下首页无纵向滚动：圆形主 CTA + 紧凑任务文案 + 两枚等宽
+    /// 入口磁贴 + 可选提醒，全部落在首屏内。`ViewThatFits` 按可用高度
+    /// 在 常规/紧凑/迷你 三档间选择（Spacer 只放在外层，不参与测量，
+    /// 保证量到的是真实内容高度）；辅助字号（ax 档）改用可读性优先的
+    /// 纵向滚动备用布局。
+    @ViewBuilder
+    private func home(_ plan: TodayPlan) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView {
+                homeColumn(plan, density: .accessibility)
+                    .padding(.horizontal, OboeTheme.pageHorizontalPadding)
+                    .padding(.vertical, OboeTheme.Spacing.lg)
+                    .frame(maxWidth: .infinity)
+            }
+            .refreshable {
+                await model.load()
+            }
+        } else {
+            GeometryReader { _ in
+                ViewThatFits(in: .vertical) {
+                    homeColumn(plan, density: .regular)
+                    homeColumn(plan, density: .compact)
+                    homeColumn(plan, density: .mini)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, OboeTheme.pageHorizontalPadding)
+                .padding(.vertical, OboeTheme.Spacing.sm)
+            }
+        }
+    }
+
+    /// VoiceOver 顺序即此列顺序：连续天数→开始学习状态→主牌组（圆形
+    /// 按钮内部）→ 今日任务 → 每日统计 → 收集箱 → 可选提醒。
+    private func homeColumn(_ plan: TodayPlan, density: HomeDensity) -> some View {
+        VStack(spacing: density.sectionSpacing) {
+            studyEntry(plan, density: density)
+            compactTaskSummary(plan.summary, density: density)
+            shortcutTiles(plan: plan, density: density)
+            if let item = pendingContinueItem {
+                continueCaptureBanner(item)
+            }
+            if model.showsAdaptiveEntry {
+                adaptiveCapsule
+            }
+        }
+    }
+
+    /// 圆形主 CTA：有可学任务时整圆跳转主牌组 scope（v0.5.5 起不再
+    /// 提供「全部牌组」学习入口）；其余状态为纯展示圆盘，保证内部
+    /// 标识符可被查询。
+    @ViewBuilder
+    private func studyEntry(_ plan: TodayPlan, density: HomeDensity) -> some View {
+        let hero = heroPresentation(plan)
+        if hero.isActionable, let deckID = model.primaryDeckID {
+            NavigationLink(
+                value: StudyScope(
+                    deckID: deckID,
+                    title: model.primaryDeckName ?? "主牌组"
+                )
+            ) {
+                TodayStudyButton(
+                    hero: hero,
+                    streak: model.currentStreak,
+                    primaryDeckName: model.primaryDeckName,
+                    density: density
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("today-start-button")
+        } else {
+            TodayStudyButton(
+                hero: hero,
+                streak: model.currentStreak,
+                primaryDeckName: model.primaryDeckName,
+                density: density
+            )
+        }
+    }
+
+    /// 圆形按钮下的紧凑今日任务文案：标题行 + 五个计数，普通字号
+    /// 一行排开，辅助字号每项独占一行优先可读性。
+    private func compactTaskSummary(
+        _ summary: TodayStudySummary,
+        density: HomeDensity
+    ) -> some View {
+        VStack(spacing: density.isAccessibility ? OboeTheme.Spacing.sm : OboeTheme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline) {
                 Text("今日任务")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("today-summary")
                 Spacer()
                 if let fraction = summary.completionFraction {
                     Text(fraction, format: .percent.precision(.fractionLength(0)))
-                        .font(.headline)
-                        .monospacedDigit()
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                         .accessibilityIdentifier("today-completion-percent")
                 } else {
                     Text("暂无任务")
+                        .font(.caption)
                         .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
                 }
             }
-            if let fraction = summary.completionFraction {
-                ProgressView(value: fraction)
-                    .accessibilityLabel("今日完成比例")
-                    .accessibilityRespondsToUserInteraction(false)
-            }
-            LazyVGrid(columns: summaryColumns, spacing: 12) {
-                SummaryMetric(title: "新词", value: summary.newCount, tint: .blue, identifier: "today-new-count")
-                SummaryMetric(title: "待复习", value: summary.reviewCount, tint: .orange, identifier: "today-review-count")
-                SummaryMetric(title: "学习中", value: summary.learningCount, tint: .purple, identifier: "today-learning-count")
-                SummaryMetric(title: "剩余", value: summary.remainingCount, tint: .indigo, identifier: "today-remaining-count")
-                SummaryMetric(title: "已完成", value: summary.completedCount, tint: .green, identifier: "today-completed-count")
+            if density.isAccessibility {
+                VStack(spacing: OboeTheme.Spacing.xs) {
+                    taskMetricRow("新词", value: summary.newCount, identifier: "today-new-count")
+                    taskMetricRow("待复习", value: summary.reviewCount, identifier: "today-review-count")
+                    taskMetricRow("学习中", value: summary.learningCount, identifier: "today-learning-count")
+                    taskMetricRow("剩余", value: summary.remainingCount, identifier: "today-remaining-count")
+                    taskMetricRow("已完成", value: summary.completedCount, identifier: "today-completed-count")
+                }
+            } else {
+                HStack(spacing: 0) {
+                    taskMetric("新词", value: summary.newCount, identifier: "today-new-count")
+                    taskMetric("待复习", value: summary.reviewCount, identifier: "today-review-count")
+                    taskMetric("学习中", value: summary.learningCount, identifier: "today-learning-count")
+                    taskMetric("剩余", value: summary.remainingCount, identifier: "today-remaining-count")
+                    taskMetric("已完成", value: summary.completedCount, identifier: "today-completed-count")
+                }
             }
         }
-        .padding()
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
-        .accessibilityIdentifier("today-summary")
     }
 
-    private func todayStatistics(
-        _ statistics: TodayReviewStatistics,
-        studyDay: StudyDay
+    private func taskMetric(
+        _ title: String,
+        value: Int,
+        identifier: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("今日统计")
-                    .font(.headline)
-                Spacer()
-                if let streak = model.currentStreak {
-                    Text("连续 \(streak) 天")
-                        .font(.caption.weight(.medium))
-                        .monospacedDigit()
-                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-                        .accessibilityIdentifier("today-streak")
-                }
-                NavigationLink {
-                    DailyStatisticsView(
-                        studyDay: studyDay,
-                        historyService: historyService
-                    )
-                } label: {
-                    // 44×44 最小可点击区域：trailing 对齐保持视觉原位。
-                    Image(systemName: "chevron.right")
-                        .font(.caption.bold())
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 44, height: 44, alignment: .trailing)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityLabel("查看每日统计")
-                .accessibilityIdentifier("today-statistics-entry")
-            }
-            LazyVGrid(columns: statisticColumns, spacing: 12) {
-                StatisticMetric(
-                    title: "今日新学",
-                    value: statistics.newLearnedCount,
-                    identifier: "today-learned-count"
-                )
-                StatisticMetric(
-                    title: "复习次数",
-                    value: statistics.reviewAnswerCount,
-                    identifier: "today-review-answer-count"
-                )
-                StatisticMetric(
-                    title: "回答总数",
-                    value: statistics.answerCount,
-                    identifier: "today-answer-count"
-                )
-            }
-            Divider()
-            LazyVGrid(columns: ratingStatisticColumns, spacing: 8) {
-                ForEach(ReviewRating.allCases, id: \.self) { rating in
-                    VStack(spacing: 4) {
-                        Text(rating.title)
-                            .font(.caption)
-                            .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-                        Text("\(statistics.ratings[rating])")
-                            .font(.headline)
-                            .monospacedDigit()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityIdentifier("today-rating-\(rating.identifier)-count")
-                }
-            }
-            Text(
-                statistics.answerCount == 0
-                    ? "今天还没有有效评分；开始学习后会在这里累计。"
-                    : "统计按有效评分事件计算，已撤销评分不计入。"
-            )
-            .font(.caption)
-            .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+            Text("\(value)")
+                .font(.headline)
+                .monospacedDigit()
+                .accessibilityIdentifier(identifier)
         }
-        .padding()
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
+        .frame(maxWidth: .infinity)
     }
 
-    /// Continue-processing entry for a capture saved with "在 App 中继续" —
-    /// a passive card only: it never navigates by itself, never launches AI,
-    /// and doesn't interrupt other unfinished edits.
-    private func continueCaptureEntry(_ item: InboxItem) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func taskMetricRow(
+        _ title: String,
+        value: Int,
+        identifier: String
+    ) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+            Spacer()
+            Text("\(value)")
+                .font(.headline)
+                .monospacedDigit()
+                .accessibilityIdentifier(identifier)
+        }
+    }
+
+    /// 两枚等宽入口磁贴：每日统计 + 收集箱。辅助字号下纵向堆叠。
+    private func shortcutTiles(plan: TodayPlan, density: HomeDensity) -> some View {
+        let statisticsTile = NavigationLink {
+            DailyStatisticsView(
+                studyDay: plan.studyDay,
+                historyService: historyService
+            )
+        } label: {
+            HomeShortcutTile(
+                title: "每日统计",
+                systemImage: "chart.bar.xaxis",
+                detail: "逐日记录与连续天数"
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("today-statistics-entry")
+
+        let inboxTile = NavigationLink {
+            InboxView(
+                service: inboxService,
+                processingServices: processingServices,
+                inboxImageStore: inboxImageStore,
+                ocrService: ocrService,
+                drainSharedCaptures: drainSharedCaptures,
+                sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
+                importAwaitingSharedCaptures: importAwaitingSharedCaptures
+            )
+        } label: {
+            HomeShortcutTile(
+                title: "收集箱",
+                systemImage: "tray.and.arrow.down",
+                detail: unprocessedInboxCount > 0
+                    ? "\(unprocessedInboxCount) 条待处理"
+                    : "暂无待处理",
+                detailIdentifier: "today-inbox-count"
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            unprocessedInboxCount > 0
+                ? "收集箱，\(unprocessedInboxCount) 条待处理"
+                : "收集箱，暂无待处理"
+        )
+        .accessibilityIdentifier("today-inbox-entry")
+
+        return Group {
+            if density.isAccessibility {
+                VStack(spacing: OboeTheme.Spacing.sm) {
+                    statisticsTile
+                    inboxTile
+                }
+            } else {
+                HStack(alignment: .top, spacing: OboeTheme.Spacing.sm) {
+                    statisticsTile
+                    inboxTile
+                }
+            }
+        }
+    }
+
+    /// 继续处理入口并入收集箱区域（Step 7）：仅当有「在 App 中继续」
+    /// 的分享保存时出现的窄横幅——仍是纯被动入口，点击直达条目详情，
+    /// 不自动导航、不触发 AI，也不打断未完成的编辑。
+    private func continueCaptureBanner(_ item: InboxItem) -> some View {
+        HStack(spacing: OboeTheme.Spacing.xs) {
             NavigationLink {
                 InboxItemDetailView(
                     item: item,
@@ -303,16 +391,25 @@ struct TodayView: View {
                     }
                 )
             } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("继续处理刚保存的内容", systemImage: "arrow.right.circle")
-                        .font(.subheadline.weight(.medium))
+                HStack(spacing: OboeTheme.Spacing.xs) {
+                    Image(systemName: "arrow.right.circle")
+                        .font(.subheadline)
                         .foregroundStyle(OboeTheme.Colors.accent)
-                    Text(item.text)
-                        .font(.caption)
-                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-                        .lineLimit(2)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("继续处理刚保存的内容")
+                            .font(.caption.weight(.medium))
+                        Text(item.text)
+                            .font(.caption2)
+                            .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("today-continue-capture-link")
@@ -322,82 +419,27 @@ struct TodayView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("today-continue-capture-dismiss")
         }
-        .padding()
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
-    }
-
-    private func loadPendingContinueItem() async {
-        guard let id = pendingContinueItemID else {
-            pendingContinueItem = nil
-            return
-        }
-        do {
-            pendingContinueItem = try await inboxService.fetchItem(id: id)
-            if pendingContinueItem == nil {
-                clearPendingContinueItem()
-            }
-        } catch {
-            // Fetch failure hides the entry rather than blocking the page.
-            pendingContinueItem = nil
-        }
-    }
-
-    private var inboxEntry: some View {
-        NavigationLink {
-            InboxView(
-                service: inboxService,
-                processingServices: processingServices,
-                inboxImageStore: inboxImageStore,
-                ocrService: ocrService,
-                drainSharedCaptures: drainSharedCaptures,
-                sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
-                importAwaitingSharedCaptures: importAwaitingSharedCaptures
+        .padding(.leading, OboeTheme.Spacing.md)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(
+            OboeTheme.Colors.cardBackground,
+            in: RoundedRectangle(
+                cornerRadius: OboeTheme.Radius.medium,
+                style: .continuous
             )
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "tray.and.arrow.down")
-                    .font(.headline)
-                    .foregroundStyle(OboeTheme.Colors.accent)
-                    .accessibilityHidden(true)
-                Text("收集箱")
-                    .font(.subheadline.weight(.medium))
-                Spacer()
-                Text(
-                    unprocessedInboxCount > 0
-                        ? "\(unprocessedInboxCount) 条待处理"
-                        : "暂无待处理"
-                )
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-                .accessibilityIdentifier("today-inbox-count")
-                Image(systemName: "chevron.right")
-                    .font(.caption.bold())
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding()
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
-            .contentShape(RoundedRectangle(cornerRadius: 18))
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            unprocessedInboxCount > 0
-                ? "收集箱，\(unprocessedInboxCount) 条待处理"
-                : "收集箱，暂无待处理"
         )
-        .accessibilityIdentifier("today-inbox-entry")
     }
 
-    /// Home entry for the Adaptive center (T03): visible only while enabled
-    /// leech cards exist AND reminders are on; count comes from the same
-    /// snapshot the list page filters, so the number can never disagree.
-    private var adaptiveEntry: some View {
+    /// 易错提醒改为小胶囊（Step 7）：仍是进入易错中心（T03）的唯一
+    /// 首页入口——只在提醒开启且有易错卡时出现；计数与列表页同源，
+    /// 数字不会打架。
+    private var adaptiveCapsule: some View {
         NavigationLink {
             AdaptiveCenterView(
                 service: adaptiveCardService,
@@ -417,14 +459,13 @@ struct TodayView: View {
                 }
             )
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: OboeTheme.Spacing.xs) {
                 Image(systemName: "exclamationmark.arrow.circlepath")
-                    .font(.headline)
+                    .font(.subheadline)
                     .foregroundStyle(.orange)
                     .accessibilityHidden(true)
                 Text("需要关注")
                     .font(.subheadline.weight(.medium))
-                Spacer()
                 Text("\(model.adaptiveLeechCount) 张卡最近经常遗忘")
                     .font(.caption)
                     .monospacedDigit()
@@ -435,14 +476,34 @@ struct TodayView: View {
                     .foregroundStyle(.tertiary)
                     .accessibilityHidden(true)
             }
-            .padding()
-            .background(.background.secondary, in: RoundedRectangle(cornerRadius: 18))
-            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, OboeTheme.Spacing.md)
+            .frame(minHeight: 44)
+            .background(OboeTheme.Colors.cardBackground, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+            }
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("需要关注，\(model.adaptiveLeechCount) 张卡最近经常遗忘")
         .accessibilityIdentifier("today-adaptive-entry")
+    }
+
+    private func loadPendingContinueItem() async {
+        guard let id = pendingContinueItemID else {
+            pendingContinueItem = nil
+            return
+        }
+        do {
+            pendingContinueItem = try await inboxService.fetchItem(id: id)
+            if pendingContinueItem == nil {
+                clearPendingContinueItem()
+            }
+        } catch {
+            // Fetch failure hides the entry rather than blocking the page.
+            pendingContinueItem = nil
+        }
     }
 
     /// T04 edit reflow: the Adaptive detail's edit entry reuses the existing
@@ -506,129 +567,7 @@ struct TodayView: View {
         }
     }
 
-    private var summaryColumns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible()),
-            count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
-        )
-    }
-
-    private var statisticColumns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible()),
-            count: dynamicTypeSize.isAccessibilitySize ? 1 : 3
-        )
-    }
-
-    private var ratingStatisticColumns: [GridItem] {
-        Array(
-            repeating: GridItem(.flexible()),
-            count: dynamicTypeSize.isAccessibilitySize ? 2 : 4
-        )
-    }
-
-    // MARK: - 首屏 Hero（T14，设计 §8.1/§8.3）
-
-    /// Hero 卡即主 CTA：可学任务时整卡跳转主牌组 scope（v0.5.5 起不再
-    /// 提供「全部牌组」学习入口），卡内整合 now/later/完成/等待状态与
-    /// 主牌组一行。无可学任务时退化为纯展示状态卡（不包
-    /// NavigationLink），保证内部标识符可被查询、VoiceOver 按
-    /// 标题→状态→主牌组 顺序朗读。
-    private func heroCard(_ plan: TodayPlan) -> some View {
-        let hero = heroPresentation(plan)
-        return Group {
-            if hero.isActionable, let deckID = model.primaryDeckID {
-                NavigationLink(
-                    value: StudyScope(
-                        deckID: deckID,
-                        title: model.primaryDeckName ?? "主牌组"
-                    )
-                ) {
-                    heroContent(hero)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("today-start-button")
-            } else {
-                heroContent(hero)
-            }
-        }
-    }
-
-    private func heroContent(_ hero: HeroPresentation) -> some View {
-        VStack(alignment: .leading, spacing: OboeTheme.Spacing.sm) {
-            if dynamicTypeSize.isAccessibilitySize {
-                heroIcon(hero)
-                heroTitle(hero)
-                heroStatus(hero)
-            } else {
-                HStack(spacing: OboeTheme.Spacing.md) {
-                    heroIcon(hero)
-                    VStack(alignment: .leading, spacing: OboeTheme.Spacing.xxs) {
-                        heroTitle(hero)
-                        heroStatus(hero)
-                    }
-                    Spacer(minLength: 0)
-                    if hero.isActionable {
-                        Image(systemName: "chevron.right")
-                            .font(.title3.bold())
-                            .foregroundStyle(.white.opacity(0.9))
-                            .accessibilityHidden(true)
-                    }
-                }
-            }
-            Text("主牌组 · \(model.primaryDeckName ?? "未设置")")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(
-                    hero.isActionable ? Color.white : OboeTheme.Colors.secondaryOnCard
-                )
-                .accessibilityIdentifier("today-primary-deck")
-        }
-        .padding(OboeTheme.Spacing.cardPadding)
-        .frame(
-            maxWidth: .infinity,
-            minHeight: 150,
-            alignment: .leading
-        )
-        .background {
-            heroBackground(actionable: hero.isActionable)
-                .clipShape(
-                    RoundedRectangle(
-                        cornerRadius: OboeTheme.Radius.card,
-                        style: .continuous
-                    )
-                )
-        }
-        .contentShape(
-            RoundedRectangle(
-                cornerRadius: OboeTheme.Radius.card,
-                style: .continuous
-            )
-        )
-    }
-
-    private func heroTitle(_ hero: HeroPresentation) -> some View {
-        Text("开始学习")
-            .font(.title.bold())
-            .foregroundStyle(hero.isActionable ? Color.white : Color.primary)
-    }
-
-    /// 状态行：图标与文案同时区分状态（不依赖颜色），
-    /// `statusIdentifier` 保留既有 UI 测试锚点。
-    private func heroStatus(_ hero: HeroPresentation) -> some View {
-        Text(hero.statusText)
-            .font(.subheadline)
-            .foregroundStyle(
-                hero.isActionable ? Color.white : OboeTheme.Colors.secondaryOnCard
-            )
-            .accessibilityIdentifier(hero.statusIdentifier)
-    }
-
-    private func heroIcon(_ hero: HeroPresentation) -> some View {
-        Image(systemName: hero.icon)
-            .font(.system(size: 44, weight: .semibold))
-            .foregroundStyle(hero.isActionable ? Color.white : hero.iconTint)
-            .accessibilityHidden(true)
-    }
+    // MARK: - 圆形主 CTA 状态（T14 设计 §8.1/§8.3 → Step 7 圆形按钮）
 
     /// 状态优先级：无牌组 > 空主牌组 > 全天完成 > 等待下一批 > 可学习。
     /// v0.5.5 起 CTA 只进入主牌组 scope，任务计数按 `deckIDs` 成员关系
@@ -638,7 +577,8 @@ struct TodayView: View {
         if model.decks.isEmpty {
             return HeroPresentation(
                 icon: "rectangle.stack.badge.plus",
-                statusText: "还没有学习内容，先到「牌组」创建牌组",
+                title: "还没有学习内容",
+                statusText: "先到「牌组」创建牌组",
                 isActionable: false,
                 statusIdentifier: "today-no-decks",
                 iconTint: OboeTheme.Colors.accent
@@ -647,6 +587,7 @@ struct TodayView: View {
         if let primary = model.primaryDeck, primary.isEmpty {
             return HeroPresentation(
                 icon: "rectangle.stack",
+                title: "还没有卡片",
                 statusText: "这个牌组还没有卡片",
                 isActionable: false,
                 statusIdentifier: "today-empty-deck",
@@ -659,6 +600,7 @@ struct TodayView: View {
             if plan.isDayComplete {
                 return HeroPresentation(
                     icon: "checkmark.circle.fill",
+                    title: "今日完成",
                     statusText: "今日任务全部完成，明天 04:00 后生成新计划",
                     isActionable: false,
                     statusIdentifier: "today-day-complete",
@@ -667,6 +609,7 @@ struct TodayView: View {
             }
             return HeroPresentation(
                 icon: "clock",
+                title: "暂无任务",
                 statusText: "主牌组今日没有待学任务",
                 isActionable: false,
                 statusIdentifier: "today-waiting-state",
@@ -677,6 +620,7 @@ struct TodayView: View {
             if let next = scopedLater.first?.dueAt {
                 return HeroPresentation(
                     icon: "clock",
+                    title: "稍后再来",
                     statusText: "当前已完成，\(StudyTimeText.until(next))后还有 \(scopedLater.count) 张",
                     isActionable: false,
                     statusIdentifier: "today-waiting-state",
@@ -685,6 +629,7 @@ struct TodayView: View {
             }
             return HeroPresentation(
                 icon: "clock",
+                title: "暂无任务",
                 statusText: "暂无可学任务",
                 isActionable: false,
                 statusIdentifier: "today-waiting-state",
@@ -693,6 +638,7 @@ struct TodayView: View {
         }
         return HeroPresentation(
             icon: "play.fill",
+            title: "开始学习",
             statusText: "现在 \(scopedNow.count) 张 · 今日完成 \(plan.summary.completedCount)",
             isActionable: true,
             statusIdentifier: "today-hero-ready",
@@ -700,10 +646,214 @@ struct TodayView: View {
         )
     }
 
-    /// 压暗端用黑色叠加而非半透明 accent：白字在渐变任何位置都保持
-    /// ≥4.5:1 对比度（深色模式的 accent 较亮，黑叠层同样生效）。
-    private func heroBackground(actionable: Bool) -> AnyView {
-        guard actionable else {
+}
+
+/// 圆形主 CTA 的展示态（文件级 private，供 TodayView 与
+/// TodayStudyButton 共用）。
+private struct HeroPresentation {
+    let icon: String
+    let title: String
+    let statusText: String
+    let isActionable: Bool
+    let statusIdentifier: String
+    let iconTint: Color
+}
+
+/// 首页布局密度档：`regular` 常规、`compact` 窄屏/较大字号、`mini`
+/// 兜底（保证不裁切）、`accessibility` 辅助字号（ScrollView 备用
+/// 布局，卡片式 CTA 代替圆形）。
+private enum HomeDensity {
+    case regular
+    case compact
+    case mini
+    case accessibility
+
+    var isAccessibility: Bool { self == .accessibility }
+
+    var circleDiameter: CGFloat {
+        switch self {
+        case .regular: 216
+        case .compact: 176
+        case .mini: 148
+        case .accessibility: 0 // 辅助字号不用圆形
+        }
+    }
+
+    var sectionSpacing: CGFloat {
+        switch self {
+        case .regular: OboeTheme.Spacing.xl
+        case .compact: OboeTheme.Spacing.md
+        case .mini: OboeTheme.Spacing.sm
+        case .accessibility: OboeTheme.Spacing.lg
+        }
+    }
+
+    var iconSize: CGFloat {
+        switch self {
+        case .regular: 30
+        case .compact: 26
+        case .mini: 22
+        case .accessibility: 44
+        }
+    }
+}
+
+/// 圆形主 CTA（v0.5.5 Step 7）：整合连续学习天数、开始/等待/完成
+/// 状态与主牌组名。可学习时作为 NavigationLink 的 label 进入主牌组
+/// scope；其余状态为纯展示圆盘。辅助字号下退化为整宽卡片保证可读性。
+/// 圆盘在深浅色下都有明确边界：可操作态为 accent 渐变，其余为卡片
+/// 底色 + 描边。
+private struct TodayStudyButton: View {
+    let hero: HeroPresentation
+    let streak: Int?
+    let primaryDeckName: String?
+    let density: HomeDensity
+
+    private var foreground: Color {
+        hero.isActionable ? .white : .primary
+    }
+
+    private var secondaryForeground: Color {
+        hero.isActionable ? .white.opacity(0.9) : OboeTheme.Colors.secondaryOnCard
+    }
+
+    var body: some View {
+        if density.isAccessibility {
+            cardBody
+        } else {
+            circleBody
+        }
+    }
+
+    /// 圆盘版：自上而下 连续天数 → 图标 → 标题 → 状态 → 主牌组，
+    /// 即 VoiceOver 朗读顺序。
+    private var circleBody: some View {
+        VStack(spacing: OboeTheme.Spacing.xxs) {
+            streakPill
+            Image(systemName: hero.icon)
+                .font(.system(size: density.iconSize, weight: .semibold))
+                .foregroundStyle(hero.isActionable ? .white : hero.iconTint)
+                .accessibilityHidden(true)
+            Text(hero.title)
+                .font(density == .mini ? .headline : .title3)
+                .fontWeight(.bold)
+                .foregroundStyle(foreground)
+            Text(hero.statusText)
+                .font(density == .regular ? .caption : .caption2)
+                .foregroundStyle(secondaryForeground)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .accessibilityIdentifier(hero.statusIdentifier)
+            Text("主牌组 · \(primaryDeckName ?? "未设置")")
+                .font(.caption2)
+                .foregroundStyle(secondaryForeground)
+                .lineLimit(1)
+                .accessibilityIdentifier("today-primary-deck")
+        }
+        .padding(OboeTheme.Spacing.md)
+        .frame(width: density.circleDiameter, height: density.circleDiameter)
+        .background(circleBackground)
+        .clipShape(Circle())
+        .overlay {
+            Circle()
+                .strokeBorder(
+                    hero.isActionable
+                        ? Color.black.opacity(0.12)
+                        : Color.primary.opacity(0.15),
+                    lineWidth: 1
+                )
+        }
+        .contentShape(Circle())
+        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+    }
+
+    /// 卡片版（辅助字号）：横向排布，文字随字号放大不裁切。
+    private var cardBody: some View {
+        VStack(alignment: .leading, spacing: OboeTheme.Spacing.sm) {
+            streakPill
+            HStack(spacing: OboeTheme.Spacing.md) {
+                Image(systemName: hero.icon)
+                    .font(.system(size: density.iconSize, weight: .semibold))
+                    .foregroundStyle(hero.isActionable ? .white : hero.iconTint)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: OboeTheme.Spacing.xxs) {
+                    Text(hero.title)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundStyle(foreground)
+                    Text(hero.statusText)
+                        .font(.subheadline)
+                        .foregroundStyle(secondaryForeground)
+                        .accessibilityIdentifier(hero.statusIdentifier)
+                }
+                Spacer(minLength: 0)
+                if hero.isActionable {
+                    Image(systemName: "chevron.right")
+                        .font(.title3.bold())
+                        .foregroundStyle(.white.opacity(0.9))
+                        .accessibilityHidden(true)
+                }
+            }
+            Text("主牌组 · \(primaryDeckName ?? "未设置")")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(secondaryForeground)
+                .accessibilityIdentifier("today-primary-deck")
+        }
+        .padding(OboeTheme.Spacing.cardPaddingCompact)
+        .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+        .background {
+            cardBackground
+                .clipShape(
+                    RoundedRectangle(
+                        cornerRadius: OboeTheme.Radius.card,
+                        style: .continuous
+                    )
+                )
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: OboeTheme.Radius.card, style: .continuous)
+                .strokeBorder(
+                    hero.isActionable
+                        ? Color.black.opacity(0.12)
+                        : Color.primary.opacity(0.15),
+                    lineWidth: 1
+                )
+        }
+        .contentShape(RoundedRectangle(cornerRadius: OboeTheme.Radius.card, style: .continuous))
+    }
+
+    /// 连续天数小胶囊：无数据时不占位（nil 只在统计尚未载入时出现）。
+    @ViewBuilder
+    private var streakPill: some View {
+        if let streak {
+            Text("连续 \(streak) 天")
+                .font(.caption.weight(.medium))
+                .monospacedDigit()
+                .foregroundStyle(secondaryForeground)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    hero.isActionable
+                        ? Color.white.opacity(0.18)
+                        : Color.primary.opacity(0.08),
+                    in: Capsule()
+                )
+                .accessibilityIdentifier("today-streak")
+        }
+    }
+
+    private var circleBackground: AnyView {
+        backgroundContent
+    }
+
+    private var cardBackground: AnyView {
+        backgroundContent
+    }
+
+    /// 与旧 hero 同一套背景：可操作态为 accent + 黑色压暗渐变，
+    /// 其余态为卡片底色。
+    private var backgroundContent: AnyView {
+        guard hero.isActionable else {
             return AnyView(OboeTheme.Colors.cardBackground)
         }
         return AnyView(
@@ -717,53 +867,62 @@ struct TodayView: View {
             }
         )
     }
-
-    private struct HeroPresentation {
-        let icon: String
-        let statusText: String
-        let isActionable: Bool
-        let statusIdentifier: String
-        let iconTint: Color
-    }
 }
-private struct SummaryMetric: View {
+
+/// 等宽首页入口磁贴（v0.5.5 Step 7）：图标 + 标题 + 一行说明；
+/// 由外层 HStack（辅助字号下为 VStack）保证两枚磁贴等宽排列。
+private struct HomeShortcutTile: View {
     let title: String
-    let value: Int
-    let tint: Color
-    let identifier: String
+    let systemImage: String
+    let detail: String
+    var detailIdentifier: String? = nil
 
     var body: some View {
-        HStack {
-            Circle()
-                .fill(tint)
-                .frame(width: 8, height: 8)
-            Text(title)
-                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-            Spacer()
-            Text("\(value)")
+        VStack(alignment: .leading, spacing: OboeTheme.Spacing.xxs) {
+            Image(systemName: systemImage)
                 .font(.headline)
-                .monospacedDigit()
-                .accessibilityIdentifier(identifier)
-        }
-    }
-}
-
-private struct StatisticMetric: View {
-    let title: String
-    let value: Int
-    let identifier: String
-
-    var body: some View {
-        VStack(spacing: 4) {
+                .foregroundStyle(OboeTheme.Colors.accent)
+                .accessibilityHidden(true)
             Text(title)
-                .font(.caption)
-                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
-            Text("\(value)")
-                .font(.title3.bold())
-                .monospacedDigit()
-                .accessibilityIdentifier(identifier)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+            detailText
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, OboeTheme.Spacing.sm)
+        .padding(.vertical, OboeTheme.Spacing.sm)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: 72,
+            maxHeight: .infinity,
+            alignment: .topLeading
+        )
+        .background(
+            OboeTheme.Colors.cardBackground,
+            in: RoundedRectangle(
+                cornerRadius: OboeTheme.Radius.medium,
+                style: .continuous
+            )
+        )
+        .contentShape(
+            RoundedRectangle(
+                cornerRadius: OboeTheme.Radius.medium,
+                style: .continuous
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var detailText: some View {
+        if let detailIdentifier {
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+                .accessibilityIdentifier(detailIdentifier)
+        } else {
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+        }
     }
 }
 
@@ -777,7 +936,6 @@ private final class TodayViewModel {
     private let adaptivePreferencesService: AdaptivePreferencesService
 
     var plan: TodayPlan?
-    var statistics: TodayReviewStatistics?
     /// 当前连续学习天数（只读派生值，不持久化）；载入失败时保持 nil，
     /// 不影响今日计划主流程。
     var currentStreak: Int?
@@ -820,7 +978,7 @@ private final class TodayViewModel {
         self.adaptivePreferencesService = adaptivePreferencesService
     }
 
-    /// T13（设计 §8.2）：plan/decks/settings 并发发出；statistics 依赖
+    /// T13（设计 §8.2）：plan/decks/settings 并发发出；连续天数快照依赖
     /// plan 的 studyDay.id，拿到 plan 后再并行展开。`primaryDeckName`
     /// 由 settings.primaryDeckID 在 decks 中解析——并发读取之间牌组被
     /// 删除时安全回落为 nil，由 View 统一显示「未设置」。
@@ -836,9 +994,6 @@ private final class TodayViewModel {
                 defaultTimeZoneID: timeZoneID
             )
             let freshPlan = try await planRequest
-            async let statisticsRequest = historyService.fetchTodayStatistics(
-                studyDayID: freshPlan.studyDay.id
-            )
             async let snapshotRequest = historyService.fetchDailyStatistics(
                 endingAt: freshPlan.studyDay,
                 dayCount: 30
@@ -851,7 +1006,6 @@ private final class TodayViewModel {
             primaryDeckName = settings.primaryDeckID.flatMap { id in
                 fetchedDecks.first { $0.id == id }?.name
             }
-            statistics = try await statisticsRequest
             currentStreak = try await snapshotRequest.currentStreak
             await loadAdaptiveState()
             loadErrorMessage = nil

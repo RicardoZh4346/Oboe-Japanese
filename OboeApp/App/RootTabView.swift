@@ -14,7 +14,8 @@ struct RootTabView: View {
 
     var body: some View {
         Group {
-            if let deckManagementService = dependencies.deckManagementService,
+            if !dependencies.isLoading,
+               let deckManagementService = dependencies.deckManagementService,
                let vocabularyService = dependencies.vocabularyService,
                let grammarService = dependencies.grammarService,
                let knowledgePointService = dependencies.knowledgePointService,

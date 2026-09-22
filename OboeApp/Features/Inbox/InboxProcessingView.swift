@@ -74,6 +74,7 @@ struct InboxProcessingView: View {
                     .accessibilityIdentifier("capture-processing-loading")
             }
         }
+        .secondaryPage()
         .task {
             await load()
         }

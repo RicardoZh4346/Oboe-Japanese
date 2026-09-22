@@ -466,9 +466,12 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertTrue(todayTab.waitForExistence(timeout: 5))
         todayTab.tap()
         let entry = app.descendants(matching: .any)["today-inbox-entry"]
+        // v0.5.5 Step 7：今日首页常规字号为固定布局、无滚动容器，
+        // 入口磁贴就在首屏；保留守卫兼容辅助字号备用布局。
         var attempts = 0
         while !entry.exists, attempts < 8 {
-            app.scrollViews.firstMatch.swipeUp()
+            let scroll = app.scrollViews.firstMatch
+            if scroll.exists { scroll.swipeUp() }
             attempts += 1
         }
         XCTAssertTrue(entry.waitForExistence(timeout: 5))

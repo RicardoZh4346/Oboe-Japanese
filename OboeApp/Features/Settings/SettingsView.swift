@@ -1204,6 +1204,7 @@ private struct AboutOboeView: View {
             }
         }
         .navigationTitle("关于 Oboe")
+        .secondaryPage()
     }
 }
 

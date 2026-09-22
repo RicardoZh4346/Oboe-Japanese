@@ -1579,9 +1579,8 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["today-summary"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["today-new-count"].label, "1")
         XCTAssertEqual(app.staticTexts["today-remaining-count"].label, "1")
-        XCTAssertEqual(app.staticTexts["today-learned-count"].label, "0")
-        XCTAssertEqual(app.staticTexts["today-review-answer-count"].label, "0")
-        XCTAssertEqual(app.staticTexts["today-answer-count"].label, "0")
+        // v0.5.5 Step 7：首页统计卡已移除，逐日明细由「每日统计」承担。
+        XCTAssertEqual(app.staticTexts["today-completed-count"].label, "0")
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         XCTAssertTrue(start.isEnabled)
@@ -1635,17 +1634,21 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["today-day-complete"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["today-completed-count"].label, "1")
         XCTAssertEqual(app.staticTexts["today-remaining-count"].label, "0")
-        XCTAssertEqual(app.staticTexts["today-learned-count"].label, "1")
-        XCTAssertEqual(app.staticTexts["today-review-answer-count"].label, "0")
-        XCTAssertEqual(app.staticTexts["today-answer-count"].label, "1")
-        let easyRatingCount = app.descendants(matching: .any)["today-rating-easy-count"]
-        // 评分分布行在统计卡的 LazyVGrid 里，SE 首屏之下需要滚动才会挂载。
-        let scroll = app.scrollViews.firstMatch
-        for _ in 0..<6 where !easyRatingCount.exists {
-            scroll.swipeUp()
-        }
-        XCTAssertTrue(easyRatingCount.waitForExistence(timeout: 3))
-        XCTAssertTrue(easyRatingCount.label.contains("1"))
+
+        // v0.5.5 Step 7：新学/回答/评分分布并入「每日统计」二级页——
+        // 当日行合并标签包含 新学 1 / 回答 1 / 简单 1。
+        app.descendants(matching: .any)["today-statistics-entry"].tap()
+        XCTAssertTrue(app.navigationBars["每日统计"].waitForExistence(timeout: 5))
+        let todayRow = app.descendants(matching: .any).matching(
+            NSPredicate(
+                format: "identifier BEGINSWITH 'statistics-day-' AND label CONTAINS '新学 1'"
+            )
+        ).firstMatch
+        XCTAssertTrue(todayRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(todayRow.label.contains("回答 1"), todayRow.label)
+        XCTAssertTrue(todayRow.label.contains("简单 1"), todayRow.label)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
 
         decksTab.tap()
         let deckTodayCounts = app.descendants(matching: .any).matching(
@@ -2482,11 +2485,11 @@ final class OboeNavigationUITests: XCTestCase {
             }
             return false
         }
-        // 第二遍：滚动到底部，让首屏外的元素物化，补做元素级检查
-        // （点击区域/描述/trait 基于树数据仍可靠）。对比度不随滚动
+        // 第二遍：Step 7 起首页常规字号无滚动，元素已全量物化；
+        // 保留守卫扫描兼容辅助字号的滚动备用布局。对比度不随滚动
         // 复审：审计对滚动后位置的像素取色会映射到滚动前截图（实测
         // 黑字文本被误判落在 Hero 蓝渐变上），结果不可靠。
-        for _ in 0..<8 {
+        for _ in 0..<8 where app.scrollViews.firstMatch.exists {
             app.scrollViews.firstMatch.swipeUp()
         }
         try app.performAccessibilityAudit(
@@ -2525,11 +2528,12 @@ final class OboeNavigationUITests: XCTestCase {
         )
 
         // 首屏外区块在 ax5 下仍可滚动到达，不被布局锁死。
-        let stat = app.descendants(matching: .any)["today-learned-count"]
-        for _ in 0..<10 where !stat.exists {
+        let stat = app.descendants(matching: .any)["today-statistics-entry"]
+        for _ in 0..<10 where !stat.exists || !stat.isHittable {
             app.swipeUp()
         }
-        XCTAssertTrue(stat.exists, "ax5 下今日统计必须可到达")
+        XCTAssertTrue(stat.exists, "ax5 下每日统计入口必须可到达")
+        XCTAssertTrue(stat.isHittable, "ax5 下每日统计入口必须可点击")
     }
 
     @MainActor

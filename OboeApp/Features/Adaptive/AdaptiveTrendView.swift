@@ -37,6 +37,7 @@ struct AdaptiveTrendView: View {
         }
         .navigationTitle("本周趋势")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task { await model.load() }
         .refreshable { await model.load() }
     }

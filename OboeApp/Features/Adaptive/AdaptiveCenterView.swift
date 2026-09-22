@@ -61,6 +61,7 @@ struct AdaptiveCenterView: View {
         }
         .navigationTitle("易错卡")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task { await model.load() }
         .refreshable { await model.load() }
         .alert(
