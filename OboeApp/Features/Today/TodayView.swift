@@ -714,7 +714,9 @@ private struct TodayStudyButton: View {
     }
 
     private var secondaryForeground: Color {
-        hero.isActionable ? .white.opacity(0.9) : OboeTheme.Colors.secondaryOnCard
+        // 可操作态用不透明白：带 alpha 的前景色会让无障碍对比度
+        // 审计在渐变背景上误判（实测渲染对比度 ~8:1 仍被标记）。
+        hero.isActionable ? .white : OboeTheme.Colors.secondaryOnCard
     }
 
     var body: some View {
@@ -826,19 +828,22 @@ private struct TodayStudyButton: View {
     @ViewBuilder
     private var streakPill: some View {
         if let streak {
-            Text("连续 \(streak) 天")
-                .font(.caption.weight(.medium))
-                .monospacedDigit()
-                .foregroundStyle(secondaryForeground)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(
-                    hero.isActionable
-                        ? Color.white.opacity(0.18)
-                        : Color.primary.opacity(0.08),
-                    in: Capsule()
-                )
-                .accessibilityIdentifier("today-streak")
+            if hero.isActionable {
+                Text("连续 \(streak) 天")
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(secondaryForeground)
+                    .accessibilityIdentifier("today-streak")
+            } else {
+                Text("连续 \(streak) 天")
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(secondaryForeground)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+                    .accessibilityIdentifier("today-streak")
+            }
         }
     }
 

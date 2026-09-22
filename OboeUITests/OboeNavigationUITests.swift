@@ -293,7 +293,7 @@ final class OboeNavigationUITests: XCTestCase {
         }
         app.launch()
         XCTAssertTrue(app.tabBars.buttons["牌组"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["牌组"].tap()
+        selectTab("牌组", in: app)
         app.buttons["jlpt-library-entry"].tap()
         let acknowledge = app.buttons["我知道了"]
         if acknowledge.waitForExistence(timeout: 2) { acknowledge.tap() }
@@ -863,7 +863,7 @@ final class OboeNavigationUITests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter.wait(for: [twoSaved], timeout: 5), .completed)
 
-        decksTab.tap()
+        selectTab("牌组", in: app)
         let deck = app.staticTexts["P20 Cards"]
         XCTAssertTrue(deck.waitForExistence(timeout: 5))
         deck.tap()
@@ -1065,7 +1065,7 @@ final class OboeNavigationUITests: XCTestCase {
         }
 
         // 自动默认状态：排序最前的「主牌组首页」即主牌组。
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         app.buttons["today-refresh-button"].tap()
         let primaryLine = app.staticTexts["today-primary-deck"]
         XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
@@ -1089,7 +1089,7 @@ final class OboeNavigationUITests: XCTestCase {
             app.descendants(matching: .any)["deck-primary-status"]
                 .waitForExistence(timeout: 5)
         )
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         app.buttons["today-refresh-button"].tap()
         XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
         XCTAssertTrue(primaryLine.label.contains("保留牌组"))
@@ -1105,7 +1105,7 @@ final class OboeNavigationUITests: XCTestCase {
         confirm.tap()
         XCTAssertTrue(app.staticTexts["主牌组首页"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["保留牌组"].exists)
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         app.buttons["today-refresh-button"].tap()
         XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
         XCTAssertTrue(
@@ -1124,7 +1124,7 @@ final class OboeNavigationUITests: XCTestCase {
             app.buttons["deck-create-empty-button"].waitForExistence(timeout: 5),
             "删除全部牌组后回到空态"
         )
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         app.buttons["today-refresh-button"].tap()
         XCTAssertTrue(primaryLine.waitForExistence(timeout: 5))
         XCTAssertTrue(
@@ -1480,6 +1480,7 @@ final class OboeNavigationUITests: XCTestCase {
         revealExistenceBySwipingDown(restoredStatus, in: app)
         XCTAssertTrue(restoredStatus.exists)
 
+        popToPrimaryPageIfNeeded(in: app)
         let decksTab = app.tabBars.buttons["牌组"]
         decksTab.tap()
         let favoritesButton = app.buttons["favorites-button"]
@@ -1659,7 +1660,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(formalSave.isEnabled)
         formalSave.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -1749,7 +1750,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(formalSave.isEnabled)
         formalSave.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -1814,7 +1815,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(formalSave.isEnabled)
         formalSave.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -1881,7 +1882,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(formalSave.isEnabled)
         formalSave.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -1948,7 +1949,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(save.isHittable)
         save.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -2126,7 +2127,7 @@ final class OboeNavigationUITests: XCTestCase {
         reveal(save, in: app)
         save.tap()
 
-        app.tabBars.buttons["今日"].tap()
+        selectTab("今日", in: app)
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
@@ -2236,7 +2237,9 @@ final class OboeNavigationUITests: XCTestCase {
         formalSaveC.tap()
         let confirm = app.buttons["duplicate-commit-confirm-button"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 3), "另建义项必须先经确认弹窗")
-        app.buttons["取消"].tap()
+        // confirmationDialog 的「取消」在 iOS 26 不进应用无障碍树；
+        // 点击弹层遮罩等效取消，应回到添加编辑器。
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
         XCTAssertTrue(
             app.navigationBars["添加"].waitForExistence(timeout: 3),
             "取消确认后应停留在添加编辑器"
@@ -2267,7 +2270,7 @@ final class OboeNavigationUITests: XCTestCase {
         )
 
         // 牌组与内容保留：升级牌组含 2 个知识点、6 张卡。
-        app.tabBars.buttons["牌组"].tap()
+        selectTab("牌组", in: app)
         let deckRow = app.buttons.matching(
             NSPredicate(format: "label CONTAINS %@", "升级牌组")
         ).firstMatch
@@ -2334,7 +2337,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         // 回滚路径：升级库上创建本机快照并恢复，数据保持完整。
         app.navigationBars.buttons.firstMatch.tap()
-        app.tabBars.buttons["设置"].tap()
+        selectTab("设置", in: app)
         let createSnapshot = app.buttons["local-snapshot-create-button"]
         reveal(createSnapshot, in: app)
         XCTAssertTrue(createSnapshot.exists)
@@ -2633,15 +2636,36 @@ final class OboeNavigationUITests: XCTestCase {
 
     @MainActor
     private func selectDecksTab(in app: XCUIApplication) {
-        // v0.5.5 起只有三个 tab，坐标命中不再可靠，直接点 tab 按钮。
-        let decksTab = app.tabBars.buttons["牌组"]
-        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
-        decksTab.tap()
+        // v0.5.5 起只有三个 tab，坐标命中不再可靠，直接点 tab 按钮；
+        // 二级页隐藏 Tab Bar，先返回主页面。
+        selectTab("牌组", in: app)
+    }
+
+    /// v0.5.5 起二级页隐藏 Tab Bar：切 tab 前先逐层返回到主页面。
+    @MainActor
+    private func selectTab(_ name: String, in app: XCUIApplication) {
+        popToPrimaryPageIfNeeded(in: app)
+        let tab = app.tabBars.buttons[name]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.tap()
+    }
+
+    /// v0.5.5 起二级页隐藏 Tab Bar：若当前在详情/编辑器等深层页，
+    /// 先逐层返回直到 Tab Bar 重新出现，再允许点 tab。
+    @MainActor
+    private func popToPrimaryPageIfNeeded(in app: XCUIApplication) {
+        for _ in 0..<5 {
+            if app.tabBars.buttons["牌组"].exists { return }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists, back.isHittable else { return }
+            back.tap()
+        }
     }
 
     /// v0.5.5：牌组列表空态/工具栏两种建组入口。
     @MainActor
     private func createDeck(in app: XCUIApplication, named name: String) {
+        popToPrimaryPageIfNeeded(in: app)
         let decksTab = app.tabBars.buttons["牌组"]
         XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
         decksTab.tap()
@@ -2668,6 +2692,7 @@ final class OboeNavigationUITests: XCTestCase {
     /// 重复点「牌组」tab 会先弹回列表根，因此在详情/编辑器里也可直接调用。
     @MainActor
     private func openAddFlow(in app: XCUIApplication, deckName: String) {
+        popToPrimaryPageIfNeeded(in: app)
         let decksTab = app.tabBars.buttons["牌组"]
         XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
         decksTab.tap()

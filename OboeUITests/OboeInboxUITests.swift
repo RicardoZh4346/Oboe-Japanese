@@ -127,6 +127,7 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["一つ目"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["二つ目"].exists)
 
+        popToPrimaryPageIfNeeded(in: app)
         app.tabBars.buttons["今日"].tap()
         let entry = app.buttons["today-inbox-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
@@ -439,9 +440,22 @@ final class OboeInboxUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
     }
 
+    /// v0.5.5 起二级页隐藏 Tab Bar：若当前在收集箱/详情/编辑器等
+    /// 深层页，先逐层返回直到 Tab Bar 重新出现，再允许点 tab。
+    @MainActor
+    private func popToPrimaryPageIfNeeded(in app: XCUIApplication) {
+        for _ in 0..<5 {
+            if app.tabBars.buttons["今日"].exists { return }
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            guard back.exists, back.isHittable else { return }
+            back.tap()
+        }
+    }
+
     /// v0.5.5：收集箱入口在「今日」页（添加 Tab 已移除）。
     @MainActor
     private func openInbox(in app: XCUIApplication) {
+        popToPrimaryPageIfNeeded(in: app)
         let todayTab = app.tabBars.buttons["今日"]
         XCTAssertTrue(todayTab.waitForExistence(timeout: 5))
         todayTab.tap()
@@ -462,6 +476,7 @@ final class OboeInboxUITests: XCTestCase {
     /// v0.5.5：普通添加入口在牌组详情工具栏。
     @MainActor
     private func openDeckAddFlow(in app: XCUIApplication, deckName: String) {
+        popToPrimaryPageIfNeeded(in: app)
         let decksTab = app.tabBars.buttons["牌组"]
         XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
         decksTab.tap()
