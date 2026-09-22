@@ -62,9 +62,11 @@ final class PortableBackupV4RestorationTests: XCTestCase {
                 }
             )
         }
-        XCTAssertEqual(restored.settings.0, true)
+        // v0.5.5：v4+ 备份保留显式存储值——种子的 0/0/0/0 与新默认
+        // ON/ON/ON/ON 全不同位，恢复不得被归一化成默认。
+        XCTAssertEqual(restored.settings.0, false)
         XCTAssertEqual(restored.settings.1, false)
-        XCTAssertEqual(restored.settings.2, true)
+        XCTAssertEqual(restored.settings.2, false)
         XCTAssertEqual(restored.settings.3, false)
         XCTAssertEqual(
             restored.templates,
@@ -133,9 +135,10 @@ final class PortableBackupV4RestorationTests: XCTestCase {
                     row["auto_play_word_audio"] as Bool
                 )
             }
-            XCTAssertEqual(settings.0, false)
+            // v0.5.5：v1–v3 备份缺失的 Adaptive 列回填新领域默认 ON/ON/ON/ON。
+            XCTAssertEqual(settings.0, true)
             XCTAssertEqual(settings.1, true)
-            XCTAssertEqual(settings.2, false)
+            XCTAssertEqual(settings.2, true)
             XCTAssertEqual(settings.3, true)
             XCTAssertEqual(settings.4, true)
             try await preparer.discard(prepared)
@@ -251,9 +254,9 @@ final class PortableBackupV4RestorationTests: XCTestCase {
         let settings = try XCTUnwrap(
             objects.first { $0["recordType"] as? String == "settings" }
         )
-        XCTAssertEqual(settings["typed_answer_zh_ja"] as? Int, 1)
+        XCTAssertEqual(settings["typed_answer_zh_ja"] as? Int, 0)
         XCTAssertEqual(settings["auto_play_listening_audio"] as? Int, 0)
-        XCTAssertEqual(settings["typed_answer_listening"] as? Int, 1)
+        XCTAssertEqual(settings["typed_answer_listening"] as? Int, 0)
         XCTAssertEqual(settings["leech_reminders_enabled"] as? Int, 0)
         XCTAssertEqual(settings["primary_deck_id"] as? NSNull, NSNull())
     }
@@ -466,7 +469,7 @@ private extension PortableBackupV4RestorationTests {
                         typed_answer_zh_ja, auto_play_listening_audio,
                         typed_answer_listening, leech_reminders_enabled
                     ) VALUES (1, 1, 'Asia/Shanghai', 10, 90, 1, 0, 'system',
-                              1, 0, 1, 0)
+                              0, 0, 0, 0)
                     """
             )
             let drafts: [(UUID, String, Int, String)] = [

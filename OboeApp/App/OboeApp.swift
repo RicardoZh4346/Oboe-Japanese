@@ -209,6 +209,10 @@ final class AppDependencies {
                     defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
                 )
             }
+            // v0.5.5 seam: typed-recall 偏好覆盖（PREF=1/on 显式开、
+            // =0/off 显式关）。必须在所有数据种子之后——种子可能先物化
+            // app_settings 行，覆盖再走真实 service 的 UPDATE。
+            await applyAdaptivePreferenceUITestOverrides()
             #endif
             try await reloadAppearancePreference()
             #if DEBUG

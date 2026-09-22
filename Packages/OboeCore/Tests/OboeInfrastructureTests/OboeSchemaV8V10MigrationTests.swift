@@ -74,6 +74,8 @@ final class OboeSchemaV8V10MigrationTests: XCTestCase {
                 db,
                 sql: "SELECT * FROM app_settings WHERE id = 1"
             ))
+            // v13 冻结的列 DEFAULT 仍是 v0.4 的 0/1/0/1：老库升级后保持旧
+            // 行为不改写；新装默认由 AppSettingsRowDefaults 显式写入。
             XCTAssertEqual(settings["typed_answer_zh_ja"] as Bool, false)
             XCTAssertEqual(settings["auto_play_listening_audio"] as Bool, true)
             XCTAssertEqual(settings["typed_answer_listening"] as Bool, false)

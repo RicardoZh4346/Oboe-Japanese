@@ -42,6 +42,9 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_SEED"] = "1"
+        // v0.5.5 起默认开启——本用例正是验证"关闭后保持 reveal 流程"，
+        // 不能再依赖旧默认，显式传 off。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
         let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
@@ -281,6 +284,10 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         // T18: deterministic playback — autoplay fires on load and completes.
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "ok"
+        // v0.5.5：听力与 zh→ja 卡均默认 typed——本用例审计 reveal
+        // 问题面与方向切换，两个开关都显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] = "0"
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         app.buttons["today-start-button"].tap()
@@ -333,22 +340,25 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(app.buttons["review-show-answer-button"].exists)
     }
 
-    /// T17: with 听力卡输入 enabled in Settings, the listening card asks for a
-    /// Japanese transcription before reveal; the comparison is feedback only
-    /// and the zh→ja sibling still uses reveal-only (per-template gating).
+    /// T17: 听力卡输入自 v0.5.5 起默认开启——设置页先验证默认值，
+    /// 听力卡随后要求先日语复述再揭示；对比仅为反馈。zh→ja 同胞卡经
+    /// `OBOE_UI_TEST_TYPED_RECALL_PREF=0` 显式关闭以保持逐模板门控断言。
     @MainActor
     func testListeningTypedRecallUsesInputThenRevealsAnswer() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "ok"
+        // v0.5.5：zh→ja 同胞卡也默认 typed——为保留逐模板门控断言，
+        // 显式关闭 zh→ja，让后半段仍落在 reveal-only 路径。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         app.tabBars.buttons["设置"].tap()
         let toggle = app.switches["adaptive-typed-answer-listening-toggle"]
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        XCTAssertEqual(toggle.value as? String, "0", "听力输入必须默认关闭")
+        XCTAssertEqual(toggle.value as? String, "1", "听力输入自 v0.5.5 起默认开启")
         setSwitch(toggle, enabled: true, in: app)
 
         app.tabBars.buttons["今日"].tap()
@@ -392,6 +402,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_AUTOPLAY_OFF"] = "1"
+        // v0.5.5：听力卡现为 typed 默认——本用例验证 reveal 门控，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] = "0"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "ok"
         app.launch()
 
@@ -429,6 +441,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "fail"
+        // v0.5.5：zh→ja 卡现为 typed 默认——本用例覆盖 reveal 流程，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         app.buttons["today-start-button"].tap()
@@ -489,6 +503,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "pending"
+        // v0.5.5：听力卡现为 typed 默认——本用例验证 reveal 门控，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] = "0"
         app.launch()
 
         app.buttons["today-start-button"].tap()
@@ -518,6 +534,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "fail"
+        // v0.5.5：zh→ja 卡现为 typed 默认——本用例覆盖 reveal 流程，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         app.buttons["today-start-button"].tap()
@@ -552,6 +570,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "ok"
+        // v0.5.5：听力卡现为 typed 默认——本用例审计 reveal 问题面，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] = "0"
         app.launchEnvironment["OBOE_UI_TEST_APPEARANCE_DARK"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_DYNAMIC_TYPE"] = "ax5"
         app.launch()
@@ -600,6 +620,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_LISTENING_AUTOPLAY_OFF"] = "1"
+        // v0.5.5：听力卡现为 typed 默认——本用例审计 reveal 问题面，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] = "0"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_STUB"] = "ok"
         app.launch()
 
@@ -663,6 +685,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_SIBLING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
+        // v0.5.5：A-zh2ja 卡现为 typed 默认——本用例覆盖 reveal 流程，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         enterScopedReview(deckNamed: "错开牌组", in: app)
@@ -698,6 +722,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launchEnvironment["OBOE_UI_TEST_SIBLING_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SPEECH_UNAVAILABLE"] = "1"
+        // v0.5.5：A-zh2ja 卡现为 typed 默认——本用例覆盖 reveal 流程，显式关闭。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         enterScopedReview(deckNamed: "错开牌组", in: app)
@@ -773,19 +799,25 @@ final class OboeAdaptiveUITests: XCTestCase {
         }
     }
 
+    /// v0.5.5：全新安装上两个主动回忆输入开关默认开启；已关闭的选择
+    /// 跨启动保留，且两个开关相互独立（关闭 zh→ja 不影响听力）。
     @MainActor
-    func testTypedAnswerPreferenceDefaultsOffAndPersistsAcrossLaunch() {
+    func testTypedAnswerPreferencesDefaultOnAndPersistAcrossLaunch() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
         app.tabBars.buttons["设置"].tap()
-        let toggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
-        reveal(toggle, in: app)
-        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
-        XCTAssertEqual(toggle.value as? String, "0")
-        setSwitch(toggle, enabled: true, in: app)
-        let saved = NSPredicate(format: "value == '1' AND enabled == true")
-        expectation(for: saved, evaluatedWith: toggle)
+        let zhToggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
+        reveal(zhToggle, in: app)
+        XCTAssertTrue(zhToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(zhToggle.value as? String, "1", "中文→日文输入默认开启")
+        let listeningToggle = app.switches["adaptive-typed-answer-listening-toggle"]
+        reveal(listeningToggle, in: app)
+        XCTAssertTrue(listeningToggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(listeningToggle.value as? String, "1", "听力输入默认开启")
+        setSwitch(zhToggle, enabled: false, in: app)
+        let saved = NSPredicate(format: "value == '0' AND enabled == true")
+        expectation(for: saved, evaluatedWith: zhToggle)
         waitForExpectations(timeout: 5)
         app.terminate()
         app.launch()
@@ -793,9 +825,18 @@ final class OboeAdaptiveUITests: XCTestCase {
         let restored = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(restored, in: app)
         XCTAssertTrue(restored.waitForExistence(timeout: 5))
-        XCTAssertEqual(restored.value as? String, "1")
-        setSwitch(restored, enabled: false, in: app)
-        expectation(for: NSPredicate(format: "value == '0' AND enabled == true"), evaluatedWith: restored)
+        XCTAssertEqual(restored.value as? String, "0", "已关闭的选择跨启动保留")
+        let restoredListening = app.switches["adaptive-typed-answer-listening-toggle"]
+        reveal(restoredListening, in: app)
+        XCTAssertEqual(
+            restoredListening.value as? String, "1",
+            "听力开关独立保持默认开启"
+        )
+        setSwitch(restored, enabled: true, in: app)
+        expectation(
+            for: NSPredicate(format: "value == '1' AND enabled == true"),
+            evaluatedWith: restored
+        )
         waitForExpectations(timeout: 5)
     }
 

@@ -10,6 +10,14 @@ final class RecallAttemptTests: XCTestCase {
         leechRemindersEnabled: true
     )
 
+    /// v0.5.5 产品默认：两个主动回忆输入开关均为开启（其余两项保持开启）。
+    func testAdaptivePreferencesDefaultsEnableBothTypedRecalls() {
+        XCTAssertTrue(AdaptivePreferences.defaults.typedAnswerChineseToJapanese)
+        XCTAssertTrue(AdaptivePreferences.defaults.autoPlayListeningAudio)
+        XCTAssertTrue(AdaptivePreferences.defaults.typedAnswerListening)
+        XCTAssertTrue(AdaptivePreferences.defaults.leechRemindersEnabled)
+    }
+
     private func attempt(
         cardID: UUID = UUID(),
         preferences: AdaptivePreferences? = nil
@@ -21,8 +29,18 @@ final class RecallAttemptTests: XCTestCase {
         )
     }
 
-    func testModeUsesOnlyItsOwnTemplatePreferenceAndDefaultsToReveal() {
-        for template in CardTemplateKind.allCases {
+    /// v0.5.5：产品默认改为中文→日文与听力卡先输入回答（typedJapanese），
+    /// 其余模板仍 reveal-only；每个开关只作用于自己的模板。
+    func testModeUsesOnlyItsOwnTemplatePreferenceAndTypedDefaults() {
+        XCTAssertEqual(
+            RecallMode.resolve(template: .vocabularyChineseToJapanese, preferences: .defaults),
+            .typedJapanese
+        )
+        XCTAssertEqual(
+            RecallMode.resolve(template: .vocabularyListening, preferences: .defaults),
+            .typedJapanese
+        )
+        for template in [CardTemplateKind.vocabularyJapaneseToChinese, .grammarFormToExplanation] {
             XCTAssertEqual(RecallMode.resolve(template: template, preferences: .defaults), .revealOnly)
         }
         for chinese in [false, true] {
@@ -68,7 +86,13 @@ final class RecallAttemptTests: XCTestCase {
     }
 
     func testRevealOnlyKeepsOriginalRevealFlow() {
-        var state = attempt(preferences: .defaults)
+        // v0.5.5 起 .defaults 已开启 typed 输入；reveal 路径须显式关闭。
+        var state = attempt(preferences: AdaptivePreferences(
+            typedAnswerChineseToJapanese: false,
+            autoPlayListeningAudio: true,
+            typedAnswerListening: false,
+            leechRemindersEnabled: true
+        ))
         XCTAssertFalse(state.updateInput("入力"))
         XCTAssertTrue(state.canConfirm)
         XCTAssertTrue(state.confirmInput(comparison: .matched))
@@ -142,7 +166,13 @@ final class RecallAttemptTests: XCTestCase {
         var current = attempt(cardID: id)
         current.updateInput("回答")
         current.confirmInput(comparison: .matched)
-        let nextPreferences = AdaptivePreferences.defaults
+        // v0.5.5 起 .defaults 为 typed；用显式关闭的偏好验证 reveal 采样。
+        let nextPreferences = AdaptivePreferences(
+            typedAnswerChineseToJapanese: false,
+            autoPlayListeningAudio: true,
+            typedAnswerListening: false,
+            leechRemindersEnabled: true
+        )
         current.reloadContent(version: 2)
         XCTAssertEqual(current.mode, .typedJapanese)
         let repeatedCard = attempt(cardID: id, preferences: nextPreferences)
