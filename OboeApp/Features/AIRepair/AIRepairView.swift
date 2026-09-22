@@ -56,6 +56,7 @@ struct AIRepairView: View {
         }
         .navigationTitle("AI 修卡")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task { await model.load() }
         .onDisappear {
             Task { await model.persistComment() }
@@ -439,6 +440,7 @@ private struct AIRepairSuggestionPreviewView: View {
         }
         .navigationTitle("建议预览")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .accessibilityIdentifier("ai-repair-preview")
         .task {
             await model.notePreviewing()

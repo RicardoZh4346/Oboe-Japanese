@@ -61,6 +61,7 @@ struct InboxView: View {
         }
         .background(OboeTheme.Colors.pageBackground)
         .navigationTitle("收集箱")
+        .secondaryPage()
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button(isSelecting ? "完成" : "选择") {

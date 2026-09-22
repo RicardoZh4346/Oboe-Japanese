@@ -79,7 +79,7 @@ struct ReviewView: View {
         .navigationTitle(scope.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(model.isMutating)
-        .toolbar(.hidden, for: .tabBar)
+        .secondaryPage()
         .interactiveDismissDisabled(model.isMutating)
         .sensoryFeedback(.success, trigger: model.completedSubmissionCount)
         .toolbar {

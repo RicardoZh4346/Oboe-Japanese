@@ -858,6 +858,7 @@ private struct DeckDetailView: View {
                 )
             }
         }
+        .secondaryPage()
     }
 
     @ViewBuilder
@@ -1089,6 +1090,7 @@ private struct KnowledgeSearchView: View {
         }
         .navigationTitle("搜索")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .searchable(text: $query, prompt: "日语、假名或中文")
         .task(id: query) {
             await model.debouncedSearch(query)
@@ -1296,6 +1298,7 @@ private struct FavoritesView: View {
         }
         .navigationTitle("收藏")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task {
             await model.load()
         }

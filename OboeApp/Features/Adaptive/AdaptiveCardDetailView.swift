@@ -74,6 +74,7 @@ struct AdaptiveCardDetailView: View {
         }
         .navigationTitle("卡片详情")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task { await model.load() }
     }
 

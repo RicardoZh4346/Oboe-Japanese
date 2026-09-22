@@ -105,6 +105,7 @@ struct JLPTDashboardView: View {
         }
         .navigationTitle("JLPT 学习进度")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task(id: target) { await refresh() }
         .refreshable { await refresh() }
         .onChange(of: scenePhase) { _, phase in
@@ -198,6 +199,7 @@ private struct JLPTProgressListView: View {
         }
         .navigationTitle(bucket.title)
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task { await reload() }
         .refreshable { await reload() }
         .onChange(of: scenePhase) { _, phase in
@@ -350,6 +352,7 @@ private struct JLPTWeakVocabularyView: View {
         }
         .navigationTitle("需要关注")
         .navigationBarTitleDisplayMode(.inline)
+        .secondaryPage()
         .task(id: filter) { await reload() }
         .refreshable { await reload() }
         .onChange(of: scenePhase) { _, phase in

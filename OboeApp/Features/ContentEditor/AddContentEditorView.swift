@@ -267,6 +267,7 @@ struct AddContentEditorView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .navigationTitle(title)
+        .secondaryPage()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {

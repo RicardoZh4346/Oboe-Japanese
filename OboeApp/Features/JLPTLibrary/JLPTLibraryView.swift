@@ -92,6 +92,7 @@ struct JLPTLibraryView: View {
         }
         .overlay { if isLoading { ProgressView("正在载入词库…") } }
         .navigationTitle("JLPT 词汇库")
+        .secondaryPage()
         .task {
             scheduleEnrichment()
             await refresh()
@@ -249,6 +250,7 @@ private struct JLPTLevelView: View {
             }
         }
         .navigationTitle(level.rawValue)
+        .secondaryPage()
         .searchable(text: $query, prompt: "搜索日文、假名或中文")
         .task(id: reloadKey) { await reload() }
         .toolbar {
@@ -546,6 +548,7 @@ struct JLPTVocabularyDetailView: View {
             }
         }
         .navigationTitle("词条详情")
+        .secondaryPage()
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadVocabulary() }
         .onDisappear { speechService.stop() }
