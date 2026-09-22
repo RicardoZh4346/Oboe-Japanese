@@ -3,16 +3,20 @@ import SwiftUI
 
 /// 多牌组选择的可编辑内容：勾选成员牌组 + 指定归属（home）牌组。
 /// 约束：至少保留一个成员（移除最后一个成员的点击被禁用）；移除 home
-/// 牌组时自动回退到列表顺序中的首个剩余成员。
+/// 牌组时自动回退到列表顺序中的首个剩余成员。`requiredDeckID`（如从牌组
+/// 详情进入的当前牌组）不可被移除。
 struct DeckMembershipList: View {
     let decks: [DeckSummary]
     @Binding var selection: DeckMembershipSelection
+    /// 不可移除的成员牌组（添加流的来源牌组）。
+    var requiredDeckID: UUID? = nil
 
     var body: some View {
         Section {
             ForEach(decks) { deck in
                 let isMember = selection.deckIDs.contains(deck.id)
                 let isHome = selection.homeDeckID == deck.id
+                let isLocked = deck.id == requiredDeckID && isMember
                 Button {
                     _ = selection.toggle(deckID: deck.id, decks: decks)
                 } label: {
@@ -27,6 +31,14 @@ struct DeckMembershipList: View {
                                 .padding(.vertical, 2)
                                 .background(Color.accentColor, in: Capsule())
                         }
+                        if isLocked {
+                            Text("当前牌组")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(.quaternary, in: Capsule())
+                        }
                         Spacer()
                         Text("\(deck.noteCount) 个知识点")
                             .font(.caption)
@@ -37,20 +49,26 @@ struct DeckMembershipList: View {
                         }
                     }
                 }
-                .disabled(isMember && selection.deckIDs.count == 1)
+                .disabled(isLocked || (isMember && selection.deckIDs.count == 1))
                 .accessibilityLabel(deck.name)
                 .accessibilityValue(membershipValue(isMember: isMember, isHome: isHome))
                 .accessibilityHint(
-                    isMember && selection.deckIDs.count == 1
-                        ? "至少需要保留一个牌组"
-                        : "双击切换成员状态"
+                    isLocked
+                        ? "当前牌组不可移除"
+                        : isMember && selection.deckIDs.count == 1
+                            ? "至少需要保留一个牌组"
+                            : "双击切换成员状态"
                 )
                 .accessibilityIdentifier("deck-membership-row-\(deck.id.uuidString)")
             }
         } header: {
             Text("成员牌组")
         } footer: {
-            Text("至少选择一个牌组；卡片与复习进度在所有成员牌组间共享。")
+            Text(
+                requiredDeckID == nil
+                    ? "至少选择一个牌组；卡片与复习进度在所有成员牌组间共享。"
+                    : "当前牌组会始终保留；可额外加入其他牌组，卡片与复习进度在所有成员牌组间共享。"
+            )
         }
 
         Section {
@@ -92,6 +110,8 @@ struct DeckMembershipField: View {
     let decks: [DeckSummary]
     @Binding var selection: DeckMembershipSelection
     var rowAccessibilityID: String
+    /// 不可移除的成员牌组（从牌组详情进入的添加流）。
+    var requiredDeckID: UUID? = nil
 
     @State private var isPresented = false
     @State private var draft = DeckMembershipSelection()
@@ -114,7 +134,11 @@ struct DeckMembershipField: View {
         .sheet(isPresented: $isPresented) {
             NavigationStack {
                 Form {
-                    DeckMembershipList(decks: decks, selection: $draft)
+                    DeckMembershipList(
+                        decks: decks,
+                        selection: $draft,
+                        requiredDeckID: requiredDeckID
+                    )
                 }
                 .navigationTitle("选择牌组")
                 .navigationBarTitleDisplayMode(.inline)
@@ -125,7 +149,15 @@ struct DeckMembershipField: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("完成") {
-                            selection = draft.normalized(decks: decks)
+                            var normalized = draft.normalized(decks: decks)
+                            if let requiredDeckID,
+                               decks.contains(where: { $0.id == requiredDeckID }) {
+                                normalized.deckIDs.insert(requiredDeckID)
+                                if normalized.homeDeckID == nil {
+                                    normalized.homeDeckID = requiredDeckID
+                                }
+                            }
+                            selection = normalized
                             isPresented = false
                         }
                         .disabled(draft.deckIDs.isEmpty)

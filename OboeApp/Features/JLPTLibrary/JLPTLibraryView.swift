@@ -202,6 +202,7 @@ private struct JLPTLevelView: View {
     @State private var errorMessage: String?
     @State private var resultMessage: String?
     @State private var isConfirmingLevelImport = false
+    @State private var isChoosingLevelImportDeck = false
 
     private var reloadKey: String { "\(query)|\(sort.rawValue)" }
 
@@ -263,10 +264,19 @@ private struct JLPTLevelView: View {
             isPresented: $isConfirmingLevelImport,
             titleVisibility: .visible
         ) {
-            Button("导入到 JLPT \(level.rawValue) 牌组") { startLevelImport() }
+            Button("选择牌组并导入") { isChoosingLevelImportDeck = true }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("共 \(totalCount) 个词条。将创建或复用 1 个“JLPT \(level.rawValue)”牌组，最多新增 \(totalCount) 个知识点，每个词条生成“日文 → 中文 / 中文 → 日文 / 听力 → 中文”三个方向卡片。每日新词限制保持不变；重复词会跳过，缺少中文释义的词不会导入。")
+            Text("共 \(totalCount) 个词条。导入需要选择一个既有牌组，最多新增 \(totalCount) 个知识点，每个词条生成“日文 → 中文 / 中文 → 日文 / 听力 → 中文”三个方向卡片。每日新词限制保持不变；重复词会跳过，缺少中文释义的词不会导入。")
+        }
+        .sheet(isPresented: $isChoosingLevelImportDeck) {
+            JLPTLevelImportSheet(
+                level: level,
+                totalCount: totalCount,
+                deckService: deckService
+            ) { selection in
+                startLevelImport(into: selection)
+            }
         }
         .safeAreaInset(edge: .bottom) { importStatus }
         .alert("操作结果", isPresented: resultBinding) {
@@ -360,7 +370,12 @@ private extension JLPTLevelView {
         }
     }
 
-    func startLevelImport() {
+    /// v0.5.5：整级导入写入用户在确认页选择的既有牌组（可多成员），
+    /// 不再自动创建「JLPT Nx」牌组。
+    func startLevelImport(into selection: DeckMembershipSelection) {
+        guard let homeDeckID = selection.homeDeckID, !selection.deckIDs.isEmpty else {
+            return
+        }
         importTask?.cancel()
         isImporting = true
         importProgress = nil
@@ -374,6 +389,8 @@ private extension JLPTLevelView {
                 let result = try await importer.importLevel(
                     level,
                     vocabulary: all,
+                    deckID: homeDeckID,
+                    deckIDs: selection.deckIDs,
                     directions: Set(VocabularyCardDirection.allCases)
                 ) { progress in
                     await MainActor.run { importProgress = progress }
@@ -576,6 +593,7 @@ private struct JLPTSingleImportSheet: View {
     @State private var selection = DeckMembershipSelection()
     @State private var meaningZH: String
     @State private var isImporting = false
+    @State private var isCreatingDeck = false
     @State private var message: String?
 
     init(
@@ -600,8 +618,12 @@ private struct JLPTSingleImportSheet: View {
 
                 Section("目标牌组") {
                     if decks.isEmpty {
-                        Text("请先在牌组页创建一个牌组。")
+                        Text("导入需要至少一个牌组。")
                             .foregroundStyle(.secondary)
+                        Button("新建牌组") {
+                            isCreatingDeck = true
+                        }
+                        .accessibilityIdentifier("jlpt-import-create-deck")
                     } else {
                         DeckMembershipField(
                             decks: decks,
@@ -629,6 +651,18 @@ private struct JLPTSingleImportSheet: View {
                 }
             }
             .task { await loadDecks() }
+            .sheet(isPresented: $isCreatingDeck) {
+                DeckNameEditor(title: "新建牌组", initialName: "") { name in
+                    do {
+                        _ = try await deckService.createDeck(named: name)
+                        await loadDecks()
+                        return true
+                    } catch {
+                        message = error.localizedDescription
+                        return false
+                    }
+                }
+            }
         }
     }
 
@@ -672,6 +706,92 @@ private struct JLPTSingleImportSheet: View {
             }
         } catch {
             isImporting = false
+            message = error.localizedDescription
+        }
+    }
+}
+
+/// v0.5.5 整级导入的目标牌组选择页：只写入既有牌组（可额外加入其他
+/// 成员牌组）；没有牌组时提供新建入口，不再自动创建「JLPT Nx」牌组。
+private struct JLPTLevelImportSheet: View {
+    let level: JLPTLevel
+    let totalCount: Int
+    let deckService: DeckManagementService
+    let onConfirm: (DeckMembershipSelection) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var decks: [DeckSummary] = []
+    @State private var selection = DeckMembershipSelection()
+    @State private var isCreatingDeck = false
+    @State private var message: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    if decks.isEmpty {
+                        Text("导入需要至少一个牌组。")
+                            .foregroundStyle(.secondary)
+                        Button("新建牌组") {
+                            isCreatingDeck = true
+                        }
+                        .accessibilityIdentifier("jlpt-level-import-create-deck")
+                    } else {
+                        DeckMembershipField(
+                            decks: decks,
+                            selection: $selection,
+                            rowAccessibilityID: "jlpt-level-import-deck-picker"
+                        )
+                    }
+                } header: {
+                    Text("目标牌组")
+                } footer: {
+                    Text("共 \(totalCount) 个词条；归属牌组决定新卡额度与复习归因。")
+                }
+
+                if let message {
+                    Section { Text(message) }
+                }
+            }
+            .navigationTitle("导入 \(level.rawValue) 全级")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("导入") {
+                        onConfirm(selection)
+                        dismiss()
+                    }
+                    .disabled(selection.homeDeckID == nil || selection.deckIDs.isEmpty)
+                    .accessibilityIdentifier("jlpt-level-import-confirm")
+                }
+            }
+            .task { await loadDecks() }
+            .sheet(isPresented: $isCreatingDeck) {
+                DeckNameEditor(title: "新建牌组", initialName: "JLPT \(level.rawValue)") { name in
+                    do {
+                        _ = try await deckService.createDeck(named: name)
+                        await loadDecks()
+                        return true
+                    } catch {
+                        message = error.localizedDescription
+                        return false
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadDecks() async {
+        do {
+            decks = try await deckService.fetchDecks()
+            selection = selection.normalized(decks: decks)
+            if selection.deckIDs.isEmpty, let first = decks.first?.id {
+                selection = DeckMembershipSelection(single: first)
+            }
+        } catch {
             message = error.localizedDescription
         }
     }

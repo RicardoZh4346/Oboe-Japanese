@@ -5,7 +5,6 @@ import SwiftUI
 private enum PrimaryTab: Hashable {
     case today
     case decks
-    case add
     case settings
 }
 
@@ -144,6 +143,7 @@ struct RootTabView: View {
                     studyService: studySessionService
                 ),
                 inboxImageStore: dependencies.inboxImageStore,
+                ocrService: dependencies.ocrService,
                 drainSharedCaptures: { await dependencies.drainSharedCaptures() },
                 pendingContinueItemID: dependencies.pendingContinueItemID,
                 clearPendingContinueItem: {
@@ -176,38 +176,16 @@ struct RootTabView: View {
                 jlptEnrichmentStatus: dependencies.jlptEnrichmentStatus,
                 scheduleJLPTEnrichment: { dependencies.scheduleJLPTEnrichment() },
                 adaptiveCardService: adaptiveCardService,
-                aiRepairService: aiRepairService
+                aiRepairService: aiRepairService,
+                aiCardGenerationService: aiCardGenerationService,
+                sentenceAnalysisService: sentenceAnalysisService,
+                sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService
             )
                 .id(databaseGeneration)
                 .tabItem {
                     Label("牌组", systemImage: "rectangle.stack")
                 }
                 .tag(PrimaryTab.decks)
-
-            AddView(
-                deckService: deckManagementService,
-                vocabularyService: vocabularyService,
-                grammarService: grammarService,
-                knowledgePointService: knowledgePointService,
-                contentCardService: contentCardService,
-                aiCardGenerationService: aiCardGenerationService,
-                sentenceAnalysisService: sentenceAnalysisService,
-                sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
-                historyService: studyHistoryService,
-                studyService: studySessionService,
-                speechService: speechService,
-                inboxService: inboxService,
-                inboxImageStore: dependencies.inboxImageStore,
-                ocrService: dependencies.ocrService,
-                drainSharedCaptures: { await dependencies.drainSharedCaptures() },
-                sharedCapturesAwaitingImport: dependencies.sharedCapturesAwaitingImport,
-                importAwaitingSharedCaptures: { await dependencies.importAwaitingSharedCaptures() }
-            )
-                .id(databaseGeneration)
-                .tabItem {
-                    Label("添加", systemImage: "plus.circle")
-                }
-                .tag(PrimaryTab.add)
 
             SettingsView(
                 dependencies: dependencies,

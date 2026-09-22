@@ -80,6 +80,12 @@ extension AppDependencies {
                     nowMs
                 ]
             )
+            try insertHomeDeckMembership(
+                noteID: noteID,
+                deckID: deckID,
+                atMs: nowMs,
+                in: db
+            )
             try db.execute(
                 sql: """
                     INSERT INTO cards(
@@ -301,6 +307,12 @@ extension AppDependencies {
                         nowMs
                     ]
                 )
+                try insertHomeDeckMembership(
+                    noteID: trendNoteID,
+                    deckID: deckID,
+                    atMs: nowMs,
+                    in: db
+                )
                 try db.execute(
                     sql: """
                         INSERT INTO cards(
@@ -416,6 +428,12 @@ extension AppDependencies {
                         nowMs,
                         nowMs
                     ]
+                )
+                try insertHomeDeckMembership(
+                    noteID: noteID,
+                    deckID: deckID,
+                    atMs: nowMs,
+                    in: db
                 )
             }
             // T19: an example on the listening note makes the accessibility
@@ -567,6 +585,12 @@ extension AppDependencies {
                         nowMs
                     ]
                 )
+                try insertHomeDeckMembership(
+                    noteID: noteID,
+                    deckID: deckID,
+                    atMs: nowMs,
+                    in: db
+                )
             }
             for (noteID, template, offset) in [
                 (noteAID, "vocabulary_listening", -400_000),
@@ -671,6 +695,12 @@ extension AppDependencies {
                     nowMs
                 ]
             )
+            try insertHomeDeckMembership(
+                noteID: builtinNoteID,
+                deckID: deckID,
+                atMs: nowMs,
+                in: db
+            )
             try db.execute(
                 sql: """
                     INSERT INTO notes(
@@ -685,6 +715,12 @@ extension AppDependencies {
                     nowMs,
                     nowMs
                 ]
+            )
+            try insertHomeDeckMembership(
+                noteID: manualNoteID,
+                deckID: deckID,
+                atMs: nowMs,
+                in: db
             )
             for (noteID, template, lapses) in [
                 (builtinNoteID, "vocabulary_ja_zh", 6),
@@ -894,5 +930,25 @@ extension AppDependencies {
             ]
         )
     }
+}
+
+/// v0.5.5：主牌组 scope 与牌组摘要都以 `note_decks` 为权威成员关系——
+/// seed 直插 notes 时必须同步写入 home-deck membership（生产写入路径如此；
+/// v12 夹具除外，迁移负责回填）。写在 `pool.write` 闭包内调用，故为自由
+/// 函数而非 AppDependencies 方法（闭包 @Sendable，不能捕获 self）。
+private func insertHomeDeckMembership(
+    noteID: UUID,
+    deckID: UUID,
+    atMs: Int64,
+    in db: Database
+) throws {
+    try db.execute(
+        sql: "INSERT INTO note_decks(note_id, deck_id, added_at_ms) VALUES (?, ?, ?)",
+        arguments: [
+            DatabaseValueCodec.encode(noteID),
+            DatabaseValueCodec.encode(deckID),
+            atMs
+        ]
+    )
 }
 #endif

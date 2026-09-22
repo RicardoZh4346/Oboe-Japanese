@@ -26,6 +26,10 @@ struct DecksView: View {
     /// card detail — same services as the Today-tab Adaptive center.
     private let adaptiveCardService: AdaptiveCardService
     private let aiRepairService: AIRepairService
+    /// v0.5.5：牌组详情内的添加流需要 AI 制卡/句子分析服务。
+    private let aiCardGenerationService: AICardGenerationService
+    private let sentenceAnalysisService: SentenceAnalysisService
+    private let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
 
     init(
         service: DeckManagementService,
@@ -45,7 +49,10 @@ struct DecksView: View {
         jlptEnrichmentStatus: JLPTEnrichmentStatus,
         scheduleJLPTEnrichment: @escaping () -> Void,
         adaptiveCardService: AdaptiveCardService,
-        aiRepairService: AIRepairService
+        aiRepairService: AIRepairService,
+        aiCardGenerationService: AICardGenerationService,
+        sentenceAnalysisService: SentenceAnalysisService,
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     ) {
         deckService = service
         self.vocabularyService = vocabularyService
@@ -65,6 +72,9 @@ struct DecksView: View {
         self.scheduleJLPTEnrichment = scheduleJLPTEnrichment
         self.adaptiveCardService = adaptiveCardService
         self.aiRepairService = aiRepairService
+        self.aiCardGenerationService = aiCardGenerationService
+        self.sentenceAnalysisService = sentenceAnalysisService
+        self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         _model = State(
             initialValue: DecksViewModel(
                 service: service,
@@ -200,7 +210,10 @@ struct DecksView: View {
                     adaptiveCardService: adaptiveCardService,
                     adaptivePreferencesService: adaptivePreferencesService,
                     aiRepairService: aiRepairService,
-                    speechService: speechService
+                    speechService: speechService,
+                    aiCardGenerationService: aiCardGenerationService,
+                    sentenceAnalysisService: sentenceAnalysisService,
+                    sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService
                 )
             }
             .sheet(isPresented: $isPresentingCreate) {
@@ -491,8 +504,12 @@ private struct DeckDetailView: View {
     let adaptivePreferencesService: AdaptivePreferencesService
     let aiRepairService: AIRepairService
     let speechService: any SpeechService
+    let aiCardGenerationService: AICardGenerationService
+    let sentenceAnalysisService: SentenceAnalysisService
+    let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
 
     @Environment(\.dismiss) private var dismiss
+    @State private var isPresentingAdd = false
     @State private var isPresentingRename = false
     @State private var isConfirmingDelete = false
     @State private var isChoosingNonEmptyDeletion = false
@@ -518,7 +535,10 @@ private struct DeckDetailView: View {
         adaptiveCardService: AdaptiveCardService,
         adaptivePreferencesService: AdaptivePreferencesService,
         aiRepairService: AIRepairService,
-        speechService: any SpeechService
+        speechService: any SpeechService,
+        aiCardGenerationService: AICardGenerationService,
+        sentenceAnalysisService: SentenceAnalysisService,
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     ) {
         self.deckID = deckID
         self.model = model
@@ -535,6 +555,9 @@ private struct DeckDetailView: View {
         self.adaptivePreferencesService = adaptivePreferencesService
         self.aiRepairService = aiRepairService
         self.speechService = speechService
+        self.aiCardGenerationService = aiCardGenerationService
+        self.sentenceAnalysisService = sentenceAnalysisService
+        self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         _contentModel = State(
             initialValue: DeckContentViewModel(
                 deckID: deckID,
@@ -620,9 +643,10 @@ private struct DeckDetailView: View {
                             ProgressView("正在载入内容…")
                         } else if contentModel.items.isEmpty {
                             Label("暂无学习内容", systemImage: "tray")
-                            Text("可从“添加”入口填写并保存单词或语法草稿。")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                            Button("添加单词或语法") {
+                                isPresentingAdd = true
+                            }
+                            .accessibilityIdentifier("deck-add-empty-button")
                         } else {
                             ForEach(contentModel.items) { item in
                                 NavigationLink {
@@ -669,6 +693,32 @@ private struct DeckDetailView: View {
                 }
                 .navigationTitle(deck.name)
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            isPresentingAdd = true
+                        } label: {
+                            Label("添加", systemImage: "plus")
+                        }
+                        .accessibilityIdentifier("deck-add-button")
+                    }
+                }
+                .navigationDestination(isPresented: $isPresentingAdd) {
+                    AddContentEditorView(
+                        deckService: deckService,
+                        vocabularyService: vocabularyService,
+                        grammarService: grammarService,
+                        knowledgePointService: knowledgePointService,
+                        contentCardService: contentCardService,
+                        aiCardGenerationService: aiCardGenerationService,
+                        sentenceAnalysisService: sentenceAnalysisService,
+                        sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                        historyService: historyService,
+                        speechService: speechService,
+                        studyService: studyService,
+                        requiredDeckID: deckID
+                    )
+                }
                 .searchable(
                     text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),
@@ -1373,88 +1423,6 @@ private struct DeckMoveBeforeDeletionSheet: View {
                 dismiss()
             } else {
                 isWorking = false
-            }
-        }
-    }
-}
-
-private struct DeckNameEditor: View {
-    let title: String
-    let onSave: (String) async -> Bool
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var name: String
-    @State private var isSaving = false
-
-    init(
-        title: String,
-        initialName: String,
-        onSave: @escaping (String) async -> Bool
-    ) {
-        self.title = title
-        self.onSave = onSave
-        _name = State(initialValue: initialName)
-    }
-
-    private var isNameValid: Bool {
-        (try? DeckName(validating: name)) != nil
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        TextField("牌组名称", text: $name)
-                            .textInputAutocapitalization(.never)
-                            .submitLabel(.done)
-                            .accessibilityIdentifier("deck-name-field")
-                            .onSubmit(save)
-                        if !name.isEmpty {
-                            Button {
-                                name = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("清空牌组名称")
-                            .accessibilityIdentifier("deck-name-clear-button")
-                        }
-                    }
-                } footer: {
-                    Text("名称不能为空，最多 \(DeckName.maximumLength) 个字符。")
-                }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .interactiveDismissDisabled(isSaving)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") {
-                        dismiss()
-                    }
-                    .disabled(isSaving)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存", action: save)
-                        .disabled(!isNameValid || isSaving)
-                        .accessibilityIdentifier("deck-name-save-button")
-                }
-            }
-        }
-    }
-
-    private func save() {
-        guard isNameValid, !isSaving else {
-            return
-        }
-        isSaving = true
-        Task {
-            if await onSave(name) {
-                dismiss()
-            } else {
-                isSaving = false
             }
         }
     }

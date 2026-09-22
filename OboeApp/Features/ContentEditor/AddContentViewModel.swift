@@ -110,6 +110,9 @@ final class AddContentViewModel {
     var sentenceCardStatusMessage: String?
     /// 当前主牌组（`load` 时读取）：新选择默认把主牌组作为 home。
     var primaryDeckID: UUID?
+    /// v0.5.5 牌组详情进入的添加流：该牌组是必选成员，不能被移除；
+    /// home 默认为它（用户仍可把 home 切到其他成员）。
+    let requiredDeckID: UUID?
     var errorMessage: String?
     var isLoading = true
     var isSaving = false
@@ -157,6 +160,7 @@ final class AddContentViewModel {
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         studyService: StudySessionService? = nil,
+        requiredDeckID: UUID? = nil,
         capture: CaptureEditorSession? = nil
     ) {
         self.deckService = deckService
@@ -168,6 +172,7 @@ final class AddContentViewModel {
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         self.studyService = studyService
+        self.requiredDeckID = requiredDeckID
         inboxService = capture?.inboxService
         captureSession = capture
         if let capture {
@@ -253,9 +258,26 @@ final class AddContentViewModel {
                 decks: decks,
                 preferredHomeID: primaryDeckID
             )
-            applyMembership(normalized, for: kind)
+            applyMembership(enforcingRequiredDeck(normalized), for: kind)
             persistCaptureResume()
         }
+    }
+
+    /// 牌组详情进入时当前牌组不可移除：归一化后强制补回成员关系；
+    /// home 为空时默认取当前牌组。
+    private func enforcingRequiredDeck(
+        _ selection: DeckMembershipSelection
+    ) -> DeckMembershipSelection {
+        guard let requiredDeckID,
+              decks.contains(where: { $0.id == requiredDeckID }) else {
+            return selection
+        }
+        var result = selection
+        result.deckIDs.insert(requiredDeckID)
+        if result.homeDeckID == nil {
+            result.homeDeckID = requiredDeckID
+        }
+        return result
     }
 
     private func applyMembership(
@@ -275,11 +297,15 @@ final class AddContentViewModel {
         }
     }
 
-    /// 新建内容的默认选择：主牌组（若存在）否则列表首个牌组。
+    /// 新建内容的默认选择：来源牌组（requiredDeckID）→ 主牌组 → 列表
+    /// 首个牌组，依次回退。
     private func defaultMembership() -> DeckMembershipSelection {
-        guard let fallback = primaryDeckID.flatMap({ id in
+        let preferred = requiredDeckID.flatMap { id in
             decks.contains(where: { $0.id == id }) ? id : nil
-        }) ?? decks.first?.id else {
+        } ?? primaryDeckID.flatMap { id in
+            decks.contains(where: { $0.id == id }) ? id : nil
+        } ?? decks.first?.id
+        guard let fallback = preferred else {
             return DeckMembershipSelection()
         }
         return DeckMembershipSelection(single: fallback)
@@ -313,7 +339,7 @@ final class AddContentViewModel {
             if normalized.deckIDs.isEmpty {
                 normalized = defaultMembership()
             }
-            applyMembership(normalized, for: kind)
+            applyMembership(enforcingRequiredDeck(normalized), for: kind)
         }
     }
 
@@ -926,6 +952,20 @@ final class AddContentViewModel {
         }
     }
 
+    /// 无牌组时的「创建牌组」入口：建好后刷新列表并归一化选择
+    /// （新牌组自动成为默认成员）。
+    func createDeck(named name: String) async -> Bool {
+        do {
+            _ = try await deckService.createDeck(named: name)
+            decks = try await deckService.fetchDecks()
+            normalizeMemberships()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     /// Restores a capture session: the linked draft by ID (never the global
     /// latest slot), payload-level user choices, or a fresh fragment prefill.
     /// Stale analysis data is dropped with a visible notice.
@@ -964,8 +1004,9 @@ final class AddContentViewModel {
             homeDeckID: homeDeckID,
             deckIDs: deckIDs
         ).normalized(decks: decks, preferredHomeID: primaryDeckID)
-        guard !selection.deckIDs.isEmpty else { return }
-        applyMembership(selection, for: kind)
+        let enforced = enforcingRequiredDeck(selection)
+        guard !enforced.deckIDs.isEmpty else { return }
+        applyMembership(enforced, for: kind)
     }
 
     /// The fragment recorded as a UTF-16 selection range inside the captured
@@ -1254,8 +1295,9 @@ final class AddContentViewModel {
             homeDeckID: homeDeckID,
             deckIDs: deckIDs
         ).normalized(decks: decks, preferredHomeID: primaryDeckID)
-        guard !selection.deckIDs.isEmpty else { return }
-        applyMembership(selection, for: kind)
+        let enforced = enforcingRequiredDeck(selection)
+        guard !enforced.deckIDs.isEmpty else { return }
+        applyMembership(enforced, for: kind)
     }
 
     private func restoreVocabularyDraft() async throws {

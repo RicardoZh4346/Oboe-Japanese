@@ -201,11 +201,18 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         XCTAssertEqual(counts.1, 0)
     }
 
-    func testLevelImportUsesBatchesCreatesOneDeckAndCanResumeWithoutDuplicates() async throws {
+    func testLevelImportUsesBatchesWritesIntoExistingDeckAndCanResumeWithoutDuplicates() async throws {
         let location = try JLPTTestLocation()
         defer { location.remove() }
         let database = try OboeDatabase(path: location.userDatabaseURL.path)
         let importer = GRDBJLPTImporter(database: database)
+        let deckID = UUID()
+        try await database.pool.write { db in
+            try db.execute(
+                sql: "INSERT INTO decks VALUES (?, 'JLPT 目标', 0, 1, 1)",
+                arguments: [DatabaseValueCodec.encode(deckID)]
+            )
+        }
         var words = (0..<80).map { index in
             Self.vocabulary(
                 id: String(format: "openjlpt:N5:%06d", index),
@@ -228,6 +235,7 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         let first = try await importer.importLevel(
             .n5,
             vocabulary: words,
+            deckID: deckID,
             directions: [.japaneseToChinese]
         ) { value in
             await progress.append(value)
@@ -240,6 +248,7 @@ final class GRDBJLPTLibraryTests: XCTestCase {
         let second = try await importer.importLevel(
             .n5,
             vocabulary: words,
+            deckID: deckID,
             directions: [.japaneseToChinese]
         ) { _ in }
         XCTAssertEqual(second.imported, 0)
@@ -248,14 +257,49 @@ final class GRDBJLPTLibraryTests: XCTestCase {
 
         let counts = try await database.pool.read { db in
             (
-                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM decks WHERE name = 'JLPT N5'") ?? -1,
-                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? -1,
-                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cards") ?? -1
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM decks") ?? -1,
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM notes WHERE deck_id = ?",
+                    arguments: [DatabaseValueCodec.encode(deckID)]
+                ) ?? -1,
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cards") ?? -1,
+                try Int.fetchOne(
+                    db,
+                    sql: "SELECT COUNT(*) FROM note_decks WHERE deck_id = ?",
+                    arguments: [DatabaseValueCodec.encode(deckID)]
+                ) ?? -1
             )
         }
+        // v0.5.5：不自动建牌组——全库仍只有预先创建的那一个。
         XCTAssertEqual(counts.0, 1)
         XCTAssertEqual(counts.1, 80)
         XCTAssertEqual(counts.2, 80)
+        XCTAssertEqual(counts.3, 80)
+    }
+
+    func testLevelImportRejectsMissingDeck() async throws {
+        let location = try JLPTTestLocation()
+        defer { location.remove() }
+        let database = try OboeDatabase(path: location.userDatabaseURL.path)
+        let importer = GRDBJLPTImporter(database: database)
+        let words = [Self.vocabulary(id: "openjlpt:N5:000001", headword: "食べる")]
+
+        do {
+            _ = try await importer.importLevel(
+                .n5,
+                vocabulary: words,
+                deckID: UUID(),
+                directions: [.japaneseToChinese]
+            ) { _ in }
+            XCTFail("Expected missing deck to abort the level import")
+        } catch {
+            XCTAssertEqual(error as? JLPTImportError, .deckNotFound)
+        }
+        let noteCount = try await database.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? -1
+        }
+        XCTAssertEqual(noteCount, 0)
     }
 }
 

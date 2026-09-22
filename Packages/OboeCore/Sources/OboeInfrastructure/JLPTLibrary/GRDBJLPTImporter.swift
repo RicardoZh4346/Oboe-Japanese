@@ -87,11 +87,25 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
     public func importLevel(
         _ level: JLPTLevel,
         vocabulary: [BuiltinJLPTVocabulary],
+        deckID: UUID,
+        deckIDs: Set<UUID>? = nil,
         directions: Set<VocabularyCardDirection>,
         progress: @escaping @Sendable (JLPTImportProgress) async -> Void
     ) async throws -> JLPTImportResult {
         guard !directions.isEmpty else { throw JLPTImportError.directionRequired }
-        let deckID = try await ensureDeck(named: "JLPT \(level.rawValue)")
+        // v0.5.5：批量导入只写入既有牌组，不再创建「JLPT Nx」牌组。
+        let membership = (deckIDs ?? []).union([deckID])
+        try await pool.read { db in
+            for memberDeckID in membership {
+                guard try Bool.fetchOne(
+                    db,
+                    sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",
+                    arguments: [DatabaseValueCodec.encode(memberDeckID)]
+                ) == true else {
+                    throw JLPTImportError.deckNotFound
+                }
+            }
+        }
         var imported = 0
         var skipped = 0
         var failed = 0
@@ -115,6 +129,7 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
                     if try Self.insert(
                         item,
                         deckID: deckID,
+                        deckIDs: membership,
                         meaningZH: meaning,
                         directions: directions,
                         timestamp: timestamp,
@@ -144,34 +159,6 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
             skipped: skipped,
             failed: failed
         )
-    }
-
-    private func ensureDeck(named name: String) async throws -> UUID {
-        try await pool.write { db in
-            if let rawID: String = try String.fetchOne(
-                db,
-                sql: "SELECT id FROM decks WHERE name = ? ORDER BY sort_order, id LIMIT 1",
-                arguments: [name]
-            ) {
-                return try DatabaseValueCodec.decodeUUID(rawID)
-            }
-            let id = UUID()
-            let timestamp = try DatabaseValueCodec.encode(Date())
-            let sortOrder = try Int.fetchOne(
-                db,
-                sql: "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM decks"
-            ) ?? 0
-            try db.execute(
-                sql: """
-                    INSERT INTO decks(id, name, sort_order, created_at_ms, updated_at_ms)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                arguments: [
-                    DatabaseValueCodec.encode(id), name, sortOrder, timestamp, timestamp
-                ]
-            )
-            return id
-        }
     }
 
     private static func insert(

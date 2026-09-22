@@ -8,11 +8,12 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    func testSwitchesBetweenFourPrimaryTabs() {
+    func testSwitchesBetweenThreePrimaryTabs() {
         let app = XCUIApplication()
         app.launch()
 
-        let expectedTabs = ["今日", "牌组", "添加", "设置"]
+        // v0.5.5：「添加」入口迁入牌组详情，一级 tab 收敛为三个。
+        let expectedTabs = ["今日", "牌组", "设置"]
         for tabName in expectedTabs {
             let tab = app.tabBars.buttons[tabName]
             XCTAssertTrue(tab.waitForExistence(timeout: 2), "缺少 \(tabName) 入口")
@@ -22,6 +23,33 @@ final class OboeNavigationUITests: XCTestCase {
                 "切换到 \(tabName) 后未显示对应页面"
             )
         }
+    }
+
+    /// v0.5.5 每日统计：complete 种子含一条有效 review_log，统计页应
+    /// 显示连续天数 ≥1 且最近 30 天列表可独立加载。
+    @MainActor
+    func testDailyStatisticsOpensFromTodayAndShowsStreak() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_TODAY_SEED"] = "complete"
+        app.launch()
+
+        let entry = app.descendants(matching: .any)["today-statistics-entry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["每日统计"].waitForExistence(timeout: 5),
+            "未进入每日统计页"
+        )
+        XCTAssertTrue(
+            app.staticTexts["statistics-streak-count"].waitForExistence(timeout: 5)
+        )
+        XCTAssertEqual(
+            app.staticTexts["statistics-streak-count"].label,
+            "1",
+            "complete 种子含一条今日有效评分，streak 应为 1"
+        )
     }
 
     @MainActor
@@ -104,7 +132,19 @@ final class OboeNavigationUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         app.buttons["jlpt-level-N5"].tap()
         app.buttons["导入全级"].tap()
-        app.buttons["导入到 JLPT N5 牌组"].tap()
+        // v0.5.5：整级导入先显式选牌组——确认弹窗后进选牌组 sheet，空库需先建牌组。
+        app.buttons["选择牌组并导入"].tap()
+        let createDeck = app.buttons["jlpt-level-import-create-deck"]
+        XCTAssertTrue(createDeck.waitForExistence(timeout: 5))
+        createDeck.tap()
+        let deckNameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(deckNameField.waitForExistence(timeout: 2))
+        deckNameField.tap()
+        deckNameField.typeText("N5 全级")
+        app.buttons["deck-name-save-button"].tap()
+        let confirm = app.buttons["jlpt-level-import-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         XCTAssertTrue(app.alerts["操作结果"].waitForExistence(timeout: 60))
         let result = app.alerts.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "新增 ")).firstMatch.label
         let imported = Int(result.components(separatedBy: "新增 ").last?
@@ -134,7 +174,9 @@ final class OboeNavigationUITests: XCTestCase {
 
         // Dashboard entry: ONE word under 易错 although two leech
         // directions exist — counting unit is the library entry.
+        // 入口在「已加入的辅助状态」section 之后，SE 首屏之外——先滚动显露。
         let entry = app.buttons["jlpt-weak-entry"]
+        revealExistence(entry, in: app)
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         XCTAssertTrue(entry.label.contains("经常遗忘 1 个词"), entry.label)
         entry.tap()
@@ -362,11 +404,6 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["牌组"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.alerts["无法完成操作"].waitForExistence(timeout: 2))
 
-        let addTab = app.tabBars.buttons["添加"]
-        addTab.tap()
-        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.alerts["无法完成操作"].waitForExistence(timeout: 2))
-
         let todayTab = app.tabBars.buttons["今日"]
         todayTab.tap()
         XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
@@ -448,9 +485,10 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["learning-settings-backup-note"].exists)
 
         app.buttons["learning-settings-save-button"].tap()
-        XCTAssertTrue(
-            app.staticTexts["learning-settings-status"].waitForExistence(timeout: 5)
-        )
+        // 状态行在保存按钮下方，SE 首屏之外——先滚动显露再等待。
+        let saveStatus = app.staticTexts["learning-settings-status"]
+        revealExistence(saveStatus, in: app)
+        XCTAssertTrue(saveStatus.waitForExistence(timeout: 5))
 
         app.terminate()
         app.launch()
@@ -510,7 +548,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["P21b Small Screen"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "P21b Small Screen")
         let kindPicker = app.descendants(matching: .any)["add-content-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
         let segmentedPicker = app.segmentedControls["add-content-kind-picker"]
@@ -544,7 +582,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(
@@ -617,13 +655,15 @@ final class OboeNavigationUITests: XCTestCase {
         reveal(capability, in: app)
         XCTAssertTrue(capability.exists)
 
+        // 未配置 Key 时按钮处于禁用态——disabled 元素不可 hit-test，
+        // reveal() 会扫过它导致离屏卸载，只能用存在性显露。
         let testButton = app.buttons["ai-test-connection-button"]
-        reveal(testButton, in: app)
+        revealExistence(testButton, in: app)
         XCTAssertTrue(testButton.exists)
         XCTAssertFalse(testButton.isEnabled, "未启用且没有 Key 时不得发起连接测试")
 
         let costNotice = app.staticTexts["ai-connection-cost-note"]
-        reveal(costNotice, in: app)
+        revealExistence(costNotice, in: app)
         XCTAssertTrue(costNotice.exists)
     }
 
@@ -659,8 +699,8 @@ final class OboeNavigationUITests: XCTestCase {
         let keyConfigured = app.descendants(matching: .any)["ai-key-configured"]
         XCTAssertTrue(keyConfigured.waitForExistence(timeout: 5))
 
-        let addTab = app.tabBars.buttons["添加"]
-        addTab.tap()
+        createDeck(in: app, named: "AI 制卡")
+        openAddFlow(in: app, deckName: "AI 制卡")
         let aiInput = app.textFields["ai-card-vocabulary-input"]
         XCTAssertTrue(aiInput.waitForExistence(timeout: 5))
         aiInput.tap()
@@ -699,7 +739,7 @@ final class OboeNavigationUITests: XCTestCase {
         let formalSave = app.buttons["vocabulary-formal-save-button"]
         reveal(formalSave, in: app)
         XCTAssertTrue(formalSave.exists)
-        XCTAssertFalse(formalSave.isEnabled, "未选择牌组时不能正式入库")
+        XCTAssertTrue(formalSave.isEnabled, "添加流自带目标牌组，候选应用后可直接入库")
     }
 
     @MainActor
@@ -734,8 +774,8 @@ final class OboeNavigationUITests: XCTestCase {
             app.descendants(matching: .any)["ai-key-configured"].waitForExistence(timeout: 5)
         )
 
-        let addTab = app.tabBars.buttons["添加"]
-        addTab.tap()
+        createDeck(in: app, named: "句子分析")
+        openAddFlow(in: app, deckName: "句子分析")
         let kindPicker = app.segmentedControls["add-content-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
         kindPicker.buttons["句子分析"].tap()
@@ -752,6 +792,8 @@ final class OboeNavigationUITests: XCTestCase {
         analyze.tap()
 
         let translation = app.descendants(matching: .any)["sentence-analysis-translation"]
+        // 结果段在首屏下方：List 只挂载视口附近的行，需先滚动显露。
+        revealExistence(translation, in: app)
         XCTAssertTrue(translation.waitForExistence(timeout: 5))
         XCTAssertTrue(translation.label.contains("你去过日本吗"))
         let initialAlignment = app.staticTexts["sentence-analysis-aligned"]
@@ -784,16 +826,14 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        openAddFlow(in: app, deckName: "句子分析")
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
         kindPicker.buttons["句子分析"].tap()
         XCTAssertTrue(sentenceInput.waitForExistence(timeout: 5))
         XCTAssertEqual(sentenceInput.value as? String, "日本に行ったことがありますか。")
-        XCTAssertTrue(
-            app.descendants(matching: .any)["sentence-analysis-translation"]
-                .waitForExistence(timeout: 5)
-        )
+        let restoredTranslation = app.descendants(matching: .any)["sentence-analysis-translation"]
+        revealExistence(restoredTranslation, in: app)
+        XCTAssertTrue(restoredTranslation.waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["已恢复上次分析草稿"].exists)
     }
 
@@ -833,7 +873,7 @@ final class OboeNavigationUITests: XCTestCase {
             app.descendants(matching: .any)["ai-key-configured"].waitForExistence(timeout: 5)
         )
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "P20 Cards")
         let kindPicker = app.segmentedControls["add-content-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
         kindPicker.buttons["句子分析"].tap()
@@ -843,16 +883,17 @@ final class OboeNavigationUITests: XCTestCase {
         sentenceInput.typeText("日本に行ったことがありますか。")
         dismissKeyboard(in: app)
         app.buttons["sentence-analysis-start-button"].tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["sentence-analysis-translation"]
-                .waitForExistence(timeout: 5)
-        )
-        decksTab.tap()
-        app.tabBars.buttons["添加"].tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["sentence-analysis-translation"]
-                .waitForExistence(timeout: 5)
-        )
+        let translation = app.descendants(matching: .any)["sentence-analysis-translation"]
+        revealExistence(translation, in: app)
+        XCTAssertTrue(translation.waitForExistence(timeout: 5))
+        // 牌组详情的添加流每次进入都是新编辑器实例：草稿已恢复，
+        // 但需要重新切到「句子分析」分页才会渲染结果段。
+        openAddFlow(in: app, deckName: "P20 Cards")
+        XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
+        kindPicker.buttons["句子分析"].tap()
+        let restoredTranslation = app.descendants(matching: .any)["sentence-analysis-translation"]
+        revealExistence(restoredTranslation, in: app)
+        XCTAssertTrue(restoredTranslation.waitForExistence(timeout: 5))
 
         let selectVocabulary = app.switches["sentence-card-select-vocabulary-1"]
         reveal(selectVocabulary, in: app)
@@ -880,8 +921,12 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["deck-note-count"].label.contains("2"))
         // 词汇知识点固定生成三个方向卡 + 语法 1 张 = 4。
         XCTAssertTrue(app.staticTexts["deck-card-count"].label.contains("4"))
+        // 知识行在统计卡下方的 List 里，SE 首屏只挂视口附近几行——
+        // 两行顺序不定（created_at 并列时按 id 排序），双向扫描显露。
+        revealBidirectional(app.staticTexts["行く"], in: app)
         XCTAssertTrue(app.staticTexts["行く"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["～たことがある"].exists)
+        revealBidirectional(app.staticTexts["～たことがある"], in: app)
+        XCTAssertTrue(app.staticTexts["～たことがある"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -1140,14 +1185,14 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    func testVocabularyDraftPersistsAndFormalSaveRequiresDeck() {
+    func testVocabularyDraftPersistsAcrossRelaunch() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        // v0.5.5：添加流必须经由牌组进入，目标牌组在入口已确定。
+        createDeck(in: app, named: "词汇草稿")
+        openAddFlow(in: app, deckName: "词汇草稿")
 
         let headwordField = app.textFields["vocabulary-headword-field"]
         let meaningField = app.textFields["vocabulary-meaning-field"]
@@ -1175,12 +1220,11 @@ final class OboeNavigationUITests: XCTestCase {
         let formalSave = app.buttons["vocabulary-formal-save-button"]
         reveal(formalSave, in: app)
         XCTAssertTrue(formalSave.exists)
-        XCTAssertFalse(formalSave.isEnabled)
+        XCTAssertTrue(formalSave.isEnabled, "入口牌组即目标牌组，字段齐即可入库")
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        openAddFlow(in: app, deckName: "词汇草稿")
 
         let kindPicker = app.segmentedControls["add-content-kind-picker"]
         revealExistenceBySwipingDown(kindPicker, in: app)
@@ -1197,7 +1241,7 @@ final class OboeNavigationUITests: XCTestCase {
         let restoredFormalSave = app.buttons["vocabulary-formal-save-button"]
         reveal(restoredFormalSave, in: app)
         XCTAssertTrue(restoredFormalSave.exists)
-        XCTAssertFalse(restoredFormalSave.isEnabled)
+        XCTAssertTrue(restoredFormalSave.isEnabled)
     }
 
     @MainActor
@@ -1207,9 +1251,8 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DYNAMIC_TYPE"] = "ax5"
         app.launch()
 
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        createDeck(in: app, named: "T08 词性")
+        openAddFlow(in: app, deckName: "T08 词性")
 
         let additionalFields = app.buttons["更多字段（可选）"]
         reveal(additionalFields, in: app)
@@ -1247,9 +1290,8 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        createDeck(in: app, named: "T09 音调")
+        openAddFlow(in: app, deckName: "T09 音调")
 
         let additionalFields = app.buttons["更多字段（可选）"]
         reveal(additionalFields, in: app)
@@ -1302,8 +1344,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["P08 验收"].waitForExistence(timeout: 5))
 
-        let addTab = app.tabBars.buttons["添加"]
-        addTab.tap()
+        openAddFlow(in: app, deckName: "P08 验收")
         // 新表单不再提供方向选择：词的全部方向固定创建。
         XCTAssertFalse(app.switches["vocabulary-direction-zh-ja"].exists)
         XCTAssertFalse(app.switches["vocabulary-direction-listening"].exists)
@@ -1393,7 +1434,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["T16 验收"].waitForExistence(timeout: 5))
 
         // 新建表单不再提供方向选择：默认创建全部三个方向。
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "T16 验收")
         XCTAssertFalse(app.switches["vocabulary-direction-listening"].exists)
 
         let headwordField = app.textFields["vocabulary-headword-field"]
@@ -1448,9 +1489,8 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        createDeck(in: app, named: "语法草稿")
+        openAddFlow(in: app, deckName: "语法草稿")
 
         let kindPicker = app.segmentedControls["add-content-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
@@ -1473,12 +1513,11 @@ final class OboeNavigationUITests: XCTestCase {
         let formalSave = app.buttons["grammar-formal-save-button"]
         reveal(formalSave, in: app)
         XCTAssertTrue(formalSave.exists)
-        XCTAssertFalse(formalSave.isEnabled)
+        XCTAssertTrue(formalSave.isEnabled, "入口牌组即目标牌组，字段齐即可入库")
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
+        openAddFlow(in: app, deckName: "语法草稿")
         revealExistenceBySwipingDown(kindPicker, in: app)
         XCTAssertTrue(kindPicker.exists)
         kindPicker.buttons["语法"].tap()
@@ -1519,7 +1558,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["P11 Flow"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "P11 Flow")
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(headword, in: app)
@@ -1543,7 +1582,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["today-learned-count"].label, "0")
         XCTAssertEqual(app.staticTexts["today-review-answer-count"].label, "0")
         XCTAssertEqual(app.staticTexts["today-answer-count"].label, "0")
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         XCTAssertTrue(start.isEnabled)
         start.tap()
@@ -1557,20 +1596,20 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["review-rating-good"].exists)
         XCTAssertTrue(app.buttons["review-rating-easy"].exists)
 
-        app.navigationBars["全部牌组"].buttons.element(boundBy: 0).tap()
+        app.navigationBars["P11 Flow"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["today-new-count"].label, "1")
         XCTAssertEqual(app.staticTexts["today-remaining-count"].label, "1")
 
-        // v0.5 T13：首页移除逐牌组入口；改由「全部牌组」继续同一队列，
-        // 牌组 scope 学习仍由仓库层接口支持（设计 §4.7）。
+        // v0.5.5：首页 CTA 进入主牌组 scope（首个牌组自动成为主牌组），
+        // 其他牌组的学习仍由牌组详情的「学习此牌组」入口承担。
         XCTAssertFalse(
             app.buttons.matching(
                 NSPredicate(format: "identifier BEGINSWITH 'today-start-deck-'")
             ).firstMatch.exists
         )
         start.tap()
-        XCTAssertTrue(app.navigationBars["全部牌组"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["P11 Flow"].waitForExistence(timeout: 3))
         showReviewAnswer(in: app)
         let easy = app.buttons["review-rating-easy"]
         XCTAssertTrue(easy.waitForExistence(timeout: 3))
@@ -1600,6 +1639,11 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["today-review-answer-count"].label, "0")
         XCTAssertEqual(app.staticTexts["today-answer-count"].label, "1")
         let easyRatingCount = app.descendants(matching: .any)["today-rating-easy-count"]
+        // 评分分布行在统计卡的 LazyVGrid 里，SE 首屏之下需要滚动才会挂载。
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<6 where !easyRatingCount.exists {
+            scroll.swipeUp()
+        }
         XCTAssertTrue(easyRatingCount.waitForExistence(timeout: 3))
         XCTAssertTrue(easyRatingCount.label.contains("1"))
 
@@ -1647,7 +1691,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["Again Wait"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "Again Wait")
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(headword, in: app)
@@ -1664,7 +1708,7 @@ final class OboeNavigationUITests: XCTestCase {
         formalSave.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
@@ -1712,7 +1756,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(finish.waitForExistence(timeout: 3))
         finish.tap()
         // T14: 任务清空后 Hero 呈现「今日完成」非可操作状态卡，
-        // today-start-all-button 只在可学状态下存在。
+        // today-start-button 只在可学状态下存在。
         XCTAssertTrue(
             app.staticTexts["today-day-complete"].waitForExistence(timeout: 5)
         )
@@ -1737,7 +1781,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["Retry Flow"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "Retry Flow")
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(headword, in: app)
@@ -1754,7 +1798,7 @@ final class OboeNavigationUITests: XCTestCase {
         formalSave.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
@@ -1802,7 +1846,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["No Voice"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "No Voice")
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(headword, in: app)
@@ -1819,7 +1863,7 @@ final class OboeNavigationUITests: XCTestCase {
         formalSave.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
@@ -1869,7 +1913,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["Dark Mode"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "Dark Mode")
         let headword = app.textFields["vocabulary-headword-field"]
         let meaning = app.textFields["vocabulary-meaning-field"]
         revealExistence(headword, in: app)
@@ -1886,7 +1930,7 @@ final class OboeNavigationUITests: XCTestCase {
         formalSave.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
@@ -1921,7 +1965,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["XL Text"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
+        openAddFlow(in: app, deckName: "XL Text")
         let kindPicker = app.descendants(matching: .any)["add-content-kind-picker"]
         XCTAssertTrue(kindPicker.waitForExistence(timeout: 5))
         let segmentedPicker = app.segmentedControls["add-content-kind-picker"]
@@ -1953,7 +1997,7 @@ final class OboeNavigationUITests: XCTestCase {
         save.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 5))
@@ -2110,8 +2154,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["Review Transition"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["添加"].tap()
-        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
+        openAddFlow(in: app, deckName: "Review Transition")
         let headword = app.textFields["vocabulary-headword-field"]
         revealExistence(headword, in: app)
         headword.tap()
@@ -2129,7 +2172,7 @@ final class OboeNavigationUITests: XCTestCase {
         save.tap()
 
         app.tabBars.buttons["今日"].tap()
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         XCTAssertTrue(app.buttons["review-show-answer-button"].waitForExistence(timeout: 5))
@@ -2155,7 +2198,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         // 新卡不丢：v12 种子的 6 张 New 卡被今日计划接纳，Hero 可学习。
         XCTAssertTrue(
-            app.buttons["today-start-all-button"].waitForExistence(timeout: 5),
+            app.buttons["today-start-button"].waitForExistence(timeout: 5),
             "升级库上的新卡必须进入今日队列"
         )
 
@@ -2199,12 +2242,18 @@ final class OboeNavigationUITests: XCTestCase {
 
         // 打开回填过的内置词详情：音调 2 与例句中文译文来自词库 v2。
         // 行内 headword 与 reading 同文本，须按行标识符定位避免重复匹配。
+        XCTAssertTrue(deckRow.waitForExistence(timeout: 5))
         deckRow.tap()
+        XCTAssertTrue(
+            app.navigationBars["升级牌组"].waitForExistence(timeout: 5),
+            "应重新进入升级牌组详情"
+        )
         let jlptNote = app.descendants(matching: .any).matching(
             NSPredicate(
                 format: "identifier BEGINSWITH 'knowledge-row-' AND label CONTAINS 'あさって'"
             )
         ).firstMatch
+        revealExistence(jlptNote, in: app)
         XCTAssertTrue(jlptNote.waitForExistence(timeout: 5))
         jlptNote.tap()
         let pitchLabel = app.descendants(matching: .any).matching(
@@ -2262,7 +2311,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
         app.launch()
 
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         showReviewAnswer(in: app)
@@ -2294,7 +2343,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
         app.launch()
         XCTAssertTrue(
-            app.buttons["today-start-all-button"].waitForExistence(timeout: 5)
+            app.buttons["today-start-button"].waitForExistence(timeout: 5)
         )
         // 打印每个 issue 的元素与描述供定位，不吞掉任何结果。
         let logIssue: (XCUIAccessibilityAuditIssue) -> Void = { issue in
@@ -2347,7 +2396,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launch()
 
         // Hero 可操作且未截断。
-        let start = app.buttons["today-start-all-button"]
+        let start = app.buttons["today-start-button"]
         XCTAssertTrue(start.waitForExistence(timeout: 5), "ax5 下 Hero 应存在")
         XCTAssertTrue(start.isHittable, "ax5 下 Hero 必须可点击")
         XCTAssertTrue(start.frame.height > 100, "ax5 下 Hero 应纵向放大")
@@ -2443,6 +2492,24 @@ final class OboeNavigationUITests: XCTestCase {
         }
     }
 
+    /// 目标行可能在当前视口上方或下方（懒挂载 List 的行序不稳定），
+    /// 先向上扫到底、再向下扫回顶，直到元素挂载进无障碍树。
+    @MainActor
+    private func revealBidirectional(
+        _ element: XCUIElement,
+        in app: XCUIApplication
+    ) {
+        let form = app.collectionViews.firstMatch
+        for _ in 0..<12 {
+            if element.exists { return }
+            form.swipeUp()
+        }
+        for _ in 0..<12 {
+            if element.exists { return }
+            form.swipeDown()
+        }
+    }
+
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
         guard app.keyboards.firstMatch.exists else { return }
@@ -2487,7 +2554,56 @@ final class OboeNavigationUITests: XCTestCase {
 
     @MainActor
     private func selectDecksTab(in app: XCUIApplication) {
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.375, dy: 0.95)).tap()
+        // v0.5.5 起只有三个 tab，坐标命中不再可靠，直接点 tab 按钮。
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+    }
+
+    /// v0.5.5：牌组列表空态/工具栏两种建组入口。
+    @MainActor
+    private func createDeck(in app: XCUIApplication, named name: String) {
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        let emptyCreate = app.buttons["deck-create-empty-button"]
+        if emptyCreate.waitForExistence(timeout: 3) {
+            emptyCreate.tap()
+        } else {
+            let toolbarCreate = app.buttons["deck-create-toolbar-button"]
+            XCTAssertTrue(toolbarCreate.waitForExistence(timeout: 3))
+            toolbarCreate.tap()
+        }
+        let nameField = app.textFields["deck-name-field"]
+        XCTAssertTrue(nameField.waitForExistence(timeout: 2))
+        nameField.tap()
+        nameField.typeText(name)
+        app.buttons["deck-name-save-button"].tap()
+        // ax5 下行高膨胀，新牌组可能落在折叠线下方未挂载——双向扫描显露。
+        let row = app.staticTexts[name]
+        revealBidirectional(row, in: app)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+    }
+
+    /// v0.5.5：添加入口迁入牌组详情——牌组列表 → 牌组 → 工具栏「添加」。
+    /// 重复点「牌组」tab 会先弹回列表根，因此在详情/编辑器里也可直接调用。
+    @MainActor
+    private func openAddFlow(in app: XCUIApplication, deckName: String) {
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        let row = app.staticTexts[deckName]
+        revealBidirectional(row, in: app)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        // 显露后若停在列表底缘（标签栏遮挡），再向上推一点到可点击区。
+        for _ in 0..<6 where !row.isHittable {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        row.tap()
+        let addButton = app.buttons["deck-add-button"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
     }
 
 }

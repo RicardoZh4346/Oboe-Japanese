@@ -27,6 +27,7 @@ struct AddContentEditorView: View {
     private let importAwaitingSharedCaptures: @Sendable () async -> Void
     @State private var unprocessedInboxCount = 0
     @State private var isImageCapturePresented = false
+    @State private var isCreatingDeck = false
     @State private var isConfirmingDuplicateCommit = false
     @State private var isVocabularyAdditionalFieldsExpanded = false
     @State private var isGrammarAdditionalFieldsExpanded = false
@@ -53,6 +54,7 @@ struct AddContentEditorView: View {
         sharedCapturesAwaitingImport: Int? = nil,
         importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
         captureSession: CaptureEditorSession? = nil,
+        requiredDeckID: UUID? = nil,
         title: String = "添加"
     ) {
         self.deckService = deckService
@@ -84,6 +86,7 @@ struct AddContentEditorView: View {
                 sentenceAnalysisService: sentenceAnalysisService,
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                 studyService: studyService,
+                requiredDeckID: requiredDeckID,
                 capture: captureSession
             )
         )
@@ -216,6 +219,7 @@ struct AddContentEditorView: View {
                             service: inboxService,
                             processingServices: processingServices,
                             inboxImageStore: inboxImageStore,
+                            ocrService: ocrService,
                             drainSharedCaptures: drainSharedCaptures,
                             sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
                             importAwaitingSharedCaptures: importAwaitingSharedCaptures
@@ -306,6 +310,11 @@ struct AddContentEditorView: View {
         }
         .task {
             await observeInboxCount()
+        }
+        .sheet(isPresented: $isCreatingDeck) {
+            DeckNameEditor(title: "新建牌组", initialName: "") { name in
+                await model.createDeck(named: name)
+            }
         }
         .task(id: model.duplicateQuery) {
             await model.checkDuplicates()
@@ -543,23 +552,35 @@ struct AddContentEditorView: View {
     private var targetDeckSection: some View {
         @Bindable var model = model
         Section {
-            if model.kind == .vocabulary {
+            if model.decks.isEmpty {
+                // v0.5.5：没有牌组时不提供任何写入路径，只引导先建牌组。
+                Button("新建牌组") {
+                    isCreatingDeck = true
+                }
+                .accessibilityIdentifier("add-create-deck-button")
+            } else if model.kind == .vocabulary {
                 DeckMembershipField(
                     decks: model.decks,
                     selection: $model.currentMembershipSelection,
-                    rowAccessibilityID: "vocabulary-deck-picker"
+                    rowAccessibilityID: "vocabulary-deck-picker",
+                    requiredDeckID: model.requiredDeckID
                 )
             } else {
                 DeckMembershipField(
                     decks: model.decks,
                     selection: $model.currentMembershipSelection,
-                    rowAccessibilityID: "grammar-deck-picker"
+                    rowAccessibilityID: "grammar-deck-picker",
+                    requiredDeckID: model.requiredDeckID
                 )
             }
         } header: {
             Text("目标牌组")
         } footer: {
-            Text("知识点会加入全部所选牌组；归属牌组决定新卡额度与复习归因，切换不影响学习进度。")
+            Text(
+                model.decks.isEmpty
+                    ? "知识点必须加入至少一个牌组；请先创建一个牌组。"
+                    : "知识点会加入全部所选牌组；归属牌组决定新卡额度与复习归因，切换不影响学习进度。"
+            )
         }
     }
 

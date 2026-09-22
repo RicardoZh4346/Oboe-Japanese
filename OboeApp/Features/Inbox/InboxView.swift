@@ -9,9 +9,13 @@ struct InboxView: View {
     @State private var selection = Set<UUID>()
     @State private var isCapturePresented = false
 
+    @State private var isImageCapturePresented = false
+
     private let service: InboxService
     private let processingServices: InboxProcessingServices?
     private let inboxImageStore: InboxImageStore?
+    /// v0.5.5：图片收集入口从已删除的「添加」Tab 迁入收集箱。
+    private let ocrService: (any OCRRecognizing)?
     private let drainSharedCaptures: @Sendable () async -> Void
     private let sharedCapturesAwaitingImport: Int?
     private let importAwaitingSharedCaptures: @Sendable () async -> Void
@@ -20,6 +24,7 @@ struct InboxView: View {
         service: InboxService,
         processingServices: InboxProcessingServices? = nil,
         inboxImageStore: InboxImageStore? = nil,
+        ocrService: (any OCRRecognizing)? = nil,
         drainSharedCaptures: @escaping @Sendable () async -> Void = {},
         sharedCapturesAwaitingImport: Int? = nil,
         importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {}
@@ -27,6 +32,7 @@ struct InboxView: View {
         self.service = service
         self.processingServices = processingServices
         self.inboxImageStore = inboxImageStore
+        self.ocrService = ocrService
         self.drainSharedCaptures = drainSharedCaptures
         self.sharedCapturesAwaitingImport = sharedCapturesAwaitingImport
         self.importAwaitingSharedCaptures = importAwaitingSharedCaptures
@@ -79,12 +85,30 @@ struct InboxView: View {
                     .disabled(selection.isEmpty)
                     .accessibilityIdentifier("inbox-batch-archive-button")
                 } else {
-                    Button {
-                        isCapturePresented = true
-                    } label: {
-                        Label("手动添加", systemImage: "plus")
+                    HStack(spacing: 16) {
+                        if let ocrService, let inboxImageStore {
+                            Button {
+                                isImageCapturePresented = true
+                            } label: {
+                                Label("图片收集", systemImage: "photo.badge.plus")
+                            }
+                            .accessibilityIdentifier("inbox-image-capture-entry")
+                            .sheet(isPresented: $isImageCapturePresented) {
+                                ImageCaptureView(
+                                    imageStore: inboxImageStore,
+                                    ocrService: ocrService,
+                                    inboxService: service,
+                                    processingServices: processingServices
+                                )
+                            }
+                        }
+                        Button {
+                            isCapturePresented = true
+                        } label: {
+                            Label("手动添加", systemImage: "plus")
+                        }
+                        .accessibilityIdentifier("inbox-add-button")
                     }
-                    .accessibilityIdentifier("inbox-add-button")
                 }
             }
         }

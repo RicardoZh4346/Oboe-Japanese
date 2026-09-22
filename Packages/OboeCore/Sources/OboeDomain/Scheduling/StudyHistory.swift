@@ -145,6 +145,56 @@ public struct CardReviewHistory: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// v0.5.5「每日统计」行：一个学习日（按 04:00 边界与学习时区切分，
+/// `localDate` 即 `study_days.local_date`）的有效评分聚合。
+/// 只统计 `undone_at_ms IS NULL` 的日志；多牌组共享的 Card 按唯一
+/// 日志计一次，不随成员关系放大。
+public struct DailyStudyStatistics: Equatable, Identifiable, Sendable {
+    public let localDate: String
+    /// 当日首学的 Note 数（按 note_id 去重，与首页「新词」口径一致）。
+    public let newLearnedCount: Int
+    /// 当日实际复习过的 Card 数（非首学，按 card_key 去重）。
+    public let reviewedCardCount: Int
+    /// 当日有效评分事件总数（同一卡重复评分累计）。
+    public let answerCount: Int
+    public let durationMilliseconds: Int
+    public let ratings: RatingDistribution
+
+    public init(
+        localDate: String,
+        newLearnedCount: Int,
+        reviewedCardCount: Int,
+        answerCount: Int,
+        durationMilliseconds: Int,
+        ratings: RatingDistribution
+    ) {
+        self.localDate = localDate
+        self.newLearnedCount = newLearnedCount
+        self.reviewedCardCount = reviewedCardCount
+        self.answerCount = answerCount
+        self.durationMilliseconds = durationMilliseconds
+        self.ratings = ratings
+    }
+
+    public var id: String { localDate }
+    public var hasActivity: Bool { answerCount > 0 }
+}
+
+/// 最近 N 个学习日（含今天、新日期在前、固定 N 行零补齐）与连续学习天数。
+/// `currentStreak` 按「今天已学则从今天起连续计；今天未学但昨天已学则
+/// 保留截至昨天的连续天数」规则派生，不持久化。
+public struct StudyStatisticsSnapshot: Equatable, Sendable {
+    public let currentStreak: Int
+    public let days: [DailyStudyStatistics]
+
+    public init(currentStreak: Int, days: [DailyStudyStatistics]) {
+        self.currentStreak = currentStreak
+        self.days = days
+    }
+
+    public var activeDayCount: Int { days.count { $0.hasActivity } }
+}
+
 public protocol StudyHistoryRepository: Sendable {
     func fetchTodayStatistics(studyDayID: UUID) async throws -> TodayReviewStatistics
     func fetchCompletionStatistics(
@@ -152,6 +202,12 @@ public protocol StudyHistoryRepository: Sendable {
         deckID: UUID?
     ) async throws -> StudyCompletionStatistics
     func fetchCardHistories(noteID: UUID) async throws -> [CardReviewHistory]
+    /// 以 `studyDay`（今天）为终点向前取 `dayCount` 个学习日；
+    /// 没有记录的学习日补零，保证返回行数恒定。
+    func fetchDailyStatistics(
+        endingAt studyDay: StudyDay,
+        dayCount: Int
+    ) async throws -> StudyStatisticsSnapshot
 }
 
 public struct StudyHistoryService: Sendable {
@@ -174,5 +230,12 @@ public struct StudyHistoryService: Sendable {
 
     public func fetchCardHistories(noteID: UUID) async throws -> [CardReviewHistory] {
         try await repository.fetchCardHistories(noteID: noteID)
+    }
+
+    public func fetchDailyStatistics(
+        endingAt studyDay: StudyDay,
+        dayCount: Int = 30
+    ) async throws -> StudyStatisticsSnapshot {
+        try await repository.fetchDailyStatistics(endingAt: studyDay, dayCount: dayCount)
     }
 }

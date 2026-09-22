@@ -191,6 +191,11 @@ final class AppDependencies {
             if ProcessInfo.processInfo.environment["OBOE_UI_TEST_JLPT_WEAK_SEED"] != nil {
                 try? await seedJLPTWeakUITestData(database: database)
             }
+            // v0.5.5 seam: five-state Today fixture (empty deck / ready /
+            // waiting / complete —「无牌组」由空库直接覆盖).
+            if let todaySeed = ProcessInfo.processInfo.environment["OBOE_UI_TEST_TODAY_SEED"] {
+                try? await seedTodayUITestData(database: database, mode: todaySeed)
+            }
             // T07 UI-test seam: persist an enabled configuration + stub
             // credential so repair analysis runs without typing through
             // Settings (the credential lives only in the UITest store).

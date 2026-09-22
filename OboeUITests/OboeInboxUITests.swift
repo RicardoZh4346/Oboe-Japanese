@@ -10,7 +10,7 @@ final class OboeInboxUITests: XCTestCase {
     func testInboxManualCapturePersistsAcrossRelaunch() {
         let databaseID = UUID().uuidString
         let app = launchApp(databaseID: databaseID)
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
 
         XCTAssertTrue(app.staticTexts["inbox-empty-state"].waitForExistence(timeout: 5))
         captureText("そんなわけないでしょう。", in: app)
@@ -22,7 +22,7 @@ final class OboeInboxUITests: XCTestCase {
         app.terminate()
 
         let relaunched = launchApp(databaseID: databaseID)
-        openInboxFromAddTab(in: relaunched)
+        openInbox(in: relaunched)
         XCTAssertTrue(
             relaunched.staticTexts["そんなわけないでしょう。"].waitForExistence(timeout: 5)
         )
@@ -31,7 +31,7 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     func testInboxDetailEditArchiveAndDelete() {
         let app = launchApp()
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("毎朝パンを食べます。", in: app)
         let captured = app.staticTexts["毎朝パンを食べます。"]
         XCTAssertTrue(captured.waitForExistence(timeout: 5))
@@ -77,7 +77,7 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     func testInboxSearchAndSwipeArchive() {
         let app = launchApp()
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("パンを食べる", in: app)
         captureText("学校に行く", in: app)
 
@@ -109,7 +109,7 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     func testInboxBatchArchiveAndTodayEntryCount() {
         let app = launchApp()
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("一つ目", in: app)
         captureText("二つ目", in: app)
 
@@ -139,7 +139,7 @@ final class OboeInboxUITests: XCTestCase {
     func testInboxPasteCapture() {
         UIPasteboard.general.string = "パンケーキを焼いた"
         let app = launchApp()
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
 
         app.buttons["inbox-add-button"].tap()
         let pasteButton = app.buttons["inbox-capture-paste-button"]
@@ -179,7 +179,7 @@ final class OboeInboxUITests: XCTestCase {
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["收集入库"].waitForExistence(timeout: 5))
 
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("食べる", in: app)
 
         app.staticTexts["食べる"].firstMatch.tap()
@@ -219,7 +219,7 @@ final class OboeInboxUITests: XCTestCase {
         app.terminate()
 
         let relaunched = launchApp(databaseID: databaseID)
-        openInboxFromAddTab(in: relaunched)
+        openInbox(in: relaunched)
         relaunched.buttons["处理中"].tap()
         relaunched.staticTexts["食べる"].firstMatch.tap()
         XCTAssertTrue(
@@ -229,11 +229,11 @@ final class OboeInboxUITests: XCTestCase {
         relaunched.buttons["继续处理"].tap()
 
         let restoredHeadword = relaunched.textFields["vocabulary-headword-field"]
-        reveal(restoredHeadword, in: relaunched)
+        revealInEitherDirection(restoredHeadword, in: relaunched)
         XCTAssertTrue(restoredHeadword.waitForExistence(timeout: 5))
         XCTAssertEqual(restoredHeadword.value as? String, "食べる")
         let restoredMeaning = relaunched.textFields["vocabulary-meaning-field"]
-        reveal(restoredMeaning, in: relaunched)
+        revealInEitherDirection(restoredMeaning, in: relaunched)
         XCTAssertEqual(restoredMeaning.value as? String, "吃")
         let resumeStatus = relaunched.staticTexts["vocabulary-draft-status"]
         for _ in 0..<12 where !resumeStatus.exists {
@@ -268,8 +268,7 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertTrue(relaunched.staticTexts["食べる"].waitForExistence(timeout: 5))
 
         // The capture draft must not leak into the normal Add page.
-        let addTab = relaunched.tabBars.buttons["添加"]
-        addTab.tap()
+        openDeckAddFlow(in: relaunched, deckName: "收集入库")
         let normalHeadword = relaunched.textFields["vocabulary-headword-field"]
         XCTAssertTrue(normalHeadword.waitForExistence(timeout: 5))
         XCTAssertNotEqual(normalHeadword.value as? String, "食べる")
@@ -283,7 +282,7 @@ final class OboeInboxUITests: XCTestCase {
         let databaseID = UUID().uuidString
         let app = launchApp(databaseID: databaseID)
         configureTestAI(in: app)
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("日本に行ったことがありますか。", in: app)
 
         app.staticTexts["日本に行ったことがありますか。"].firstMatch.tap()
@@ -316,7 +315,7 @@ final class OboeInboxUITests: XCTestCase {
         app.terminate()
 
         let relaunched = launchApp(databaseID: databaseID)
-        openInboxFromAddTab(in: relaunched)
+        openInbox(in: relaunched)
         relaunched.buttons["处理中"].tap()
         relaunched.staticTexts["日本に行ったことがありますか。"].firstMatch.tap()
         relaunched.buttons["继续处理"].tap()
@@ -347,7 +346,7 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     func testInboxProcessingIsolatesItemsAcrossSwitching() {
         let app = launchApp()
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         captureText("林檎", in: app)
         captureText("蜜柑", in: app)
 
@@ -356,6 +355,8 @@ final class OboeInboxUITests: XCTestCase {
         app.buttons["直接加入学习"].tap()
         XCTAssertTrue(app.navigationBars["处理收集"].waitForExistence(timeout: 5))
         let headwordA = app.textFields["vocabulary-headword-field"]
+        revealInEitherDirection(headwordA, in: app)
+        XCTAssertTrue(headwordA.waitForExistence(timeout: 5))
         XCTAssertEqual(headwordA.value as? String, "林檎")
         app.navigationBars.buttons.firstMatch.tap()
         app.navigationBars.buttons.firstMatch.tap()
@@ -365,6 +366,7 @@ final class OboeInboxUITests: XCTestCase {
         app.buttons["直接加入学习"].tap()
         XCTAssertTrue(app.navigationBars["处理收集"].waitForExistence(timeout: 5))
         let headwordB = app.textFields["vocabulary-headword-field"]
+        revealInEitherDirection(headwordB, in: app)
         XCTAssertTrue(headwordB.waitForExistence(timeout: 5))
         XCTAssertEqual(headwordB.value as? String, "蜜柑")
 
@@ -375,10 +377,10 @@ final class OboeInboxUITests: XCTestCase {
         app.staticTexts["林檎"].firstMatch.tap()
         app.buttons["继续处理"].tap()
         XCTAssertTrue(app.navigationBars["处理收集"].waitForExistence(timeout: 5))
-        XCTAssertEqual(
-            app.textFields["vocabulary-headword-field"].value as? String,
-            "林檎"
-        )
+        let headwordARestored = app.textFields["vocabulary-headword-field"]
+        revealInEitherDirection(headwordARestored, in: app)
+        XCTAssertTrue(headwordARestored.waitForExistence(timeout: 5))
+        XCTAssertEqual(headwordARestored.value as? String, "林檎")
     }
 
     @MainActor
@@ -386,6 +388,21 @@ final class OboeInboxUITests: XCTestCase {
         let form = app.collectionViews.firstMatch
         for _ in 0..<12 {
             if element.exists, element.isHittable { return }
+            form.swipeUp()
+        }
+    }
+
+    /// 续编恢复的表单可能已略微滚动（目标恰在视口上沿之外），
+    /// 单方向滑动会越推越远——先扫回顶部，再向下扫。
+    @MainActor
+    private func revealInEitherDirection(_ element: XCUIElement, in app: XCUIApplication) {
+        let form = app.collectionViews.firstMatch
+        for _ in 0..<8 {
+            if element.exists { return }
+            form.swipeDown()
+        }
+        for _ in 0..<12 {
+            if element.exists { return }
             form.swipeUp()
         }
     }
@@ -442,20 +459,36 @@ final class OboeInboxUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
     }
 
+    /// v0.5.5：收集箱入口在「今日」页（添加 Tab 已移除）。
     @MainActor
-    private func openInboxFromAddTab(in app: XCUIApplication) {
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
-        let entry = app.buttons["add-inbox-entry"]
+    private func openInbox(in app: XCUIApplication) {
+        let todayTab = app.tabBars.buttons["今日"]
+        XCTAssertTrue(todayTab.waitForExistence(timeout: 5))
+        todayTab.tap()
+        let entry = app.descendants(matching: .any)["today-inbox-entry"]
         var attempts = 0
         while !entry.exists, attempts < 8 {
-            app.swipeUp()
+            app.scrollViews.firstMatch.swipeUp()
             attempts += 1
         }
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         entry.tap()
         XCTAssertTrue(app.navigationBars["收集箱"].waitForExistence(timeout: 5))
+    }
+
+    /// v0.5.5：普通添加入口在牌组详情工具栏。
+    @MainActor
+    private func openDeckAddFlow(in app: XCUIApplication, deckName: String) {
+        let decksTab = app.tabBars.buttons["牌组"]
+        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+        decksTab.tap()
+        let row = app.staticTexts[deckName]
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        let addButton = app.buttons["deck-add-button"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
     }
 
     @MainActor
@@ -519,7 +552,7 @@ final class OboeInboxUITests: XCTestCase {
 
         // The file must NOT have been auto-imported — entering the Inbox
         // shows the notice instead.
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         XCTAssertTrue(
             app.staticTexts["检测到 1 个尚未导入的分享内容"]
                 .waitForExistence(timeout: 5)
@@ -660,17 +693,11 @@ final class OboeInboxUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: 5) == .completed
     }
 
+    /// v0.5.5：图片收集入口迁入收集箱工具栏。
     @MainActor
     private func openImageCaptureSheet(in app: XCUIApplication) {
-        let addTab = app.tabBars.buttons["添加"]
-        XCTAssertTrue(addTab.waitForExistence(timeout: 5))
-        addTab.tap()
-        let entry = app.buttons["add-image-capture-entry"]
-        var attempts = 0
-        while !entry.exists, attempts < 8 {
-            app.swipeUp()
-            attempts += 1
-        }
+        openInbox(in: app)
+        let entry = app.buttons["inbox-image-capture-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         entry.tap()
     }
@@ -696,7 +723,7 @@ final class OboeInboxUITests: XCTestCase {
 
         app.buttons["image-capture-cancel-button"].tap()
         XCTAssertTrue(
-            app.buttons["add-image-capture-entry"].waitForExistence(timeout: 5)
+            app.buttons["inbox-image-capture-entry"].waitForExistence(timeout: 5)
         )
         // Cancelling discards the unlinked resource — nothing is left behind.
         stored = try FileManager.default.contentsOfDirectory(
@@ -767,7 +794,7 @@ final class OboeInboxUITests: XCTestCase {
 
         app.buttons["ocr-save-button"].tap()
         XCTAssertTrue(
-            app.buttons["add-image-capture-entry"].waitForExistence(timeout: 5)
+            app.buttons["inbox-image-capture-entry"].waitForExistence(timeout: 5)
         )
         // The linked attachment survives — only unlinked resources are cleaned.
         let stored = try FileManager.default.contentsOfDirectory(
@@ -775,7 +802,7 @@ final class OboeInboxUITests: XCTestCase {
         )
         XCTAssertEqual(stored.count, 1)
 
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         let row = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "今日はいい天気です")
         ).firstMatch
@@ -864,7 +891,7 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertTrue(saveButton.isEnabled)
         saveButton.tap()
 
-        openInboxFromAddTab(in: app)
+        openInbox(in: app)
         XCTAssertTrue(
             app.staticTexts["手動入力テキスト"].waitForExistence(timeout: 5)
         )

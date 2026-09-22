@@ -68,6 +68,9 @@
 		A00100000000000000000036 /* AIRepairPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000036 /* AIRepairPresentation.swift */; };
 		A00100000000000000000037 /* AIRepairViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000037 /* AIRepairViewModel.swift */; };
 		A00100000000000000000038 /* AIRepairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000038 /* AIRepairView.swift */; };
+		A00100000000000000000041 /* DailyStatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000041 /* DailyStatisticsView.swift */; };
+		A00100000000000000000042 /* UITestTodaySeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000042 /* UITestTodaySeed.swift */; };
+		A00100000000000000000043 /* DeckNameEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000043 /* DeckNameEditor.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -149,6 +152,9 @@
 		A00200000000000000000036 /* AIRepairPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRepairPresentation.swift; sourceTree = "<group>"; };
 		A00200000000000000000037 /* AIRepairViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRepairViewModel.swift; sourceTree = "<group>"; };
 		A00200000000000000000038 /* AIRepairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRepairView.swift; sourceTree = "<group>"; };
+		A00200000000000000000041 /* DailyStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStatisticsView.swift; sourceTree = "<group>"; };
+		A00200000000000000000042 /* UITestTodaySeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestTodaySeed.swift; sourceTree = "<group>"; };
+		A00200000000000000000043 /* DeckNameEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckNameEditor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -223,6 +229,7 @@
 				A00200000000000000000001 /* OboeApp.swift */,
 				A00200000000000000000002 /* RootTabView.swift */,
 				A00200000000000000000034 /* UITestAdaptiveSeed.swift */,
+				A00200000000000000000042 /* UITestTodaySeed.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -247,13 +254,13 @@
 			path = Features;
 			sourceTree = "<group>";
 		};
-		A00500000000000000000005 /* Today */ = {isa = PBXGroup; children = (A00200000000000000000003 /* TodayView.swift */,); path = Today; sourceTree = "<group>"; };
+		A00500000000000000000005 /* Today */ = {isa = PBXGroup; children = (A00200000000000000000003 /* TodayView.swift */, A00200000000000000000041 /* DailyStatisticsView.swift */,); path = Today; sourceTree = "<group>"; };
 		A00500000000000000000006 /* Decks */ = {isa = PBXGroup; children = (A00200000000000000000004 /* DecksView.swift */, A00200000000000000000040 /* DeckMembershipPicker.swift */,); path = Decks; sourceTree = "<group>"; };
 		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
 		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (A00200000000000000000026 /* SentenceAnalysisSections.swift */,); path = SentenceAnalysis; sourceTree = "<group>"; };
 		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
 		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
-		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */,); path = SharedUI; sourceTree = "<group>"; };
+		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */,); path = SharedUI; sourceTree = "<group>"; };
 		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */,); path = Resources; sourceTree = "<group>"; };
 		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */,); path = OboeUITests; sourceTree = "<group>"; };
 		A0050000000000000000000D /* Products */ = {isa = PBXGroup; children = (A0020000000000000000000A /* Oboe.app */, A0020000000000000000000B /* OboeUITests.xctest */, A0020000000000000000002D /* OboeShareExtension.appex */,); name = Products; sourceTree = "<group>"; };
@@ -446,6 +453,9 @@
 				A00100000000000000000036 /* AIRepairPresentation.swift in Sources */,
 				A00100000000000000000037 /* AIRepairViewModel.swift in Sources */,
 				A00100000000000000000038 /* AIRepairView.swift in Sources */,
+				A00100000000000000000041 /* DailyStatisticsView.swift in Sources */,
+				A00100000000000000000042 /* UITestTodaySeed.swift in Sources */,
+				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

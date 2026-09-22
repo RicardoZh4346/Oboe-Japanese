@@ -212,9 +212,13 @@ public protocol JLPTImporting: Sendable {
         meaningZH: String,
         directions: Set<VocabularyCardDirection>
     ) async throws -> JLPTImportResult
+    /// `deckID` 为归属（home）牌组；`deckIDs` 为全部成员牌组（缺省仅 home）。
+    /// 不再自动创建牌组：任一成员牌组不存在时整体失败，不产生部分写入。
     func importLevel(
         _ level: JLPTLevel,
         vocabulary: [BuiltinJLPTVocabulary],
+        deckID: UUID,
+        deckIDs: Set<UUID>?,
         directions: Set<VocabularyCardDirection>,
         progress: @escaping @Sendable (JLPTImportProgress) async -> Void
     ) async throws -> JLPTImportResult

@@ -15,6 +15,7 @@ struct TodayView: View {
     let inboxService: InboxService
     let processingServices: InboxProcessingServices
     let inboxImageStore: InboxImageStore?
+    let ocrService: (any OCRRecognizing)?
     let drainSharedCaptures: @Sendable () async -> Void
     let pendingContinueItemID: UUID?
     let clearPendingContinueItem: @Sendable () -> Void
@@ -40,6 +41,7 @@ struct TodayView: View {
         inboxService: InboxService,
         processingServices: InboxProcessingServices,
         inboxImageStore: InboxImageStore? = nil,
+        ocrService: (any OCRRecognizing)? = nil,
         drainSharedCaptures: @escaping @Sendable () async -> Void = {},
         pendingContinueItemID: UUID? = nil,
         clearPendingContinueItem: @escaping @Sendable () -> Void = {},
@@ -57,6 +59,7 @@ struct TodayView: View {
         self.inboxService = inboxService
         self.processingServices = processingServices
         self.inboxImageStore = inboxImageStore
+        self.ocrService = ocrService
         self.drainSharedCaptures = drainSharedCaptures
         self.pendingContinueItemID = pendingContinueItemID
         self.clearPendingContinueItem = clearPendingContinueItem
@@ -91,7 +94,7 @@ struct TodayView: View {
                                 adaptiveEntry
                             }
                             if let statistics = model.statistics {
-                                todayStatistics(statistics)
+                                todayStatistics(statistics, studyDay: plan.studyDay)
                             }
                         }
                         .padding()
@@ -206,10 +209,38 @@ struct TodayView: View {
         .accessibilityIdentifier("today-summary")
     }
 
-    private func todayStatistics(_ statistics: TodayReviewStatistics) -> some View {
+    private func todayStatistics(
+        _ statistics: TodayReviewStatistics,
+        studyDay: StudyDay
+    ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("今日统计")
-                .font(.headline)
+            HStack {
+                Text("今日统计")
+                    .font(.headline)
+                Spacer()
+                if let streak = model.currentStreak {
+                    Text("连续 \(streak) 天")
+                        .font(.caption.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+                        .accessibilityIdentifier("today-streak")
+                }
+                NavigationLink {
+                    DailyStatisticsView(
+                        studyDay: studyDay,
+                        historyService: historyService
+                    )
+                } label: {
+                    // 44×44 最小可点击区域：trailing 对齐保持视觉原位。
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 44, height: 44, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("查看每日统计")
+                .accessibilityIdentifier("today-statistics-entry")
+            }
             LazyVGrid(columns: statisticColumns, spacing: 12) {
                 StatisticMetric(
                     title: "今日新学",
@@ -321,6 +352,7 @@ struct TodayView: View {
                 service: inboxService,
                 processingServices: processingServices,
                 inboxImageStore: inboxImageStore,
+                ocrService: ocrService,
                 drainSharedCaptures: drainSharedCaptures,
                 sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
                 importAwaitingSharedCaptures: importAwaitingSharedCaptures
@@ -497,19 +529,25 @@ struct TodayView: View {
 
     // MARK: - 首屏 Hero（T14，设计 §8.1/§8.3）
 
-    /// Hero 卡即主 CTA：可学任务时整卡跳转「全部牌组」scope，卡内整合
-    /// now/later/完成/等待状态与主牌组一行。无可学任务时退化为纯展示
-    /// 状态卡（不包 NavigationLink），保证内部标识符可被查询、
-    /// VoiceOver 按 标题→状态→主牌组 顺序朗读。
+    /// Hero 卡即主 CTA：可学任务时整卡跳转主牌组 scope（v0.5.5 起不再
+    /// 提供「全部牌组」学习入口），卡内整合 now/later/完成/等待状态与
+    /// 主牌组一行。无可学任务时退化为纯展示状态卡（不包
+    /// NavigationLink），保证内部标识符可被查询、VoiceOver 按
+    /// 标题→状态→主牌组 顺序朗读。
     private func heroCard(_ plan: TodayPlan) -> some View {
         let hero = heroPresentation(plan)
         return Group {
-            if hero.isActionable {
-                NavigationLink(value: StudyScope(deckID: nil, title: "全部牌组")) {
+            if hero.isActionable, let deckID = model.primaryDeckID {
+                NavigationLink(
+                    value: StudyScope(
+                        deckID: deckID,
+                        title: model.primaryDeckName ?? "主牌组"
+                    )
+                ) {
                     heroContent(hero)
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("today-start-all-button")
+                .accessibilityIdentifier("today-start-button")
             } else {
                 heroContent(hero)
             }
@@ -541,7 +579,7 @@ struct TodayView: View {
             Text("主牌组 · \(model.primaryDeckName ?? "未设置")")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(
-                    hero.isActionable ? Color.white.opacity(0.85) : OboeTheme.Colors.secondaryOnCard
+                    hero.isActionable ? Color.white : OboeTheme.Colors.secondaryOnCard
                 )
                 .accessibilityIdentifier("today-primary-deck")
         }
@@ -580,7 +618,7 @@ struct TodayView: View {
         Text(hero.statusText)
             .font(.subheadline)
             .foregroundStyle(
-                hero.isActionable ? Color.white.opacity(0.85) : OboeTheme.Colors.secondaryOnCard
+                hero.isActionable ? Color.white : OboeTheme.Colors.secondaryOnCard
             )
             .accessibilityIdentifier(hero.statusIdentifier)
     }
@@ -592,7 +630,9 @@ struct TodayView: View {
             .accessibilityHidden(true)
     }
 
-    /// 状态优先级：无牌组 > 全天完成 > 等待下一批 > 可学习。
+    /// 状态优先级：无牌组 > 空主牌组 > 全天完成 > 等待下一批 > 可学习。
+    /// v0.5.5 起 CTA 只进入主牌组 scope，任务计数按 `deckIDs` 成员关系
+    /// 过滤——共享 Note 的卡从任一成员牌组都可见，但不跨牌组重复计。
     /// 无牌组时保留 `today-no-decks` 语义——引导创建而非跳转。
     private func heroPresentation(_ plan: TodayPlan) -> HeroPresentation {
         if model.decks.isEmpty {
@@ -604,20 +644,40 @@ struct TodayView: View {
                 iconTint: OboeTheme.Colors.accent
             )
         }
-        if plan.isDayComplete {
+        if let primary = model.primaryDeck, primary.isEmpty {
             return HeroPresentation(
-                icon: "checkmark.circle.fill",
-                statusText: "今日任务全部完成，明天 04:00 后生成新计划",
+                icon: "rectangle.stack",
+                statusText: "这个牌组还没有卡片",
                 isActionable: false,
-                statusIdentifier: "today-day-complete",
-                iconTint: .green
+                statusIdentifier: "today-empty-deck",
+                iconTint: OboeTheme.Colors.accent
             )
         }
-        if plan.availableNow.isEmpty {
-            if let next = plan.nextAvailableAt {
+        let scopedNow = model.scopedItems(plan.availableNow)
+        let scopedLater = model.scopedItems(plan.availableLater)
+        if scopedNow.isEmpty, scopedLater.isEmpty {
+            if plan.isDayComplete {
+                return HeroPresentation(
+                    icon: "checkmark.circle.fill",
+                    statusText: "今日任务全部完成，明天 04:00 后生成新计划",
+                    isActionable: false,
+                    statusIdentifier: "today-day-complete",
+                    iconTint: .green
+                )
+            }
+            return HeroPresentation(
+                icon: "clock",
+                statusText: "主牌组今日没有待学任务",
+                isActionable: false,
+                statusIdentifier: "today-waiting-state",
+                iconTint: .orange
+            )
+        }
+        if scopedNow.isEmpty {
+            if let next = scopedLater.first?.dueAt {
                 return HeroPresentation(
                     icon: "clock",
-                    statusText: "当前已完成，\(StudyTimeText.until(next))后还有 \(plan.availableLater.count) 张",
+                    statusText: "当前已完成，\(StudyTimeText.until(next))后还有 \(scopedLater.count) 张",
                     isActionable: false,
                     statusIdentifier: "today-waiting-state",
                     iconTint: .orange
@@ -633,7 +693,7 @@ struct TodayView: View {
         }
         return HeroPresentation(
             icon: "play.fill",
-            statusText: "现在 \(plan.availableNow.count) 张 · 今日完成 \(plan.summary.completedCount)",
+            statusText: "现在 \(scopedNow.count) 张 · 今日完成 \(plan.summary.completedCount)",
             isActionable: true,
             statusIdentifier: "today-hero-ready",
             iconTint: .white
@@ -718,10 +778,25 @@ private final class TodayViewModel {
 
     var plan: TodayPlan?
     var statistics: TodayReviewStatistics?
+    /// 当前连续学习天数（只读派生值，不持久化）；载入失败时保持 nil，
+    /// 不影响今日计划主流程。
+    var currentStreak: Int?
     var decks: [DeckSummary] = []
     /// 主牌组显示名：settings.primaryDeckID 已是有效值（未设置/失效时自动
     /// 取排序最前的牌组）；nil 只在没有任何牌组时出现，View 显示「未设置」。
+    var primaryDeckID: UUID?
     var primaryDeckName: String?
+
+    /// 主牌组摘要（含卡片数）；无牌组时为 nil。
+    var primaryDeck: DeckSummary? {
+        decks.first { $0.id == primaryDeckID }
+    }
+
+    /// 按主牌组成员关系过滤队列项（`deckIDs.contains`）。
+    func scopedItems(_ items: [TodayQueueItem]) -> [TodayQueueItem] {
+        guard let primaryDeckID else { return [] }
+        return items.filter { $0.deckIDs.contains(primaryDeckID) }
+    }
     var adaptiveLeechCount = 0
     var leechRemindersEnabled = true
     var isLoading = true
@@ -764,14 +839,20 @@ private final class TodayViewModel {
             async let statisticsRequest = historyService.fetchTodayStatistics(
                 studyDayID: freshPlan.studyDay.id
             )
+            async let snapshotRequest = historyService.fetchDailyStatistics(
+                endingAt: freshPlan.studyDay,
+                dayCount: 30
+            )
             let fetchedDecks = try await decksRequest
             let settings = try await settingsRequest
             plan = freshPlan
             decks = fetchedDecks
+            primaryDeckID = settings.primaryDeckID
             primaryDeckName = settings.primaryDeckID.flatMap { id in
                 fetchedDecks.first { $0.id == id }?.name
             }
             statistics = try await statisticsRequest
+            currentStreak = try await snapshotRequest.currentStreak
             await loadAdaptiveState()
             loadErrorMessage = nil
         } catch is CancellationError {
