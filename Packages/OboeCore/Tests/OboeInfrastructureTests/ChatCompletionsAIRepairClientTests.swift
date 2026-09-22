@@ -122,8 +122,8 @@ final class ChatCompletionsAIRepairClientTests: XCTestCase {
         )
     }
 
-    static func configuration(mode: AIResponseFormatMode) -> AIConfiguration {
-        AIConfiguration(
+    static func configuration(mode: AIResponseFormatMode) -> ResolvedAIConfiguration {
+        ResolvedAIConfiguration(
             isEnabled: true,
             serviceKind: .custom,
             serviceName: "Fixture",

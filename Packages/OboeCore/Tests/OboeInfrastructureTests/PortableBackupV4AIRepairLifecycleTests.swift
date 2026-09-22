@@ -412,7 +412,7 @@ final class PortableBackupV4AIRepairLifecycleTests: XCTestCase {
             )
         }
 
-        let configuration = AIConfiguration(
+        let configuration = ResolvedAIConfiguration(
             isEnabled: true,
             serviceKind: .custom,
             serviceName: "quality-acceptance",
@@ -662,7 +662,7 @@ private actor StubRepairClient: AIRepairClient {
 
     func analyze(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         callCount += 1

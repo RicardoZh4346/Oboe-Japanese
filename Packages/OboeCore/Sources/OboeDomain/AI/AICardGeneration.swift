@@ -126,7 +126,7 @@ public enum AICardPromptV2 {
 public protocol AICardGenerationClient: Sendable {
     func generate(
         input: AICardGenerationInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String
 }
@@ -158,6 +158,9 @@ public actor AICardGenerationService {
             defaultTimeZoneID: defaultTimeZoneID
         )
         guard configuration.isEnabled else { throw AIConnectionError.aiDisabled }
+        guard let resolved = configuration.resolved else {
+            throw AIConnectionError.modelNotSelected
+        }
         guard let credential = try await credentialStore.readCredential(
             for: configuration.credentialReference
         ), !credential.isEmpty else {
@@ -171,7 +174,7 @@ public actor AICardGenerationService {
         try Task.checkCancellation()
         let content = try await client.generate(
             input: input,
-            configuration: configuration,
+            configuration: resolved,
             credential: credential
         )
         try Task.checkCancellation()

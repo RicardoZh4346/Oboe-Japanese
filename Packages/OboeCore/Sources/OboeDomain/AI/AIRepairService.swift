@@ -246,6 +246,10 @@ public actor AIRepairService {
             try await save(draftID: draftID, envelope: revertingToEditing(envelope))
             throw AIConnectionError.aiDisabled
         }
+        guard let resolved = configuration.resolved else {
+            try await save(draftID: draftID, envelope: revertingToEditing(envelope))
+            throw AIConnectionError.modelNotSelected
+        }
         guard let credential = try await credentialStore.readCredential(
             for: configuration.credentialReference
         ), !credential.isEmpty else {
@@ -268,7 +272,7 @@ public actor AIRepairService {
         do {
             let content = try await client.analyze(
                 context: context,
-                configuration: configuration,
+                configuration: resolved,
                 credential: credential
             )
             let response = try AIRepairOutputDecoder.decode(content)

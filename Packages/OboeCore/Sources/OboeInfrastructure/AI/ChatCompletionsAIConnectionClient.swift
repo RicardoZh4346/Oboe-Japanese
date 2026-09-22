@@ -27,7 +27,7 @@ public struct ChatCompletionsAIConnectionClient: AIConnectionClient, Sendable {
     }
 
     public func testConnection(
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> AIConnectionTestResult {
         let request = try makeRequest(configuration: configuration, credential: credential)
@@ -86,7 +86,7 @@ public struct ChatCompletionsAIConnectionClient: AIConnectionClient, Sendable {
     }
 
     private func makeRequest(
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) throws -> URLRequest {
         guard !credential.isEmpty,
@@ -118,7 +118,7 @@ public struct ChatCompletionsAIConnectionClient: AIConnectionClient, Sendable {
             .appendingPathComponent("completions", isDirectory: false)
     }
 
-    static func connectionTestBody(for configuration: AIConfiguration) throws -> Data {
+    static func connectionTestBody(for configuration: ResolvedAIConfiguration) throws -> Data {
         var body: [String: Any] = [
             "model": configuration.modelID,
             "messages": [

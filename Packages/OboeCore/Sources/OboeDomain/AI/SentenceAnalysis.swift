@@ -260,7 +260,7 @@ public enum SentenceAnalysisPromptV2 {
 public protocol SentenceAnalysisClient: Sendable {
     func analyze(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String
 }
@@ -308,6 +308,9 @@ public actor SentenceAnalysisService {
             defaultTimeZoneID: defaultTimeZoneID
         )
         guard configuration.isEnabled else { throw AIConnectionError.aiDisabled }
+        guard let resolved = configuration.resolved else {
+            throw AIConnectionError.modelNotSelected
+        }
         guard let credential = try await credentialStore.readCredential(
             for: configuration.credentialReference
         ), !credential.isEmpty else {
@@ -321,7 +324,7 @@ public actor SentenceAnalysisService {
         try Task.checkCancellation()
         let content = try await client.analyze(
             input: input,
-            configuration: configuration,
+            configuration: resolved,
             credential: credential
         )
         try Task.checkCancellation()
@@ -330,8 +333,8 @@ public actor SentenceAnalysisService {
             requestID: input.requestID,
             sourceInput: input,
             result: result,
-            providerID: configuration.serviceKind.rawValue,
-            modelID: configuration.modelID
+            providerID: resolved.serviceKind.rawValue,
+            modelID: resolved.modelID
         )
     }
 

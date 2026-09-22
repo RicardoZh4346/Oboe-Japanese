@@ -56,11 +56,12 @@ public struct GRDBAIConfigurationRepository: AIConfigurationRepository, Sendable
 
         let providerID: String? = row["ai_provider_id"]
         let baseURL: String? = row["ai_base_url"]
+        // ai_model_id 允许为 NULL：「已配置供应商但尚未选模型」不是损坏配置。
         let modelID: String? = row["ai_model_id"]
         let serviceName: String? = row["ai_service_name"]
         let credentialIDText: String? = row["ai_credential_id"]
         let responseFormatModeText: String = row["ai_response_format_mode"]
-        if providerID == nil || baseURL == nil || modelID == nil
+        if providerID == nil || baseURL == nil
             || serviceName == nil || credentialIDText == nil {
             let defaults = AIConfigurationDraft.deepSeekDefault
             let credentialID = UUID()
@@ -88,7 +89,6 @@ public struct GRDBAIConfigurationRepository: AIConfigurationRepository, Sendable
               let credentialID = UUID(uuidString: credentialIDText),
               let providerID,
               let baseURL,
-              let modelID,
               let serviceName,
               let responseFormatMode = AIResponseFormatMode(rawValue: responseFormatModeText) else {
             throw AIConfigurationError.invalidPersistedConfiguration
@@ -97,7 +97,9 @@ public struct GRDBAIConfigurationRepository: AIConfigurationRepository, Sendable
         let draft = AIConfigurationDraft(
             isEnabled: row["ai_enabled"],
             serviceKind: serviceKind,
-            serviceName: serviceKind == .custom ? serviceName : "DeepSeek",
+            serviceName: serviceKind.isCustomEndpoint
+                ? serviceName
+                : (AIProviderPresetRegistry.preset(for: serviceKind)?.displayName ?? serviceName),
             baseURL: baseURL,
             modelID: modelID,
             responseFormatMode: responseFormatMode

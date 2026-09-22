@@ -22,7 +22,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
 
     public func analyze(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         let request = try makeRequest(
@@ -71,7 +71,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
 
     private func makeRequest(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) throws -> URLRequest {
         guard !credential.isEmpty,
@@ -97,7 +97,7 @@ public struct ChatCompletionsAIRepairClient: AIRepairClient, Sendable {
 
     static func requestBody(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration
+        configuration: ResolvedAIConfiguration
     ) throws -> Data {
         let userContent = try AIRepairRequestEncoder.encode(context)
         var body: [String: Any] = [

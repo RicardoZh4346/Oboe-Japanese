@@ -32,6 +32,7 @@ final class AIConnectionTests: XCTestCase {
     func testEnabledConfigurationRequiresCredentialBeforeNetwork() async throws {
         var draft = AIConfigurationDraft.deepSeekDefault
         draft.isEnabled = true
+        draft.modelID = "deepseek-v4-pro"
         let configuration = try AIConfigurationValidator.validate(draft, credentialID: UUID())
         let client = RecordingConnectionClient()
         let service = AIConnectionTestService(
@@ -72,11 +73,34 @@ final class AIConnectionTests: XCTestCase {
         XCTAssertEqual(result.serviceName, "兼容服务")
         XCTAssertEqual(result.responseFormatMode, .jsonSchema)
         let received = await client.received
-        XCTAssertEqual(received?.configuration, configuration)
+        XCTAssertEqual(received?.configuration, configuration.resolved)
         XCTAssertEqual(received?.credential, "test-only-key")
 
         draft.responseFormatMode = .promptedJSON
         XCTAssertNotEqual(draft.responseFormatMode, result.responseFormatMode)
+    }
+
+    func testEnabledConfigurationWithoutModelCannotExecute() async throws {
+        // 持久化的「已启用但未选模型」配置可加载，但绝不能到达网络层。
+        var draft = AIConfigurationDraft.deepSeekDefault
+        draft.isEnabled = true
+        let configuration = try AIConfigurationValidator.validate(draft, credentialID: UUID())
+        XCTAssertNil(configuration.modelID)
+        let client = RecordingConnectionClient()
+        let service = AIConnectionTestService(
+            repository: ConnectionTestRepository(configuration: configuration),
+            credentialStore: ConnectionTestCredentialStore(credential: "test-only-key"),
+            client: client
+        )
+
+        do {
+            _ = try await service.testConnection(defaultTimeZoneID: "Asia/Shanghai")
+            XCTFail("未选模型的配置不得执行 AI")
+        } catch let error as AIConnectionError {
+            XCTAssertEqual(error, .modelNotSelected)
+        }
+        let clientCallCount = await client.callCount
+        XCTAssertEqual(clientCallCount, 0)
     }
 }
 
@@ -113,10 +137,10 @@ private actor ConnectionTestCredentialStore: AICredentialStore {
 
 private actor RecordingConnectionClient: AIConnectionClient {
     private(set) var callCount = 0
-    private(set) var received: (configuration: AIConfiguration, credential: String)?
+    private(set) var received: (configuration: ResolvedAIConfiguration, credential: String)?
 
     func testConnection(
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) -> AIConnectionTestResult {
         callCount += 1

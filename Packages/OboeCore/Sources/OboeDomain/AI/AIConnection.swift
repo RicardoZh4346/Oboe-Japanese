@@ -18,6 +18,8 @@ public struct AIConnectionTestResult: Equatable, Sendable {
 
 public enum AIConnectionError: Error, Equatable, Sendable {
     case aiDisabled
+    /// 配置已启用/已保存但尚未选择模型——不能执行 AI。
+    case modelNotSelected
     case credentialMissing
     case invalidCredential
     case cancelled
@@ -44,6 +46,8 @@ extension AIConnectionError: LocalizedError {
         switch self {
         case .aiDisabled:
             "请先保存并启用 AI。"
+        case .modelNotSelected:
+            "尚未选择模型，请在设置中选择模型后再试。"
         case .credentialMissing:
             "当前服务没有可用的 API Key，请重新保存配置。"
         case .invalidCredential:
@@ -92,7 +96,7 @@ extension AIConnectionError: LocalizedError {
 
 public protocol AIConnectionClient: Sendable {
     func testConnection(
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> AIConnectionTestResult
 }
@@ -122,6 +126,9 @@ public actor AIConnectionTestService {
         guard configuration.isEnabled else {
             throw AIConnectionError.aiDisabled
         }
+        guard let resolved = configuration.resolved else {
+            throw AIConnectionError.modelNotSelected
+        }
         guard let credential = try await credentialStore.readCredential(
             for: configuration.credentialReference
         ), !credential.isEmpty else {
@@ -134,7 +141,7 @@ public actor AIConnectionTestService {
         }
         try Task.checkCancellation()
         return try await client.testConnection(
-            configuration: configuration,
+            configuration: resolved,
             credential: credential
         )
     }

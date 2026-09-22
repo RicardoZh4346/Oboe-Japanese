@@ -16,7 +16,8 @@ final class ChatCompletionsAIConnectionClientTests: XCTestCase {
         )
         var draft = AIConfigurationDraft.deepSeekDefault
         draft.isEnabled = true
-        let configuration = try AIConfigurationValidator.validate(draft, credentialID: UUID())
+        draft.modelID = "deepseek-v4-pro"
+        let configuration = try AIConfigurationValidator.resolve(draft, credentialID: UUID())
         let client = ChatCompletionsAIConnectionClient(transport: transport)
 
         let result = try await client.testConnection(
@@ -190,8 +191,8 @@ extension ChatCompletionsAIConnectionClientTests {
 }
 
 private extension ChatCompletionsAIConnectionClientTests {
-    func configuration(mode: AIResponseFormatMode) throws -> AIConfiguration {
-        try AIConfigurationValidator.validate(
+    func configuration(mode: AIResponseFormatMode) throws -> ResolvedAIConfiguration {
+        try AIConfigurationValidator.resolve(
             AIConfigurationDraft(
                 isEnabled: true,
                 serviceKind: .custom,
@@ -206,7 +207,7 @@ private extension ChatCompletionsAIConnectionClientTests {
 
     func connectionError(
         from client: ChatCompletionsAIConnectionClient,
-        configuration: AIConfiguration
+        configuration: ResolvedAIConfiguration
     ) async -> AIConnectionError? {
         do {
             _ = try await client.testConnection(

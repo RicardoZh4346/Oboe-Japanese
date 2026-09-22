@@ -1188,7 +1188,7 @@ private actor StubAIRepairClient: AIRepairClient {
 
     func analyze(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
         callCount += 1

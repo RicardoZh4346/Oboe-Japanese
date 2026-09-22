@@ -308,7 +308,7 @@ public enum AIRepairPromptV2 {
 public protocol AIRepairClient: Sendable {
     func analyze(
         context: AIRepairRequestContext,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String
 }

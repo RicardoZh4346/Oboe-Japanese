@@ -147,7 +147,9 @@ final class ChatCompletionsSentenceAnalysisClientTests: XCTestCase {
         try await draftRepository.saveSentenceAnalysisDraft(existingDraft)
         let configuration = Self.configuration(mode: .jsonObject)
         let service = SentenceAnalysisService(
-            configurationRepository: SentenceFixedConfigurationRepository(configuration: configuration),
+            configurationRepository: SentenceFixedConfigurationRepository(
+                configuration: AIConfiguration(resolved: configuration)
+            ),
             credentialStore: SentenceFixedCredentialStore(
                 reference: configuration.credentialReference,
                 credential: "fixture-key"
@@ -175,8 +177,8 @@ private extension ChatCompletionsSentenceAnalysisClientTests {
     static let sentence = "日本に行ったことがありますか。"
     static let fixedJSON = #"{"schemaVersion":2,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问过去经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":null},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"过去式谓语","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partsOfSpeech":["五段动词","自动词"],"pitchAccent":0,"usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":null}],"warnings":[]}"#
 
-    static func configuration(mode: AIResponseFormatMode) -> AIConfiguration {
-        AIConfiguration(
+    static func configuration(mode: AIResponseFormatMode) -> ResolvedAIConfiguration {
+        ResolvedAIConfiguration(
             isEnabled: true,
             serviceKind: .custom,
             serviceName: "Fixture",
@@ -215,7 +217,7 @@ private actor SentenceFixedClient: SentenceAnalysisClient {
     init(response: String) { self.response = response }
     func analyze(
         input: SentenceAnalysisInput,
-        configuration: AIConfiguration,
+        configuration: ResolvedAIConfiguration,
         credential: String
     ) -> String { response }
 }
