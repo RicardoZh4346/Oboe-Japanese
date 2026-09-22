@@ -117,13 +117,35 @@ public actor AIConnectionTestService {
     }
 
     public func testConnection(defaultTimeZoneID: String) async throws -> AIConnectionTestResult {
+        try await performTest(
+            defaultTimeZoneID: defaultTimeZoneID,
+            requiresEnabled: true
+        )
+    }
+
+    /// 「保存并测试」专用：配置已写入但可能尚未启用——启用本身以测试
+    /// 通过为前提，因此跳过 `isEnabled` 检查。其余校验（模型已选、
+    /// 凭据存在且合法）与正式请求完全一致，仍由用户的显式动作发起。
+    public func testConnectionAllowingDisabled(
+        defaultTimeZoneID: String
+    ) async throws -> AIConnectionTestResult {
+        try await performTest(
+            defaultTimeZoneID: defaultTimeZoneID,
+            requiresEnabled: false
+        )
+    }
+
+    private func performTest(
+        defaultTimeZoneID: String,
+        requiresEnabled: Bool
+    ) async throws -> AIConnectionTestResult {
         guard TimeZone(identifier: defaultTimeZoneID) != nil else {
             throw StudyDayPlanningError.invalidTimeZone(defaultTimeZoneID)
         }
         let configuration = try await repository.loadOrCreateAIConfiguration(
             defaultTimeZoneID: defaultTimeZoneID
         )
-        guard configuration.isEnabled else {
+        if requiresEnabled, !configuration.isEnabled {
             throw AIConnectionError.aiDisabled
         }
         guard let resolved = configuration.resolved else {

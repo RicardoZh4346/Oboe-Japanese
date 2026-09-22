@@ -92,6 +92,7 @@ final class AppDependencies {
     private(set) var adaptivePreferencesService: AdaptivePreferencesService?
     private(set) var aiConfigurationService: AIConfigurationService?
     private(set) var aiConnectionTestService: AIConnectionTestService?
+    private(set) var aiModelCatalogService: AIModelCatalogService?
     private(set) var aiCardGenerationService: AICardGenerationService?
     private(set) var sentenceAnalysisService: SentenceAnalysisService?
     private(set) var sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService?
@@ -199,6 +200,22 @@ final class AppDependencies {
             // T07 UI-test seam: persist an enabled configuration + stub
             // credential so repair analysis runs without typing through
             // Settings (the credential lives only in the UITest store).
+            // 只预置凭据：供「获取模型→选择→保存并测试」的 UI 测试跳过
+            // SecureField 输入，路径与真实 Key 完全一致。重存当前持久化
+            // 草稿本身——测试内 terminate 后用同一数据库重启时，内存态
+            // UITestAICredentialStore 是新的，此分支只补齐 Key，不覆盖
+            // 已保存的启用状态与模型选择。
+            if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AI_KEY"] != nil,
+               let aiConfigurationService,
+               let persisted = try? await aiConfigurationService.load(
+                   defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+               ) {
+                _ = try? await aiConfigurationService.save(
+                    AIConfigurationDraft(configuration: persisted.configuration),
+                    apiKey: "ui-test-key",
+                    defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                )
+            }
             if ProcessInfo.processInfo.environment["OBOE_UI_TEST_AI_ENABLED"] != nil,
                let aiConfigurationService {
                 var draft = AIConfigurationDraft.deepSeekDefault
@@ -542,23 +559,31 @@ final class AppDependencies {
         let connectionClient: any AIConnectionClient
         let cardGenerationClient: any AICardGenerationClient
         let sentenceAnalysisClient: any SentenceAnalysisClient
+        var modelCatalogClient: any AIModelCatalogClient
         #if DEBUG
         if ProcessInfo.processInfo.environment["OBOE_UI_TEST_DATABASE_ID"] != nil {
             credentialStore = UITestAICredentialStore()
             connectionClient = UITestAIConnectionClient()
             cardGenerationClient = UITestAICardGenerationClient()
             sentenceAnalysisClient = UITestSentenceAnalysisClient()
+            modelCatalogClient = UITestStubbedModelCatalogClient()
         } else {
             credentialStore = KeychainAICredentialStore()
             connectionClient = ChatCompletionsAIConnectionClient()
             cardGenerationClient = ChatCompletionsAICardGenerationClient()
             sentenceAnalysisClient = ChatCompletionsSentenceAnalysisClient()
+            modelCatalogClient = HTTPAIModelCatalogClient()
+        }
+        // 显式 seam：即便不走 UITest 数据库也允许替换模型目录 client。
+        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_MODEL_CATALOG"] != nil {
+            modelCatalogClient = UITestStubbedModelCatalogClient()
         }
         #else
         credentialStore = KeychainAICredentialStore()
         connectionClient = ChatCompletionsAIConnectionClient()
         cardGenerationClient = ChatCompletionsAICardGenerationClient()
         sentenceAnalysisClient = ChatCompletionsSentenceAnalysisClient()
+        modelCatalogClient = HTTPAIModelCatalogClient()
         #endif
         let aiRepository = GRDBAIConfigurationRepository(database: database)
         aiConfigurationService = AIConfigurationService(
@@ -569,6 +594,11 @@ final class AppDependencies {
             repository: aiRepository,
             credentialStore: credentialStore,
             client: connectionClient
+        )
+        aiModelCatalogService = AIModelCatalogService(
+            repository: aiRepository,
+            credentialStore: credentialStore,
+            client: modelCatalogClient
         )
         aiCardGenerationService = AICardGenerationService(
             repository: aiRepository,
@@ -826,6 +856,53 @@ private struct UITestSentenceAnalysisClient: SentenceAnalysisClient {
     ) async throws -> String {
         try await Task.sleep(for: .seconds(1))
         return #"{"schemaVersion":2,"sentence":"日本に行ったことがありますか。","translationZH":"你去过日本吗？","explanationZH":"询问对方是否有去日本的经历。","items":[{"kind":"particle","surface":"に","canonicalForm":"に","reading":"に","meaningZH":"向、到","roleZH":"表示移动的目的地","spans":[{"text":"に","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"に","reading":"","meaningZH":"表示移动目的地","partsOfSpeech":[],"pitchAccent":null,"usage":"接在地点后","connection":"地点＋に","notes":""}},{"kind":"vocabulary","surface":"行った","canonicalForm":"行く","reading":"いく","meaningZH":"去","roleZH":"动词「行く」的过去式","spans":[{"text":"行った","occurrence":1}],"cardDraft":{"kind":"vocabulary","headword":"行く","reading":"いく","meaningZH":"去","partsOfSpeech":["五段动词","自动词"],"pitchAccent":0,"usage":"","connection":"","notes":""}},{"kind":"grammar","surface":"～たことがある","canonicalForm":"～たことがある","reading":"","meaningZH":"曾经……过","roleZH":"表示过去经历","spans":[{"text":"行った","occurrence":1},{"text":"ことがあります","occurrence":1}],"cardDraft":{"kind":"grammar","headword":"～たことがある","reading":"","meaningZH":"曾经……过","partsOfSpeech":[],"pitchAccent":null,"usage":"表示过去经历","connection":"动词た形＋ことがある","notes":""}},{"kind":"expression","surface":"未对齐项目","canonicalForm":"未对齐项目","reading":"","meaningZH":"即使定位失败，解释仍然可读","roleZH":"验证安全降级","spans":[{"text":"存在しない","occurrence":1}],"cardDraft":null}],"warnings":["请核对语境后再用于学习"]}"#
+    }
+}
+
+/// UI 测试模型目录 stub：返回稳定的虚拟模型列表，不发起网络请求。
+/// `OBOE_UI_TEST_MODEL_CATALOG_DELAY`（秒）制造可取消的慢请求；
+/// `OBOE_UI_TEST_MODEL_CATALOG_FAIL=1` 始终失败；
+/// `OBOE_UI_TEST_MODEL_CATALOG_FAIL_COUNT=N` 前 N 次失败后成功（重试路径）；
+/// `OBOE_UI_TEST_MODEL_CATALOG_EMPTY=1` 返回空列表错误（空态）。
+private actor UITestStubbedModelCatalogClient: AIModelCatalogClient {
+    private var remainingFailures: Int
+
+    init() {
+        remainingFailures = Int(
+            ProcessInfo.processInfo
+                .environment["OBOE_UI_TEST_MODEL_CATALOG_FAIL_COUNT"] ?? "0"
+        ) ?? 0
+    }
+
+    func fetchModels(
+        configuration: AIConfiguration,
+        credential: String
+    ) async throws -> [AIModelDescriptor] {
+        let environment = ProcessInfo.processInfo.environment
+        if let raw = environment["OBOE_UI_TEST_MODEL_CATALOG_DELAY"],
+           let delay = Double(raw), delay > 0 {
+            try await Task.sleep(for: .seconds(delay))
+        }
+        try Task.checkCancellation()
+        if environment["OBOE_UI_TEST_MODEL_CATALOG_EMPTY"] != nil {
+            throw AIModelCatalogError.emptyModelList
+        }
+        if environment["OBOE_UI_TEST_MODEL_CATALOG_FAIL"] != nil {
+            throw AIModelCatalogError.serviceUnavailable(statusCode: 503)
+        }
+        if remainingFailures > 0 {
+            remainingFailures -= 1
+            throw AIModelCatalogError.serviceUnavailable(statusCode: 503)
+        }
+        let prefix = "uitest-\(configuration.serviceKind.rawValue)"
+        return [
+            AIModelDescriptor(id: "\(prefix)-model-a", displayName: "UITest Model A"),
+            AIModelDescriptor(id: "\(prefix)-model-b", displayName: "UITest Model B"),
+            AIModelDescriptor(
+                id: "\(prefix)-model-c-with-a-deliberately-long-identifier-for-layout",
+                displayName: "UITest Model C（超长 ID）"
+            ),
+        ]
     }
 }
 

@@ -13,6 +13,7 @@ struct SettingsView: View {
     let adaptivePreferencesService: AdaptivePreferencesService
     let aiConfigurationService: AIConfigurationService
     let aiConnectionTestService: AIConnectionTestService
+    let aiModelCatalogService: AIModelCatalogService
     let speechService: any SpeechService
 
     @Environment(\.scenePhase) private var scenePhase
@@ -53,6 +54,14 @@ struct SettingsView: View {
     @State private var isSavingAIConfiguration = false
     @State private var isTestingAIConnection = false
     @State private var connectionTestTask: Task<Void, Never>?
+    /// 已拉取的模型列表（只存在于内存）；供应商/Key/地址变化即失效清空。
+    @State private var fetchedModels: [AIModelDescriptor] = []
+    @State private var isFetchingModels = false
+    @State private var modelFetchError: String?
+    @State private var modelFetchTask: Task<Void, Never>?
+    /// 最近一次「保存并测试」通过时的草稿（isEnabled 归一化为 false）。
+    /// 总开关只能在草稿与该状态一致时打开——测试成功是开启 AI 的前置条件。
+    @State private var testedDraft: AIConfigurationDraft?
     @State private var showAIEnablePrivacyConfirmation = false
     @State private var showRemoveAPIKeyConfirmation = false
     @State private var aiStatusMessage: String?
@@ -395,10 +404,12 @@ struct SettingsView: View {
             }
             .onDisappear {
                 connectionTestTask?.cancel()
+                modelFetchTask?.cancel()
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else {
                     connectionTestTask?.cancel()
+                    modelFetchTask?.cancel()
                     return
                 }
                 refreshPendingSharedCaptures()
@@ -525,6 +536,7 @@ struct SettingsView: View {
             aiEnabledToggle
             aiServicePicker
             aiEndpointFields
+            aiModelSelectionRow
             aiCapabilityFields
             aiCredentialFields
             aiConfigurationActions
@@ -532,6 +544,7 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var aiEnabledToggle: some View {
         Toggle(
             "启用 AI 功能",
@@ -540,27 +553,37 @@ struct SettingsView: View {
                 set: { isEnabled in
                     if isEnabled, !aiDraft.isEnabled {
                         showAIEnablePrivacyConfirmation = true
-                    } else {
+                    } else if !isEnabled {
                         aiDraft.isEnabled = false
                     }
                 }
             )
         )
-        .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
+        .disabled(aiEnableToggleDisabled)
         .accessibilityIdentifier("ai-enabled-toggle")
+
+        if aiEnableGateHintVisible {
+            Text("开启前需要选择模型并通过「保存并测试」验证连接。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("ai-enable-gated-note")
+        }
     }
 
     private var aiServicePicker: some View {
-        Picker("服务", selection: $aiDraft.serviceKind) {
+        Picker(
+            "服务",
+            selection: Binding(
+                get: { aiDraft.serviceKind },
+                set: { kind in updateAIPreset(to: kind) }
+            )
+        ) {
             ForEach(AIServiceKind.allCases, id: \.self) { kind in
                 Text(kind.displayName).tag(kind)
             }
         }
         .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
         .accessibilityIdentifier("ai-service-picker")
-        .onChange(of: aiDraft.serviceKind) { previous, current in
-            updateAIPreset(from: previous, to: current)
-        }
     }
 
     @ViewBuilder
@@ -571,7 +594,16 @@ struct SettingsView: View {
                 .autocorrectionDisabled()
                 .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
                 .accessibilityIdentifier("ai-service-name-field")
-            TextField("https://example.com/v1", text: $aiDraft.baseURL)
+            TextField(
+                "https://example.com/v1",
+                text: Binding(
+                    get: { aiDraft.baseURL },
+                    set: { newValue in
+                        aiDraft.baseURL = newValue
+                        invalidateAIModelSelection()
+                    }
+                )
+            )
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -579,19 +611,50 @@ struct SettingsView: View {
                 .accessibilityIdentifier("ai-base-url-field")
         } else {
             LabeledContent("服务地址", value: aiDraft.baseURL)
+                .accessibilityIdentifier("ai-base-url-readonly")
         }
 
-        TextField(
-            "模型 ID",
-            text: Binding(
-                get: { aiDraft.modelID ?? "" },
-                set: { aiDraft.modelID = $0.isEmpty ? nil : $0 }
+        if let providerNote = AIProviderPresetRegistry.preset(for: aiDraft.serviceKind)?.note {
+            Text(providerNote)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("ai-provider-note")
+        }
+        if aiDraft.serviceKind == .openAI {
+            Text("ChatGPT 订阅不包含 OpenAI API 额度；使用 API 需要在 OpenAI 开发者平台单独充值。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("ai-openai-billing-note")
+        }
+    }
+
+    /// 模型选择入口：已选显示 modelID，未选显示「未选择」；
+    /// 列表与搜索在二级页完成（长 ID 与最大字号更容易排版）。
+    private var aiModelSelectionRow: some View {
+        NavigationLink {
+            AIModelPickerView(
+                serviceName: aiDraft.serviceName.isEmpty
+                    ? aiDraft.serviceKind.displayName
+                    : aiDraft.serviceName,
+                models: fetchedModels,
+                isFetching: isFetchingModels,
+                errorMessage: modelFetchError,
+                prerequisiteMessage: modelFetchPrerequisiteMessage,
+                selectedModelID: aiDraft.modelID,
+                onFetch: fetchAIModels,
+                onCancel: { modelFetchTask?.cancel() },
+                onSelect: { model in aiDraft.modelID = model.id }
             )
-        )
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
-            .accessibilityIdentifier("ai-model-id-field")
+        } label: {
+            LabeledContent("模型") {
+                Text(aiDraft.modelID ?? "未选择")
+                    .foregroundStyle(
+                        aiDraft.modelID == nil ? Color.secondary : Color.primary
+                    )
+            }
+        }
+        .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
+        .accessibilityIdentifier("ai-model-selection-link")
     }
 
     @ViewBuilder
@@ -614,7 +677,13 @@ struct SettingsView: View {
     private var aiCredentialFields: some View {
         SecureField(
             hasAPIKeyForDraft ? "留空以保留已保存的 Key" : "API Key",
-            text: $apiKeyInput
+            text: Binding(
+                get: { apiKeyInput },
+                set: { newValue in
+                    apiKeyInput = newValue
+                    invalidateAIModelSelection()
+                }
+            )
         )
         .textInputAutocapitalization(.never)
         .autocorrectionDisabled()
@@ -634,22 +703,10 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var aiConfigurationActions: some View {
-        Button {
-            saveAIConfiguration()
-        } label: {
-            if isSavingAIConfiguration {
-                ProgressView()
-            } else {
-                Label("保存 AI 配置", systemImage: "externaldrive.badge.checkmark")
-            }
-        }
-        .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
-        .accessibilityIdentifier("ai-save-configuration-button")
-
-        if isTestingAIConnection {
+        if isSavingAIConfiguration || isTestingAIConnection {
             HStack {
                 ProgressView()
-                Text("正在测试连接…")
+                Text(isTestingAIConnection ? "正在测试连接…" : "正在保存配置…")
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("取消", role: .cancel) {
@@ -657,14 +714,22 @@ struct SettingsView: View {
                 }
                 .accessibilityIdentifier("ai-cancel-connection-test-button")
             }
+            .accessibilityIdentifier("ai-save-test-in-progress")
         } else {
             Button {
-                testAIConnection()
+                saveAIConfigurationAndTest()
             } label: {
-                Label("测试连接", systemImage: "network")
+                Label("保存并测试", systemImage: "checkmark.circle")
             }
-            .disabled(!canTestAIConnection)
-            .accessibilityIdentifier("ai-test-connection-button")
+            .disabled(!canSaveAndTestAIConfiguration)
+            .accessibilityIdentifier("ai-save-configuration-button")
+        }
+
+        if hasUnsavedAIChanges {
+            Text("有未保存的更改——点「保存并测试」保存并验证连接。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("ai-unsaved-changes-note")
         }
 
         if loadedAIStatus?.hasAPIKey == true {
@@ -686,11 +751,11 @@ struct SettingsView: View {
             .font(.footnote)
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("ai-request-privacy-note")
-        Text("保存配置不会发起网络请求。")
+        Text("「获取模型」会把 API Key 发送给所选服务做鉴权，仅用于列出可选模型；不会发送学习内容。")
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .accessibilityIdentifier("ai-no-network-note")
-        Text("只有点击“测试连接”才会发送最小 JSON 请求，可能产生少量 API 用量；不会自动重试。")
+            .accessibilityIdentifier("ai-model-fetch-note")
+        Text("「保存并测试」保存配置后立即发送最小 JSON 请求验证连接，可能产生少量 API 用量；不会自动重试。")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .accessibilityIdentifier("ai-connection-cost-note")
@@ -779,21 +844,122 @@ struct SettingsView: View {
         return "当前服务尚未配置 API Key"
     }
 
-    private var canTestAIConnection: Bool {
+    /// 已持久化配置对应的草稿（isEnabled 归一化为 false）——
+    /// 「已启用且未改动」判定的比较基准。
+    private var persistedDraftNormalized: AIConfigurationDraft? {
+        guard let loadedAIStatus else { return nil }
+        var draft = AIConfigurationDraft(configuration: loadedAIStatus.configuration)
+        draft.isEnabled = false
+        return draft
+    }
+
+    /// 当前草稿是否允许开启 AI：本会话内已通过连接测试的同一草稿，
+    /// 或本来就处于启用状态且未被改动的持久化配置。Key 输入框有
+    /// 未保存的新 Key 时一律要求重新「保存并测试」。
+    private var canEnableAIDraft: Bool {
+        guard apiKeyInput.isEmpty else { return false }
+        var normalized = aiDraft
+        normalized.isEnabled = false
+        if normalized == testedDraft {
+            return true
+        }
+        if loadedAIStatus?.configuration.isEnabled == true,
+           normalized == persistedDraftNormalized {
+            return true
+        }
+        return false
+    }
+
+    private var aiEnableToggleDisabled: Bool {
+        isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection
+            || (!aiDraft.isEnabled && !canEnableAIDraft)
+    }
+
+    private var aiEnableGateHintVisible: Bool {
+        !isLoadingAIConfiguration && !aiDraft.isEnabled && !canEnableAIDraft
+    }
+
+    /// 「保存并测试」前置条件：已选模型、有可用 Key（已保存或已填写）、
+    /// 草稿能通过校验（自定义服务地址等），且没有进行中的 AI 任务。
+    private var canSaveAndTestAIConfiguration: Bool {
         guard !isLoadingAIConfiguration, !isSavingAIConfiguration,
-              let loadedAIStatus, loadedAIStatus.hasAPIKey,
-              loadedAIStatus.configuration.isEnabled,
-              apiKeyInput.isEmpty,
+              !isTestingAIConnection, !isFetchingModels,
+              aiDraft.modelID?.isEmpty == false,
+              hasAPIKeyForDraft
+                  || !apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let credentialID = loadedAIStatus?.configuration.credentialReference.id,
+              (try? AIConfigurationValidator.validate(
+                  aiDraft,
+                  credentialID: credentialID
+              )) != nil else {
+            return false
+        }
+        return true
+    }
+
+    /// 草稿（含 Key 输入）与持久化配置是否有差异——用于提示
+    /// 「保存并测试」才会生效。
+    private var hasUnsavedAIChanges: Bool {
+        guard !isLoadingAIConfiguration,
+              let loadedAIStatus,
               let candidate = try? AIConfigurationValidator.validate(
                   aiDraft,
                   credentialID: loadedAIStatus.configuration.credentialReference.id
               ) else {
             return false
         }
-        return candidate == loadedAIStatus.configuration
+        return candidate != loadedAIStatus.configuration || !apiKeyInput.isEmpty
+    }
+
+    /// 「获取模型」前置条件的可解释文案；nil 表示可以获取。
+    private var modelFetchPrerequisiteMessage: String? {
+        if isLoadingAIConfiguration {
+            return "正在读取 AI 配置…"
+        }
+        if isSavingAIConfiguration || isTestingAIConnection {
+            return "正在保存并测试配置…"
+        }
+        guard hasAPIKeyForDraft
+                || !apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return "请先填写 API Key——获取模型需要用它做鉴权。"
+        }
+        guard let credentialID = loadedAIStatus?.configuration.credentialReference.id,
+              (try? AIConfigurationValidator.validate(
+                  aiDraft,
+                  credentialID: credentialID
+              )) != nil else {
+            return "请先完善服务配置（自定义服务需要有效的 HTTPS 地址与名称）。"
+        }
+        return nil
+    }
+
+    private var canFetchAIModels: Bool {
+        modelFetchPrerequisiteMessage == nil && !isFetchingModels
+    }
+
+    /// 供应商/Key/地址变化：在途请求作废、清空已拉取列表与已选模型，
+    /// 并取消测试通过状态——之后必须重新获取模型并「保存并测试」。
+    private func invalidateAIModelSelection() {
+        modelFetchTask?.cancel()
+        modelFetchTask = nil
+        isFetchingModels = false
+        fetchedModels = []
+        modelFetchError = nil
+        aiDraft.modelID = nil
+        testedDraft = nil
+        if aiDraft.isEnabled {
+            aiDraft.isEnabled = false
+        }
+        Task {
+            await aiModelCatalogService.invalidatePendingFetches()
+        }
     }
 
     private func loadAIConfiguration() async {
+        // `.task` 在二级页（模型选择等）pop 返回时会重跑——已加载过就跳过，
+        // 否则重建草稿会把刚选的模型/拉取的列表/测试通过状态全部抹掉。
+        guard loadedAIStatus == nil else { return }
         isLoadingAIConfiguration = true
         do {
             let status = try await aiConfigurationService.load(
@@ -802,15 +968,19 @@ struct SettingsView: View {
             loadedAIStatus = status
             aiDraft = AIConfigurationDraft(configuration: status.configuration)
             apiKeyInput = ""
+            fetchedModels = []
+            modelFetchError = nil
+            testedDraft = nil
         } catch {
             errorMessage = "无法读取 AI 配置：\(error.localizedDescription)"
         }
         isLoadingAIConfiguration = false
     }
 
-    private func updateAIPreset(from previous: AIServiceKind, to current: AIServiceKind) {
-        guard previous != current else { return }
-        if let preset = AIProviderPresetRegistry.preset(for: current) {
+    private func updateAIPreset(to kind: AIServiceKind) {
+        guard kind != aiDraft.serviceKind else { return }
+        aiDraft.serviceKind = kind
+        if let preset = AIProviderPresetRegistry.preset(for: kind) {
             aiDraft.serviceName = preset.displayName
             aiDraft.baseURL = preset.baseURL
             aiDraft.responseFormatMode = preset.responseFormatMode
@@ -819,53 +989,117 @@ struct SettingsView: View {
             aiDraft.baseURL = "https://"
             aiDraft.responseFormatMode = .jsonObject
         }
-        aiDraft.modelID = nil
         apiKeyInput = ""
+        invalidateAIModelSelection()
     }
 
-    private func saveAIConfiguration() {
-        guard !isSavingAIConfiguration, !isTestingAIConnection else { return }
-        isSavingAIConfiguration = true
-        errorMessage = nil
-        Task {
+    /// 「获取模型」：先把当前草稿与 Key 落库（模型目录服务只读取
+    /// 已持久化配置与凭据），再拉取可选模型列表。
+    private func fetchAIModels() {
+        guard canFetchAIModels else { return }
+        isFetchingModels = true
+        modelFetchError = nil
+        modelFetchTask = Task {
+            defer {
+                isFetchingModels = false
+                modelFetchTask = nil
+            }
             do {
+                // 未选模型时不能持久化 enabled——按关闭态保存。
+                var draftToSave = aiDraft
+                if draftToSave.modelID == nil {
+                    draftToSave.isEnabled = false
+                }
                 let status = try await aiConfigurationService.save(
-                    aiDraft,
+                    draftToSave,
                     apiKey: apiKeyInput,
                     defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
                 )
                 loadedAIStatus = status
-                aiDraft = AIConfigurationDraft(configuration: status.configuration)
                 apiKeyInput = ""
-                aiStatusMessage = "AI 配置已保存在本机；尚未发起网络请求。"
+                aiDraft = AIConfigurationDraft(configuration: status.configuration)
+                let models = try await aiModelCatalogService.fetchModels(
+                    defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                )
+                fetchedModels = models
+            } catch let error as AIModelCatalogError
+            where error == .cancelled || error == .requestSuperseded {
+                // 用户取消或配置在请求途中又变化——静默回到可重试状态。
+            } catch is CancellationError {
             } catch {
-                errorMessage = "无法保存 AI 配置：\(error.localizedDescription)"
+                modelFetchError = error.localizedDescription
             }
-            isSavingAIConfiguration = false
         }
     }
 
-    private func testAIConnection() {
-        guard canTestAIConnection, !isTestingAIConnection else { return }
-        isTestingAIConnection = true
-        aiStatusMessage = nil
+    /// 「保存并测试」：先按关闭态保存（测试通过前持久化配置绝不保留
+    /// enabled），随后立即发起连接测试；草稿要求开启且测试通过时
+    /// 再补存 enabled——持久化的 enabled 配置必然对应一次通过的测试。
+    private func saveAIConfigurationAndTest() {
+        guard canSaveAndTestAIConfiguration else { return }
+        isSavingAIConfiguration = true
+        isTestingAIConnection = false
         errorMessage = nil
+        aiStatusMessage = nil
         connectionTestTask = Task {
             defer {
+                isSavingAIConfiguration = false
                 isTestingAIConnection = false
                 connectionTestTask = nil
             }
+            let timeZoneID = TimeZone.autoupdatingCurrent.identifier
             do {
-                let result = try await aiConnectionTestService.testConnection(
-                    defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                var disabledDraft = aiDraft
+                disabledDraft.isEnabled = false
+                let status = try await aiConfigurationService.save(
+                    disabledDraft,
+                    apiKey: apiKeyInput,
+                    defaultTimeZoneID: timeZoneID
                 )
-                aiStatusMessage = "连接成功：\(result.serviceName) / \(result.modelID) / \(result.responseFormatMode.displayName)。"
+                loadedAIStatus = status
+                apiKeyInput = ""
+            } catch is CancellationError {
+                aiStatusMessage = "已取消保存。"
+                return
+            } catch {
+                errorMessage = "无法保存 AI 配置：\(error.localizedDescription)"
+                return
+            }
+
+            isTestingAIConnection = true
+            do {
+                let result = try await aiConnectionTestService
+                    .testConnectionAllowingDisabled(defaultTimeZoneID: timeZoneID)
+                var normalized = aiDraft
+                normalized.isEnabled = false
+                testedDraft = normalized
+                if aiDraft.isEnabled {
+                    do {
+                        let enabledStatus = try await aiConfigurationService.save(
+                            aiDraft,
+                            apiKey: nil,
+                            defaultTimeZoneID: timeZoneID
+                        )
+                        loadedAIStatus = enabledStatus
+                        aiStatusMessage = "已保存并通过连接测试，AI 已启用：\(result.serviceName) / \(result.modelID)。"
+                    } catch {
+                        errorMessage = "连接测试已通过，但保存启用状态失败：\(error.localizedDescription)"
+                    }
+                } else {
+                    aiStatusMessage = "已保存并通过连接测试：\(result.serviceName) / \(result.modelID)。现在可以开启 AI。"
+                }
             } catch let error as AIConnectionError where error == .cancelled {
                 aiStatusMessage = error.localizedDescription
             } catch is CancellationError {
                 aiStatusMessage = AIConnectionError.cancelled.localizedDescription
             } catch {
                 errorMessage = "连接测试失败：\(error.localizedDescription)"
+                testedDraft = nil
+            }
+            // 以持久化结果重建草稿：测试失败时持久化停留在关闭态，
+            // 草稿同步回落到未启用，避免显示一个无效的"已开启"。
+            if let loadedAIStatus {
+                aiDraft = AIConfigurationDraft(configuration: loadedAIStatus.configuration)
             }
         }
     }

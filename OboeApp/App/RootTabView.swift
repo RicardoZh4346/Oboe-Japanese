@@ -28,6 +28,7 @@ struct RootTabView: View {
                let adaptivePreferencesService = dependencies.adaptivePreferencesService,
                let aiConfigurationService = dependencies.aiConfigurationService,
                let aiConnectionTestService = dependencies.aiConnectionTestService,
+               let aiModelCatalogService = dependencies.aiModelCatalogService,
                let aiCardGenerationService = dependencies.aiCardGenerationService,
                let sentenceAnalysisService = dependencies.sentenceAnalysisService,
                let sentenceAnalysisCardCreationService = dependencies.sentenceAnalysisCardCreationService,
@@ -52,6 +53,7 @@ struct RootTabView: View {
                     adaptivePreferencesService: adaptivePreferencesService,
                     aiConfigurationService: aiConfigurationService,
                     aiConnectionTestService: aiConnectionTestService,
+                    aiModelCatalogService: aiModelCatalogService,
                     aiCardGenerationService: aiCardGenerationService,
                     sentenceAnalysisService: sentenceAnalysisService,
                     sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
@@ -106,6 +108,7 @@ struct RootTabView: View {
         adaptivePreferencesService: AdaptivePreferencesService,
         aiConfigurationService: AIConfigurationService,
         aiConnectionTestService: AIConnectionTestService,
+        aiModelCatalogService: AIModelCatalogService,
         aiCardGenerationService: AICardGenerationService,
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
@@ -197,6 +200,7 @@ struct RootTabView: View {
                 adaptivePreferencesService: adaptivePreferencesService,
                 aiConfigurationService: aiConfigurationService,
                 aiConnectionTestService: aiConnectionTestService,
+                aiModelCatalogService: aiModelCatalogService,
                 speechService: speechService
             )
                 .id(databaseGeneration)
