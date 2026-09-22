@@ -2179,6 +2179,115 @@ final class OboeNavigationUITests: XCTestCase {
         return app
     }
 
+    /// v0.5.5 第五步：重复提示中的「加入当前牌组」把同一 Note 复用进
+    /// 第二牌组——不复制、不重新制卡；回到详情后两个牌组都能看到它。
+    /// 已是当前牌组成员时该行只保留「打开查看」，正式保存另建义项仍
+    /// 需经确认弹窗。
+    @MainActor
+    func testDuplicatePromptJoinsCurrentDeckReusingSameNote() {
+        let app = XCUIApplication()
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launch()
+
+        // 牌组 A 正常添加「兼ねる」。
+        createDeck(in: app, named: "共享甲")
+        openAddFlow(in: app, deckName: "共享甲")
+        let headword = app.textFields["vocabulary-headword-field"]
+        let meaning = app.textFields["vocabulary-meaning-field"]
+        revealExistence(headword, in: app)
+        XCTAssertTrue(headword.exists)
+        headword.tap()
+        headword.typeText("兼ねる")
+        dismissKeyboard(in: app)
+        meaning.tap()
+        meaning.typeText("兼任")
+        dismissKeyboard(in: app)
+        let formalSave = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSave, in: app)
+        XCTAssertTrue(formalSave.isEnabled)
+        formalSave.tap()
+        let savedStatus = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS %@", "已正式保存")
+        ).firstMatch
+        revealExistence(savedStatus, in: app)
+        XCTAssertTrue(savedStatus.waitForExistence(timeout: 5))
+
+        // 牌组 B 再输入同词：重复提示出现，且优先提供「加入当前牌组」。
+        createDeck(in: app, named: "共享乙")
+        openAddFlow(in: app, deckName: "共享乙")
+        let headwordB = app.textFields["vocabulary-headword-field"]
+        revealExistence(headwordB, in: app)
+        XCTAssertTrue(headwordB.exists)
+        headwordB.tap()
+        headwordB.typeText("兼ねる")
+        dismissKeyboard(in: app)
+
+        let joinButton = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "duplicate-join-")
+        ).firstMatch
+        XCTAssertTrue(joinButton.waitForExistence(timeout: 5), "非成员重复项应提供「加入当前牌组」")
+        reveal(joinButton, in: app)
+        joinButton.tap()
+
+        // 加入成功后退出添加流、回到牌组 B 详情；内容列表已刷新出该词。
+        XCTAssertTrue(
+            app.navigationBars["共享乙"].waitForExistence(timeout: 5),
+            "加入后应返回来源牌组详情"
+        )
+        let joinedNote = app.staticTexts["兼ねる"]
+        revealBidirectional(joinedNote, in: app)
+        XCTAssertTrue(joinedNote.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.staticTexts["deck-note-count"].label.contains("1"),
+            "加入后牌组 B 应计 1 个知识点"
+        )
+        XCTAssertTrue(
+            app.staticTexts["deck-card-count"].label.contains("3"),
+            "复用同一 Note 的既有 3 张方向卡，不重新制卡"
+        )
+
+        // 牌组 A 详情也能看到同一词（同一 Note，同一份正文）。
+        app.navigationBars["共享乙"].buttons.element(boundBy: 0).tap()
+        let deckA = app.staticTexts["共享甲"]
+        XCTAssertTrue(deckA.waitForExistence(timeout: 5))
+        deckA.tap()
+        let noteInA = app.staticTexts["兼ねる"]
+        revealBidirectional(noteInA, in: app)
+        XCTAssertTrue(noteInA.waitForExistence(timeout: 5), "牌组 A 应同样显示该知识点")
+
+        // 已是当前牌组成员：再进牌组 B 添加流输入同词，只有「打开查看」
+        // 与徽标，不再出现「加入当前牌组」。
+        openAddFlow(in: app, deckName: "共享乙")
+        let headwordC = app.textFields["vocabulary-headword-field"]
+        revealExistence(headwordC, in: app)
+        XCTAssertTrue(headwordC.exists)
+        headwordC.tap()
+        headwordC.typeText("兼ねる")
+        dismissKeyboard(in: app)
+
+        let memberBadge = app.staticTexts["已在当前牌组"]
+        XCTAssertTrue(memberBadge.waitForExistence(timeout: 5), "成员项应显示「已在当前牌组」")
+        XCTAssertFalse(joinButton.exists, "已是成员的重复项不再提供「加入当前牌组」")
+
+        // 「另建义项」仍需明确确认：正式保存先弹确认，取消则留在编辑器。
+        let meaningC = app.textFields["vocabulary-meaning-field"]
+        revealExistence(meaningC, in: app)
+        meaningC.tap()
+        meaningC.typeText("另一义项")
+        dismissKeyboard(in: app)
+        let formalSaveC = app.buttons["vocabulary-formal-save-button"]
+        reveal(formalSaveC, in: app)
+        XCTAssertTrue(formalSaveC.isEnabled)
+        formalSaveC.tap()
+        let confirm = app.buttons["duplicate-commit-confirm-button"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3), "另建义项必须先经确认弹窗")
+        app.buttons["取消"].tap()
+        XCTAssertTrue(
+            app.navigationBars["添加"].waitForExistence(timeout: 3),
+            "取消确认后应停留在添加编辑器"
+        )
+    }
+
     // MARK: - T16 真机与可访问性验收（模拟器可覆盖部分）
 
     /// T16：v0.4 数据副本（schema v12）的真实升级路径——App 打开时执行

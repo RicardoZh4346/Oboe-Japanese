@@ -7,6 +7,7 @@ import UIKit
 struct AddContentEditorView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.dismiss) private var dismiss
     @State private var model: AddContentViewModel
     private let deckService: DeckManagementService
     private let vocabularyService: VocabularyService
@@ -596,38 +597,85 @@ struct AddContentEditorView: View {
                 .accessibilityIdentifier("duplicate-warning")
 
                 ForEach(model.duplicates) { item in
-                    NavigationLink {
-                        KnowledgePointDetailDestination(
-                            item: item,
-                            vocabularyService: vocabularyService,
-                            grammarService: grammarService,
-                            knowledgePointService: knowledgePointService,
-                            deckService: deckService,
-                            contentCardService: contentCardService,
-                            historyService: historyService,
-                            speechService: speechService
-                        ) {
-                            await model.checkDuplicates(immediately: true)
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.headword)
-                            if let reading = item.reading {
-                                Text(reading)
+                    VStack(alignment: .leading, spacing: 8) {
+                        NavigationLink {
+                            KnowledgePointDetailDestination(
+                                item: item,
+                                vocabularyService: vocabularyService,
+                                grammarService: grammarService,
+                                knowledgePointService: knowledgePointService,
+                                deckService: deckService,
+                                contentCardService: contentCardService,
+                                historyService: historyService,
+                                speechService: speechService
+                            ) {
+                                await model.checkDuplicates(immediately: true)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(item.headword)
+                                    if model.isCurrentDeckMember(item) {
+                                        Text("已在当前牌组")
+                                            .font(.caption.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(.quaternary, in: Capsule())
+                                    }
+                                }
+                                if let reading = item.reading {
+                                    Text(reading)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(item.meaningZH)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            Text(item.meaningZH)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        }
+                        .accessibilityIdentifier("duplicate-row-\(item.id.uuidString)")
+
+                        // v0.5.5 第五步：优先展示「加入当前牌组」——只追加成员
+                        // 关系复用同一 Note，不复制卡片；成功后退出添加流，
+                        // 由牌组详情在返回时自行刷新。
+                        if model.canJoinCurrentDeck(item) {
+                            Button {
+                                Task {
+                                    if await model.addDuplicateToCurrentDeck(
+                                        noteID: item.id
+                                    ) {
+                                        dismiss()
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Label(
+                                        "加入当前牌组",
+                                        systemImage: "rectangle.stack.badge.plus"
+                                    )
+                                    if model.joiningDuplicateNoteIDs.contains(item.id) {
+                                        ProgressView()
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.joiningDuplicateNoteIDs.contains(item.id))
+                            .accessibilityIdentifier(
+                                "duplicate-join-\(item.id.uuidString)"
+                            )
                         }
                     }
-                    .accessibilityIdentifier("duplicate-row-\(item.id.uuidString)")
                 }
             } header: {
                 Text("可能重复")
             } footer: {
-                Text("可先打开已有内容核对。重复提示不会阻止在正式保存时明确另建义项。")
+                Text(
+                    model.requiredDeckID == nil
+                        ? "可先打开已有内容核对。重复提示不会阻止在正式保存时明确另建义项。"
+                        : "可先打开已有内容核对；未加入当前牌组的条目可直接「加入当前牌组」，卡片与复习进度在成员牌组间共享、归属牌组保持不变。重复提示不会阻止在正式保存时明确另建义项。"
+                )
             }
         }
     }

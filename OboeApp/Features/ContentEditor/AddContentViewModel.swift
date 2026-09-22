@@ -118,6 +118,9 @@ final class AddContentViewModel {
     var isSaving = false
     var isCommitting = false
     var duplicates: [KnowledgePointSummary] = []
+    /// 「加入当前牌组」正在处理中的重复项：驱动行内禁用态并防重入，
+    /// 重复点击只生效一次（幂等）。
+    private(set) var joiningDuplicateNoteIDs: Set<UUID> = []
 
     var currentStatusMessage: String? {
         switch kind {
@@ -1284,6 +1287,56 @@ final class AddContentViewModel {
         }
     }
 
+    /// v0.5.5 第五步：重复项是否已是当前（required）牌组成员。
+    /// 已是成员的行只保留「打开查看」与正式保存时的二次确认另建义项。
+    func isCurrentDeckMember(_ item: KnowledgePointSummary) -> Bool {
+        guard let requiredDeckID else { return false }
+        return item.deckIDs.contains(requiredDeckID)
+    }
+
+    /// 能否对重复项展示「加入当前牌组」：仅从牌组详情进入的添加流
+    ///（requiredDeckID 非空）且该 Note 尚未是当前牌组成员。
+    func canJoinCurrentDeck(_ item: KnowledgePointSummary) -> Bool {
+        requiredDeckID != nil && !isCurrentDeckMember(item)
+    }
+
+    /// v0.5.5 第五步：把重复提示中的已有 Note 追加进当前牌组。
+    /// 走现有 membership 原子替换接口，只追加成员关系并保留原 home
+    /// deck——卡片、FSRS 状态与复习日志都挂在 Note 上，不复制也不重置；
+    /// 每日新词额度归属不变，用户可在详情页「管理牌组」另行切换 home。
+    /// 返回 true 表示成员关系已就位（含已是成员的幂等结果），由调用方
+    /// 退出添加流、返回牌组详情。
+    @discardableResult
+    func addDuplicateToCurrentDeck(noteID: UUID) async -> Bool {
+        guard let requiredDeckID,
+              !joiningDuplicateNoteIDs.contains(noteID) else { return false }
+        joiningDuplicateNoteIDs.insert(noteID)
+        defer { joiningDuplicateNoteIDs.remove(noteID) }
+        do {
+            guard let existing = try await knowledgePointService.fetchMembership(
+                noteID: noteID
+            ) else {
+                errorMessage = "这个知识点已不存在。"
+                return false
+            }
+            // 幂等：已是成员时不再写库，直接按成功处理。
+            if existing.deckIDs.contains(requiredDeckID) {
+                return true
+            }
+            var deckIDs = existing.deckIDs
+            deckIDs.insert(requiredDeckID)
+            _ = try await knowledgePointService.replaceMembership(
+                noteID: noteID,
+                deckIDs: deckIDs,
+                homeDeckID: existing.homeDeckID
+            )
+            return true
+        } catch {
+            errorMessage = Self.membershipMessage(for: error)
+            return false
+        }
+    }
+
     /// 恢复草稿中的多牌组选择：过滤已删除牌组；草稿没有有效成员时不动
     /// 当前选择（由 `normalizeMemberships` 兜底默认值）。
     private func restoreDeckSelection(
@@ -1337,6 +1390,23 @@ final class AddContentViewModel {
 
     private func tagsAreValid(_ text: String) -> Bool {
         parsedTags(text).allSatisfy { (try? KnowledgeTagName(validating: $0)) != nil }
+    }
+
+    private static func membershipMessage(for error: Error) -> String {
+        switch error {
+        case NoteDeckMembershipError.noteNotFound:
+            "这个知识点已不存在。"
+        case NoteDeckMembershipError.deckNotFound(_):
+            "目标牌组已不存在，请返回牌组列表刷新后重试。"
+        case NoteDeckMembershipError.atLeastOneDeckRequired,
+             NoteDeckMembershipError.homeDeckMustBeMember:
+            "牌组成员关系无效，请重试。"
+        case NoteDeckMembershipError.cannotRemoveLastMembership,
+             NoteDeckMembershipError.cannotRemoveHomeMembership:
+            "当前成员关系不允许移除。"
+        default:
+            error.localizedDescription
+        }
     }
 
     private static func commitMessage(for error: Error) -> String {

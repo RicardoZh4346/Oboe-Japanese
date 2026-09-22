@@ -719,6 +719,16 @@ private struct DeckDetailView: View {
                         requiredDeckID: deckID
                     )
                 }
+                .onChange(of: isPresentingAdd) { _, isPresenting in
+                    // v0.5.5 第五步：添加流退出（正式保存或重复提示的
+                    // 「加入当前牌组」复用）回到详情时刷新内容与计数；
+                    // 成员关系变化不走 ValueObservation，需要主动重取。
+                    guard !isPresenting else { return }
+                    Task {
+                        await contentModel.load()
+                        await model.refreshDecks()
+                    }
+                }
                 .searchable(
                     text: $searchText,
                     placement: .navigationBarDrawer(displayMode: .always),

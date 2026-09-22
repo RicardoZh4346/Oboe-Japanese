@@ -119,13 +119,66 @@ final class GRDBNoteDeckMembershipTests: XCTestCase {
         )
     }
 
+    /// v0.5.5 第五步「加入当前牌组」的核心不变量：同一 Note 追加成员
+    /// 关系到第二牌组时，Note/Card/ReviewLog 数量与卡片调度字段、日志
+    /// 内容全部不变；两个牌组看到同一份最新正文；home 保留在原牌组，
+    /// 每日额度归属不受影响；同参数重复调用幂等。
     func testAddingSecondDeckDoesNotDuplicateCardsOrReviewLogs() async throws {
         let fixture = try await MultiDeckDatabaseFixture.make()
         defer { fixture.remove() }
         let repository = GRDBKnowledgePointRepository(database: fixture.database)
         let noteID = fixture.exclusiveNote.noteID
 
+        // 给独占 Note 的一张卡造出非默认调度状态并补一条复习日志，
+        // 使「加入后原样保留」的断言覆盖 FSRS 字段与日志内容。
+        let reviewedCard = fixture.exclusiveNote.cardID(.vocabularyJapaneseToChinese)
+        let firstStudyAt = MultiDeckDatabaseFixture.baseDate.addingTimeInterval(-86_400)
+        try await fixture.updateScheduling(
+            cardID: reviewedCard,
+            state: .review,
+            dueAt: MultiDeckDatabaseFixture.baseDate.addingTimeInterval(3_600),
+            stability: 5.4,
+            difficulty: 6.2,
+            repetitions: 2,
+            lapses: 1,
+            firstStudiedAt: firstStudyAt,
+            stateVersion: 2
+        )
+        _ = try await fixture.insertReviewLog(
+            cardKey: reviewedCard,
+            cardID: reviewedCard,
+            noteID: noteID,
+            deckID: fixture.deckBID,
+            rating: .good,
+            reviewedAt: firstStudyAt,
+            studyDayID: fixture.previousStudyDayID,
+            previousSnapshot: fixture.snapshot(
+                state: .new,
+                dueAt: firstStudyAt,
+                stability: 0,
+                difficulty: 0,
+                repetitions: 0,
+                lapses: 0,
+                stateVersion: 0
+            ),
+            nextSnapshot: fixture.snapshot(
+                state: .learning,
+                dueAt: firstStudyAt.addingTimeInterval(600),
+                stability: 1.2,
+                difficulty: 6.0,
+                repetitions: 1,
+                lapses: 0,
+                stateVersion: 1
+            ),
+            wasFirstStudy: true
+        )
+
+        let noteCountBefore = try await persistedNoteCount(in: fixture)
         let countsBefore = try await cardAndLogCounts(noteID: noteID, in: fixture)
+        let cardsBefore = try await cardSnapshots(noteID: noteID, in: fixture)
+        let logsBefore = try await reviewLogSnapshots(noteID: noteID, in: fixture)
+
+        // 加入第二牌组：只追加成员关系，保留原 home deck B。
         let membership = try await repository.replaceDeckMembership(
             noteID: noteID,
             deckIDs: [fixture.deckAID, fixture.deckBID],
@@ -133,12 +186,112 @@ final class GRDBNoteDeckMembershipTests: XCTestCase {
             at: Date()
         )
         XCTAssertEqual(membership.deckIDs, [fixture.deckAID, fixture.deckBID])
+        XCTAssertEqual(membership.homeDeckID, fixture.deckBID)
 
+        // 幂等：同参数再调一次（模拟重复点击）结果一致，不产生新行。
+        let repeated = try await repository.replaceDeckMembership(
+            noteID: noteID,
+            deckIDs: [fixture.deckAID, fixture.deckBID],
+            homeDeckID: fixture.deckBID,
+            at: Date()
+        )
+        XCTAssertEqual(repeated, membership)
+
+        let persisted = try await repository.fetchDeckMembership(noteID: noteID)
+        XCTAssertEqual(persisted?.deckIDs, [fixture.deckAID, fixture.deckBID])
+        // home 仍是 B：加入第二牌组不改变归属与每日额度归因。
+        XCTAssertEqual(persisted?.homeDeckID, fixture.deckBID)
+
+        // Note/Card/ReviewLog 数量不变；Card 归属不变：cards 表没有
+        // deck 维度，共享不产生新行。
+        let noteCountAfter = try await persistedNoteCount(in: fixture)
+        XCTAssertEqual(noteCountAfter, noteCountBefore)
         let countsAfter = try await cardAndLogCounts(noteID: noteID, in: fixture)
         XCTAssertEqual(countsAfter.cards, countsBefore.cards)
         XCTAssertEqual(countsAfter.logs, countsBefore.logs)
-        // Card 归属不变：cards 表没有 deck 维度，共享不产生新行。
         XCTAssertEqual(countsAfter.cards, 3)
+        XCTAssertEqual(countsAfter.logs, 1)
+
+        // Card ID 与调度字段（due/stateVersion/stability/difficulty/
+        // reps/lapses 等）逐项不变。
+        let cardsAfter = try await cardSnapshots(noteID: noteID, in: fixture)
+        XCTAssertEqual(cardsAfter, cardsBefore)
+        // ReviewLog 数量与内容不变。
+        let logsAfter = try await reviewLogSnapshots(noteID: noteID, in: fixture)
+        XCTAssertEqual(logsAfter, logsBefore)
+
+        // 两个牌组查看同一份最新正文：直接改释义后两边同步可见。
+        let vocabulary = GRDBVocabularyRepository(database: fixture.database)
+        try await fixture.database.pool.write { db in
+            try db.execute(
+                sql: "UPDATE notes SET meaning_zh = '更新后的释义' WHERE id = ?",
+                arguments: [DatabaseValueCodec.encode(noteID)]
+            )
+        }
+        for deckID in [fixture.deckAID, fixture.deckBID] {
+            let summaries = try await repository.fetchKnowledgePointSummaries(
+                deckID: deckID
+            )
+            let summary = try XCTUnwrap(summaries.first { $0.id == noteID })
+            XCTAssertEqual(summary.meaningZH, "更新后的释义")
+            XCTAssertEqual(summary.deckIDs, [fixture.deckAID, fixture.deckBID])
+        }
+        let detail = try await vocabulary.fetchVocabulary(id: noteID)
+        XCTAssertEqual(detail?.meaningZH, "更新后的释义")
+        XCTAssertEqual(detail?.deckIDs, [fixture.deckAID, fixture.deckBID])
+        XCTAssertEqual(detail?.deckID, fixture.deckBID)
+    }
+
+    /// v0.5.5 第五步：「加入当前牌组」在检查与写入之间目标牌组被并发
+    /// 删除时，replaceDeckMembership 抛 deckNotFound 并整体回滚——成员
+    /// 关系、home、卡片与复习日志保持原样，不留孤儿成员行。
+    func testJoiningDeletedTargetDeckRollsBackMembership() async throws {
+        let fixture = try await MultiDeckDatabaseFixture.make()
+        defer { fixture.remove() }
+        let repository = GRDBKnowledgePointRepository(database: fixture.database)
+        let deckRepository = GRDBDeckRepository(database: fixture.database)
+        let noteID = fixture.exclusiveNote.noteID
+
+        // 目标牌组在「加入」写入前被并发删除（空牌组可直接删除）。
+        let targetID = UUID()
+        _ = try await deckRepository.createDeck(id: targetID, name: "已删", at: Date())
+        _ = try await deckRepository.deleteDeckIfEmpty(id: targetID)
+
+        let countsBefore = try await cardAndLogCounts(noteID: noteID, in: fixture)
+        let cardsBefore = try await cardSnapshots(noteID: noteID, in: fixture)
+        let logsBefore = try await reviewLogSnapshots(noteID: noteID, in: fixture)
+
+        do {
+            _ = try await repository.replaceDeckMembership(
+                noteID: noteID,
+                deckIDs: [fixture.deckBID, targetID],
+                homeDeckID: fixture.deckBID,
+                at: Date()
+            )
+            XCTFail("expected deckNotFound")
+        } catch let error as NoteDeckMembershipError {
+            XCTAssertEqual(error, .deckNotFound(targetID))
+        }
+
+        // 事务回滚：成员关系与 home 不变，卡片/日志不受影响。
+        let persisted = try await repository.fetchDeckMembership(noteID: noteID)
+        XCTAssertEqual(persisted?.deckIDs, [fixture.deckBID])
+        XCTAssertEqual(persisted?.homeDeckID, fixture.deckBID)
+        let countsAfter = try await cardAndLogCounts(noteID: noteID, in: fixture)
+        XCTAssertEqual(countsAfter.cards, countsBefore.cards)
+        XCTAssertEqual(countsAfter.logs, countsBefore.logs)
+        let cardsAfter = try await cardSnapshots(noteID: noteID, in: fixture)
+        XCTAssertEqual(cardsAfter, cardsBefore)
+        let logsAfter = try await reviewLogSnapshots(noteID: noteID, in: fixture)
+        XCTAssertEqual(logsAfter, logsBefore)
+        let orphanRows = try await fixture.database.pool.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM note_decks WHERE deck_id = ?",
+                arguments: [DatabaseValueCodec.encode(targetID)]
+            )
+        }
+        XCTAssertEqual(orphanRows, 0)
     }
 
     // MARK: - move facade
@@ -910,6 +1063,88 @@ final class GRDBNoteDeckMembershipTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private func persistedNoteCount(
+        in fixture: MultiDeckDatabaseFixture
+    ) async throws -> Int {
+        try await fixture.database.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM notes") ?? 0
+        }
+    }
+
+    /// 逐字段快照某 Note 的全部卡片调度状态，用于断言「加入牌组」
+    /// 不改变任何卡片字段（含 Card ID、due、stateVersion、stability、
+    /// difficulty、reps、lapses）。
+    private func cardSnapshots(
+        noteID: UUID,
+        in fixture: MultiDeckDatabaseFixture
+    ) async throws -> [[String: String]] {
+        try await fixture.database.pool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, state, due_at_ms, stability, difficulty,
+                           reps, lapses, scheduled_days, elapsed_days,
+                           learning_step, state_version, is_enabled
+                    FROM cards WHERE note_id = ? ORDER BY id
+                    """,
+                arguments: [DatabaseValueCodec.encode(noteID)]
+            ).map { row in
+                [
+                    "id": row["id"] as String,
+                    "state": "\(row["state"] as Int)",
+                    "due_at_ms": "\(row["due_at_ms"] as Int64)",
+                    "stability": "\(row["stability"] as Double)",
+                    "difficulty": "\(row["difficulty"] as Double)",
+                    "reps": "\(row["reps"] as Int)",
+                    "lapses": "\(row["lapses"] as Int)",
+                    "scheduled_days": "\(row["scheduled_days"] as Int)",
+                    "elapsed_days": "\(row["elapsed_days"] as Int)",
+                    "learning_step": "\(row["learning_step"] as Int)",
+                    "state_version": "\(row["state_version"] as Int)",
+                    "is_enabled": "\(row["is_enabled"] as Int)"
+                ]
+            }
+        }
+    }
+
+    /// 逐字段快照某 Note 的全部复习日志，用于断言「加入牌组」不改变
+    /// 日志数量与内容。
+    private func reviewLogSnapshots(
+        noteID: UUID,
+        in fixture: MultiDeckDatabaseFixture
+    ) async throws -> [[String: String]] {
+        try await fixture.database.pool.read { db in
+            try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, event_id, card_id, card_key, note_id,
+                           deck_id_at_review, rating, reviewed_at_ms,
+                           study_day_id, was_first_study, duration_ms,
+                           content_version, previous_state_json, next_state_json
+                    FROM review_logs WHERE note_id = ? ORDER BY id
+                    """,
+                arguments: [DatabaseValueCodec.encode(noteID)]
+            ).map { row in
+                [
+                    "id": row["id"] as String,
+                    "event_id": row["event_id"] as String,
+                    "card_id": (row["card_id"] as String?) ?? "NULL",
+                    "card_key": row["card_key"] as String,
+                    "note_id": row["note_id"] as String,
+                    "deck_id_at_review": row["deck_id_at_review"] as String,
+                    "rating": "\(row["rating"] as Int)",
+                    "reviewed_at_ms": "\(row["reviewed_at_ms"] as Int64)",
+                    "study_day_id": (row["study_day_id"] as String?) ?? "NULL",
+                    "was_first_study": "\(row["was_first_study"] as Int)",
+                    "duration_ms": "\(row["duration_ms"] as Int)",
+                    "content_version": "\(row["content_version"] as Int)",
+                    "previous_state_json": row["previous_state_json"] as String,
+                    "next_state_json": row["next_state_json"] as String
+                ]
+            }
+        }
+    }
 
     private func cardAndLogCounts(
         noteID: UUID,
