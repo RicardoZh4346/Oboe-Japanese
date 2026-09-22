@@ -280,8 +280,12 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     func testInboxAnalysisResumeAndStaleAfterTextEdit() {
         let databaseID = UUID().uuidString
-        let app = launchApp(databaseID: databaseID)
-        configureTestAI(in: app)
+        // Step 12 起 AI 启用需「获取模型→选择→保存并测试」——本用例只
+        // 验证分析草稿恢复，直接经 seam 预置已启用配置与凭据。
+        let app = launchApp(
+            databaseID: databaseID,
+            environment: ["OBOE_UI_TEST_AI_ENABLED": "1"]
+        )
         openInbox(in: app)
         captureText("日本に行ったことがありますか。", in: app)
 
@@ -314,7 +318,10 @@ final class OboeInboxUITests: XCTestCase {
 
         app.terminate()
 
-        let relaunched = launchApp(databaseID: databaseID)
+        let relaunched = launchApp(
+            databaseID: databaseID,
+            environment: ["OBOE_UI_TEST_AI_ENABLED": "1"]
+        )
         openInbox(in: relaunched)
         relaunched.buttons["处理中"].tap()
         relaunched.staticTexts["日本に行ったことがありますか。"].firstMatch.tap()
@@ -418,33 +425,6 @@ final class OboeInboxUITests: XCTestCase {
             }
         }
         app.keyboards.firstMatch.swipeDown()
-    }
-
-    /// Fills the fake credential and enables AI so the UITest clients answer.
-    @MainActor
-    private func configureTestAI(in app: XCUIApplication) {
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
-        let keyField = app.secureTextFields["ai-api-key-field"]
-        reveal(keyField, in: app)
-        keyField.tap()
-        keyField.typeText("ui-test-key")
-        dismissKeyboard(in: app)
-        let aiToggle = app.switches["ai-enabled-toggle"]
-        reveal(aiToggle, in: app)
-        aiToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let enableButton = app.buttons["了解并启用"]
-        if enableButton.waitForExistence(timeout: 2) {
-            enableButton.tap()
-        }
-        let saveConfiguration = app.buttons["ai-save-configuration-button"]
-        reveal(saveConfiguration, in: app)
-        saveConfiguration.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["ai-key-configured"]
-                .waitForExistence(timeout: 5)
-        )
     }
 
     @MainActor
@@ -603,12 +583,16 @@ final class OboeInboxUITests: XCTestCase {
     @MainActor
     private func launchApp(
         databaseID: String = UUID().uuidString,
-        captureQueue: URL? = nil
+        captureQueue: URL? = nil,
+        environment: [String: String] = [:]
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = databaseID
         if let captureQueue {
             app.launchEnvironment["OBOE_UI_TEST_CAPTURE_QUEUE"] = captureQueue.path
+        }
+        for (key, value) in environment {
+            app.launchEnvironment[key] = value
         }
         app.launch()
         return app

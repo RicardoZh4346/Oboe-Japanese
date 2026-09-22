@@ -617,13 +617,22 @@ final class OboeNavigationUITests: XCTestCase {
         reveal(aiToggle, in: app)
         XCTAssertTrue(aiToggle.exists)
         XCTAssertEqual(aiToggle.value as? String, "0")
+        XCTAssertFalse(
+            aiToggle.isEnabled,
+            "未通过连接测试前 AI 总开关必须禁用"
+        )
         let servicePicker = app.descendants(matching: .any)["ai-service-picker"]
         revealExistence(servicePicker, in: app)
         XCTAssertTrue(servicePicker.exists)
-        let modelField = app.textFields["ai-model-id-field"]
-        reveal(modelField, in: app)
-        XCTAssertTrue(modelField.exists)
-        XCTAssertEqual(modelField.value as? String, "deepseek-v4-pro")
+        // 模型改为目录选择入口（不再是自由输入的模型 ID 文本框）。
+        let modelRow = app.descendants(matching: .any)["ai-model-selection-link"]
+        revealExistence(modelRow, in: app)
+        XCTAssertTrue(modelRow.exists)
+        XCTAssertTrue(modelRow.label.contains("未选择"))
+        XCTAssertFalse(
+            app.textFields["ai-model-id-field"].exists,
+            "模型必须是目录选择而非自由输入"
+        )
         let keyField = app.secureTextFields["ai-api-key-field"]
         reveal(keyField, in: app)
         XCTAssertTrue(keyField.exists)
@@ -636,9 +645,11 @@ final class OboeNavigationUITests: XCTestCase {
         let requestPrivacy = app.staticTexts["ai-request-privacy-note"]
         reveal(requestPrivacy, in: app)
         XCTAssertTrue(requestPrivacy.exists)
-        let noNetwork = app.staticTexts["ai-no-network-note"]
-        reveal(noNetwork, in: app)
-        XCTAssertTrue(noNetwork.exists)
+        // 「保存并测试」会发起请求——文案改为获取模型的鉴权边界说明。
+        let fetchNote = app.staticTexts["ai-model-fetch-note"]
+        revealExistence(fetchNote, in: app)
+        XCTAssertTrue(fetchNote.exists)
+        XCTAssertFalse(app.staticTexts["ai-no-network-note"].exists)
     }
 
     @MainActor
@@ -655,12 +666,16 @@ final class OboeNavigationUITests: XCTestCase {
         reveal(capability, in: app)
         XCTAssertTrue(capability.exists)
 
-        // 未配置 Key 时按钮处于禁用态——disabled 元素不可 hit-test，
-        // reveal() 会扫过它导致离屏卸载，只能用存在性显露。
-        let testButton = app.buttons["ai-test-connection-button"]
-        revealExistence(testButton, in: app)
-        XCTAssertTrue(testButton.exists)
-        XCTAssertFalse(testButton.isEnabled, "未启用且没有 Key 时不得发起连接测试")
+        // 未选模型且没有 Key 时「保存并测试」禁用——disabled 元素不可
+        // hit-test，reveal() 会扫过它导致离屏卸载，只能用存在性显露。
+        let saveTestButton = app.buttons["ai-save-configuration-button"]
+        revealExistence(saveTestButton, in: app)
+        XCTAssertTrue(saveTestButton.exists)
+        XCTAssertFalse(saveTestButton.isEnabled, "未选模型时不得保存并测试")
+        XCTAssertFalse(
+            app.buttons["ai-test-connection-button"].exists,
+            "连接测试已并入「保存并测试」，不再有独立入口"
+        )
 
         let costNotice = app.staticTexts["ai-connection-cost-note"]
         revealExistence(costNotice, in: app)
@@ -671,33 +686,10 @@ final class OboeNavigationUITests: XCTestCase {
     func testP18GeneratesSeparateCandidateThenRequiresExplicitAdoption() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        // Step 12 起 AI 启用需「获取模型→选择→保存并测试」——本用例只
+        // 验证制卡候选流程，直接经 seam 预置已启用配置与凭据。
+        app.launchEnvironment["OBOE_UI_TEST_AI_ENABLED"] = "1"
         app.launch()
-
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
-
-        let keyField = app.secureTextFields["ai-api-key-field"]
-        reveal(keyField, in: app)
-        XCTAssertTrue(keyField.isHittable)
-        keyField.tap()
-        keyField.typeText("ui-test-key")
-        dismissKeyboard(in: app)
-
-        let aiToggle = app.switches["ai-enabled-toggle"]
-        reveal(aiToggle, in: app)
-        aiToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let enableButton = app.buttons["了解并启用"]
-        XCTAssertTrue(enableButton.waitForExistence(timeout: 2))
-        enableButton.tap()
-        XCTAssertEqual(aiToggle.value as? String, "1")
-
-        let saveConfiguration = app.buttons["ai-save-configuration-button"]
-        reveal(saveConfiguration, in: app)
-        XCTAssertTrue(saveConfiguration.isHittable)
-        saveConfiguration.tap()
-        let keyConfigured = app.descendants(matching: .any)["ai-key-configured"]
-        XCTAssertTrue(keyConfigured.waitForExistence(timeout: 5))
 
         createDeck(in: app, named: "AI 制卡")
         openAddFlow(in: app, deckName: "AI 制卡")
@@ -746,33 +738,8 @@ final class OboeNavigationUITests: XCTestCase {
     func testP19AnalyzesSentenceAndRestoresDraft() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_AI_ENABLED"] = "1"
         app.launch()
-
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
-
-        let keyField = app.secureTextFields["ai-api-key-field"]
-        reveal(keyField, in: app)
-        XCTAssertTrue(keyField.isHittable)
-        keyField.tap()
-        keyField.typeText("ui-test-key")
-        dismissKeyboard(in: app)
-
-        let aiToggle = app.switches["ai-enabled-toggle"]
-        reveal(aiToggle, in: app)
-        aiToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let enableButton = app.buttons["了解并启用"]
-        XCTAssertTrue(enableButton.waitForExistence(timeout: 2))
-        enableButton.tap()
-
-        let saveConfiguration = app.buttons["ai-save-configuration-button"]
-        reveal(saveConfiguration, in: app)
-        XCTAssertTrue(saveConfiguration.isHittable)
-        saveConfiguration.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["ai-key-configured"].waitForExistence(timeout: 5)
-        )
 
         createDeck(in: app, named: "句子分析")
         openAddFlow(in: app, deckName: "句子分析")
@@ -841,6 +808,7 @@ final class OboeNavigationUITests: XCTestCase {
     func testP20SelectsTwoAnalysisItemsAndAtomicallyCreatesTwoCards() {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
+        app.launchEnvironment["OBOE_UI_TEST_AI_ENABLED"] = "1"
         app.launch()
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -853,25 +821,6 @@ final class OboeNavigationUITests: XCTestCase {
         deckName.typeText("P20 Cards")
         app.buttons["deck-name-save-button"].tap()
         XCTAssertTrue(app.staticTexts["P20 Cards"].waitForExistence(timeout: 5))
-
-        let settingsTab = app.tabBars.buttons["设置"]
-        settingsTab.tap()
-        let keyField = app.secureTextFields["ai-api-key-field"]
-        reveal(keyField, in: app)
-        keyField.tap()
-        keyField.typeText("ui-test-key")
-        dismissKeyboard(in: app)
-        let aiToggle = app.switches["ai-enabled-toggle"]
-        reveal(aiToggle, in: app)
-        aiToggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        XCTAssertTrue(app.buttons["了解并启用"].waitForExistence(timeout: 2))
-        app.buttons["了解并启用"].tap()
-        let saveConfiguration = app.buttons["ai-save-configuration-button"]
-        reveal(saveConfiguration, in: app)
-        saveConfiguration.tap()
-        XCTAssertTrue(
-            app.descendants(matching: .any)["ai-key-configured"].waitForExistence(timeout: 5)
-        )
 
         openAddFlow(in: app, deckName: "P20 Cards")
         let kindPicker = app.segmentedControls["add-content-kind-picker"]
@@ -2557,6 +2506,14 @@ final class OboeNavigationUITests: XCTestCase {
             }
             form.swipeUp()
         }
+        // 目标可能在视口边缘挂载但不可命中——单向扫会把它甩出视口并
+        // 卸载，回扫补一遍。
+        for _ in 0..<12 {
+            if element.exists, element.isHittable {
+                return
+            }
+            form.swipeDown()
+        }
     }
 
     @MainActor
@@ -2591,6 +2548,12 @@ final class OboeNavigationUITests: XCTestCase {
                 return
             }
             form.swipeUp()
+        }
+        for _ in 0..<12 {
+            if element.exists {
+                return
+            }
+            form.swipeDown()
         }
     }
 

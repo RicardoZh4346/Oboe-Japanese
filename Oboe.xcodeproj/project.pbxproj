@@ -73,6 +73,8 @@
 		A00100000000000000000042 /* UITestTodaySeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000042 /* UITestTodaySeed.swift */; };
 		A00100000000000000000043 /* DeckNameEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000043 /* DeckNameEditor.swift */; };
 		EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD40144146D14359888E78DD /* SecondaryPage.swift */; };
+		167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */; };
+		7775AE95FA9F47FE8457891D /* OboeSettingsAIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -159,6 +161,8 @@
 		A00200000000000000000042 /* UITestTodaySeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestTodaySeed.swift; sourceTree = "<group>"; };
 		A00200000000000000000043 /* DeckNameEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckNameEditor.swift; sourceTree = "<group>"; };
 		BD40144146D14359888E78DD /* SecondaryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryPage.swift; sourceTree = "<group>"; };
+		EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelPickerView.swift; sourceTree = "<group>"; };
+		250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeSettingsAIUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -266,11 +270,11 @@
 		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
 		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */, BD40144146D14359888E78DD /* SecondaryPage.swift */,); path = SharedUI; sourceTree = "<group>"; };
 		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */,); path = Resources; sourceTree = "<group>"; };
-		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */,); path = OboeUITests; sourceTree = "<group>"; };
+		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */,); path = OboeUITests; sourceTree = "<group>"; };
 		A0050000000000000000000D /* Products */ = {isa = PBXGroup; children = (A0020000000000000000000A /* Oboe.app */, A0020000000000000000000B /* OboeUITests.xctest */, A0020000000000000000002D /* OboeShareExtension.appex */,); name = Products; sourceTree = "<group>"; };
 		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (); path = Search; sourceTree = "<group>"; };
 		A00500000000000000000011 /* Inbox */ = {isa = PBXGroup; children = (A0020000000000000000001C /* InboxView.swift */, A0020000000000000000001D /* InboxItemDetailView.swift */, A0020000000000000000001E /* InboxCaptureView.swift */, A00200000000000000000027 /* InboxProcessingView.swift */,); path = Inbox; sourceTree = "<group>"; };
-		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */,); path = Settings; sourceTree = "<group>"; };
+		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */, EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */,); path = Settings; sourceTree = "<group>"; };
 		A00500000000000000000014 /* ImageCapture */ = {isa = PBXGroup; children = (A0020000000000000000002E /* ImageCaptureView.swift */,); path = ImageCapture; sourceTree = "<group>"; };
 		A00500000000000000000010 /* JLPTLibrary */ = {isa = PBXGroup; children = (A0020000000000000000000E /* JLPTLibraryView.swift */, B02400000000000000000002 /* JLPTDashboardView.swift */,); path = JLPTLibrary; sourceTree = "<group>"; };
 		A00500000000000000000015 /* Adaptive */ = {isa = PBXGroup; children = (A00200000000000000000030 /* AdaptivePresentation.swift */, A00200000000000000000031 /* AdaptiveCenterViewModel.swift */, A00200000000000000000032 /* AdaptiveCenterView.swift */, A00200000000000000000033 /* AdaptiveCardDetailView.swift */, A00200000000000000000039 /* AdaptiveTrendView.swift */,); path = Adaptive; sourceTree = "<group>"; };
@@ -461,6 +465,7 @@
 				A00100000000000000000042 /* UITestTodaySeed.swift in Sources */,
 				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 				EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */,
+				167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -472,6 +477,7 @@
 				A0010000000000000000001E /* OboeInboxUITests.swift in Sources */,
 				A00100000000000000000035 /* OboeAdaptiveUITests.swift in Sources */,
 				3D7C3FA3072145EDA7413284 /* OboeTabBarUITests.swift in Sources */,
+				7775AE95FA9F47FE8457891D /* OboeSettingsAIUITests.swift in Sources */,
                 B01200000000000000000003 /* RecallTextInput.swift in Tests */,
                 B01200000000000000000006 /* LanguageHintField.swift in Tests */,
 			);
