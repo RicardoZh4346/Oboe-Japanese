@@ -45,6 +45,37 @@ public final class OboeDatabase: Sendable {
     }
 }
 
+/// app_settings 单例行的统一创建入口。五个 *Repository 的 loadOrCreate 都经
+/// 此插入首行：v0.5.5 起两个主动回忆输入开关的领域默认值为开启，而 v13
+/// 冻结的列 DEFAULT 仍停留在 v0.4 的 0/1/0/1——行缺失时必须显式写入
+/// `AdaptivePreferences.defaults`，不能依赖列默认；已有行一律保留原值
+///（ON CONFLICT DO NOTHING，不擅自改写已存选择）。
+enum AppSettingsRowDefaults {
+    static func insertIfMissing(
+        in db: Database,
+        learningTimeZoneID: String
+    ) throws {
+        let defaults = AdaptivePreferences.defaults
+        try db.execute(
+            sql: """
+                INSERT INTO app_settings(
+                    id, schema_version, learning_time_zone_id, daily_new_card_limit,
+                    typed_answer_zh_ja, auto_play_listening_audio,
+                    typed_answer_listening, leech_reminders_enabled
+                ) VALUES (1, 1, ?, 10, ?, ?, ?, ?)
+                ON CONFLICT(id) DO NOTHING
+                """,
+            arguments: [
+                learningTimeZoneID,
+                defaults.typedAnswerChineseToJapanese,
+                defaults.autoPlayListeningAudio,
+                defaults.typedAnswerListening,
+                defaults.leechRemindersEnabled
+            ]
+        )
+    }
+}
+
 public enum OboeDatabaseSchema {
     public static let migrationIdentifiers = [
         "v1_content",

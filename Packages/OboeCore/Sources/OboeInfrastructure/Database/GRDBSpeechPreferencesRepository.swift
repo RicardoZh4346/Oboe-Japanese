@@ -16,14 +16,8 @@ public struct GRDBSpeechPreferencesRepository: SpeechPreferencesRepository, Send
             throw StudyDayPlanningError.invalidTimeZone(defaultTimeZoneID)
         }
         return try await pool.write { db in
-            try db.execute(
-                sql: """
-                    INSERT INTO app_settings(
-                        id, schema_version, learning_time_zone_id, daily_new_card_limit
-                    ) VALUES (1, 1, ?, 10)
-                    ON CONFLICT(id) DO NOTHING
-                    """,
-                arguments: [defaultTimeZoneID]
+            try AppSettingsRowDefaults.insertIfMissing(
+                in: db, learningTimeZoneID: defaultTimeZoneID
             )
             return try Self.fetch(in: db)
         }

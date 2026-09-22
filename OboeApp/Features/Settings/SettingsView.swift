@@ -153,7 +153,7 @@ struct SettingsView: View {
                     .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
                     .accessibilityIdentifier("adaptive-typed-answer-zh-ja-toggle")
 
-                    Text("默认关闭。开启后，中文→日文卡需先输入回答再查看答案；从下一张卡开始生效，评分仍由你选择。")
+                    Text("默认开启。中文→日文卡需先输入回答再查看答案；从下一张卡开始生效，评分仍由你选择。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("adaptive-typed-answer-zh-ja-note")
@@ -168,7 +168,7 @@ struct SettingsView: View {
                     .disabled(isLoadingAdaptivePreferences || isUpdatingAdaptivePreferences)
                     .accessibilityIdentifier("adaptive-typed-answer-listening-toggle")
 
-                    Text("默认关闭。开启后，听力卡需先用日语复述听到的内容再查看答案；从下一张卡开始生效，评分仍由你选择。")
+                    Text("默认开启。听力卡需先用日语复述听到的内容再查看答案；从下一张卡开始生效，评分仍由你选择。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("adaptive-typed-answer-listening-note")

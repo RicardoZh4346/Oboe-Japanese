@@ -684,9 +684,9 @@ private extension PortableBackupRestorationPreparer {
             migrated["primary_deck_id"] = NSNull()
         }
         if sourceVersion < 4, migrated["recordType"] as? String == "settings" {
-            // v1–v3 backups predate the Adaptive toggles: fill the v0.4
-            // defaults (OFF/ON/OFF/ON) so the row satisfies the current
-            // settings contract.
+            // v1–v3 backups predate the Adaptive toggles: fill the current
+            // `AdaptivePreferences.defaults`（v0.5.5 起 ON/ON/ON/ON）so the row
+            // satisfies the current settings contract. v4+ 记录保留原值。
             let defaults = AdaptivePreferences.defaults
             migrated["typed_answer_zh_ja"] = defaults.typedAnswerChineseToJapanese ? 1 : 0
             migrated["auto_play_listening_audio"] = defaults.autoPlayListeningAudio ? 1 : 0

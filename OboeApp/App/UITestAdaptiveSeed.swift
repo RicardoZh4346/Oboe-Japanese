@@ -124,17 +124,9 @@ extension AppDependencies {
             )
         }
 
-        // T14 seam: layout tests at maximum text size skip the Settings UI —
-        // the row's hittable point can collide with the tab bar — so the
-        // typed-recall preference is enabled through the real service. The
-        // load() call first materializes the app_settings row; on a fresh
-        // database a bare UPDATE would touch zero rows and silently no-op.
-        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_TYPED_RECALL_PREF"] != nil {
-            _ = try? await adaptivePreferencesService?.load(
-                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
-            )
-            _ = try? await adaptivePreferencesService?.setTypedAnswerChineseToJapanese(true)
-        }
+        // T14 seam 已迁至 applyAdaptivePreferenceUITestOverrides()：
+        // `OBOE_UI_TEST_TYPED_RECALL_PREF`（含 =off）在全部种子之后统一
+        // 应用——v0.5.5 起该偏好默认开启，需要关闭的用例显式传 off。
 
         // Materialize today's study day and admit the due leech card into the
         // queue so the answer-face reminder can be exercised end to end.
@@ -493,15 +485,9 @@ extension AppDependencies {
             )
             _ = try? await adaptivePreferencesService?.setAutoPlayListeningAudio(false)
         }
-        // T19 seam: enable the optional listening typed-recall input without
-        // driving Settings UI — same materialize-then-update ordering as the
-        // autoplay seam above.
-        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_LISTENING_TYPED_PREF"] != nil {
-            _ = try? await adaptivePreferencesService?.load(
-                defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
-            )
-            _ = try? await adaptivePreferencesService?.setTypedAnswerListening(true)
-        }
+        // T19 seam 已迁至 applyAdaptivePreferenceUITestOverrides()：
+        // `OBOE_UI_TEST_LISTENING_TYPED_PREF`（含 =off）在全部种子之后
+        // 统一应用——v0.5.5 起该偏好默认开启。
     }
 
     /// `OBOE_UI_TEST_SIBLING_SEED`: sibling-separation fixture for T21 —
@@ -748,6 +734,42 @@ extension AppDependencies {
                     ]
                 )
             }
+        }
+    }
+
+    /// UI 测试的主动回忆偏好覆盖：v0.5.5 起两个 typed 输入默认开启，
+    /// `…_PREF=1` 依然幂等可用，`…_PREF=0/off` 显式关闭——需要 reveal
+    /// 流程的既有用例靠后者表达，而非再依赖旧默认。两个开关相互独立。
+    /// 须在全部数据种子落库之后调用：先 load 物化 app_settings 行，
+    /// 再走真实 service 的 UPDATE（裸 UPDATE 在全新库上会零行命中）。
+    func applyAdaptivePreferenceUITestOverrides() async {
+        guard adaptivePreferencesService != nil else { return }
+        _ = try? await adaptivePreferencesService?.load(
+            defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+        )
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["OBOE_UI_TEST_TYPED_RECALL_PREF"],
+            let enabled = Self.parseToggleFlag(raw) {
+            _ = try? await adaptivePreferencesService?
+                .setTypedAnswerChineseToJapanese(enabled)
+        }
+        if let raw = env["OBOE_UI_TEST_LISTENING_TYPED_PREF"],
+            let enabled = Self.parseToggleFlag(raw) {
+            _ = try? await adaptivePreferencesService?
+                .setTypedAnswerListening(enabled)
+        }
+    }
+
+    /// 识别 UI 测试开关值：`1/true/yes/on` → true，`0/false/no/off` → false；
+    /// 其余写法不生效（保持种子默认），避免拼错的值静默翻转行为。
+    private static func parseToggleFlag(_ raw: String) -> Bool? {
+        switch raw.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        case "0", "false", "no", "off":
+            return false
+        default:
+            return nil
         }
     }
 

@@ -2128,6 +2128,9 @@ final class OboeNavigationUITests: XCTestCase {
         // 词默认全方向；收窄到两个视觉方向，使卡间断言保持确定。
         app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] =
             "japaneseToChinese,chineseToJapanese"
+        // v0.5.5：zh→ja 卡现为 typed 默认——本组用例覆盖 reveal/提交
+        // 转换而非输入流，显式关闭以保持既有断言。
+        app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
         if autoSpeech {

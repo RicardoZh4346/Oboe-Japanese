@@ -25,12 +25,13 @@ public struct AdaptivePreferences: Equatable, Sendable {
         self.leechRemindersEnabled = leechRemindersEnabled
     }
 
-    /// Requirement §16 defaults: typed recall off, listening autoplay on,
-    /// listening typed recall off, leech reminders on.
+    /// v0.5.5 起的产品默认：中文→日文与听力卡都默认要求先输入回答
+    /// （typed recall on），听力自动播放与易错提醒保持开启。
+    /// 仅作用于行缺失/旧备份补全——已存行的值一律保留，不会被改写。
     public static let defaults = AdaptivePreferences(
-        typedAnswerChineseToJapanese: false,
+        typedAnswerChineseToJapanese: true,
         autoPlayListeningAudio: true,
-        typedAnswerListening: false,
+        typedAnswerListening: true,
         leechRemindersEnabled: true
     )
 }

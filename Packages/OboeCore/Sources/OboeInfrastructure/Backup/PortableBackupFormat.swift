@@ -243,7 +243,7 @@ enum PortableBackupFormatV3 {
 /// (`ai_repair`) live in the schema, not the record contract.
 enum PortableBackupFormatV4 {
     /// Column names a v3-or-earlier `settings` record lacks; restoration fills
-    /// them with the v0.4 defaults (OFF/ON/OFF/ON).
+    /// them with `AdaptivePreferences.defaults`（v0.5.5 起 ON/ON/ON/ON）。
     static let settingsColumnsAddedInV4 = [
         "typed_answer_zh_ja",
         "auto_play_listening_audio",
