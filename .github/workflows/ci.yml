@@ -42,9 +42,15 @@ jobs:
       - name: Run navigation smoke test
         run: |
           DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
           xcodebuild \
             -project Oboe.xcodeproj \
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -only-testing:OboeUITests/OboeNavigationUITests/testSwitchesBetweenFourPrimaryTabs \
-            test
+            -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
+            test 2>&1 | tee smoke.log
+          grep -q "testPrimaryNavigationSmoke.*passed" smoke.log || {
+            echo "::error::navigation smoke test case was not executed or did not pass"
+            exit 1
+          }

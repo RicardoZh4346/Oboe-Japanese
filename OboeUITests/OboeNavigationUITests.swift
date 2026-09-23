@@ -7,19 +7,28 @@ final class OboeNavigationUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// 一级导航 smoke。名称保持稳定（不带 Tab 数量），CI workflow 直接
+    /// 引用本方法名；Tab 数量变化时只改断言，不改名字。
     @MainActor
-    func testSwitchesBetweenThreePrimaryTabs() {
+    func testPrimaryNavigationSmoke() {
         let app = XCUIApplication()
+        // 隔离数据库：共享模拟器上残留的默认库会让今日标题带上连续天数
+        // （「今日（已连续 N 天）」），fresh DB 保证标题恰为「今日」。
+        app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
         // v0.5.5：「添加」入口迁入牌组详情，一级 tab 收敛为三个。
+        // 今日页导航标题带连续天数（「今日（已连续 N 天）」），用前缀匹配。
         let expectedTabs = ["今日", "牌组", "设置"]
         for tabName in expectedTabs {
             let tab = app.tabBars.buttons[tabName]
             XCTAssertTrue(tab.waitForExistence(timeout: 2), "缺少 \(tabName) 入口")
             tab.tap()
+            let bar = app.navigationBars.matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", tabName)
+            ).firstMatch
             XCTAssertTrue(
-                app.navigationBars[tabName].waitForExistence(timeout: 2),
+                bar.waitForExistence(timeout: 5),
                 "切换到 \(tabName) 后未显示对应页面"
             )
         }
