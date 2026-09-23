@@ -5,7 +5,10 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct SettingsView: View {
-    let dependencies: AppDependencies
+    /// 窄依赖包 + 运行期操作闭包：设置页不再持有全局 runtime 对象。
+    let dependencies: SettingsFeatureDependencies
+    let operations: AppRuntimeOperations
+    let isDatabaseOperationInProgress: Bool
     let exporter: PortableBackupExporter
     let restorationPreparer: PortableBackupRestorationPreparer
     let studyService: StudySessionService
@@ -15,6 +18,25 @@ struct SettingsView: View {
     let aiConnectionTestService: AIConnectionTestService
     let aiModelCatalogService: AIModelCatalogService
     let speechService: any SpeechService
+
+    init(
+        dependencies: SettingsFeatureDependencies,
+        operations: AppRuntimeOperations,
+        isDatabaseOperationInProgress: Bool
+    ) {
+        self.dependencies = dependencies
+        self.operations = operations
+        self.isDatabaseOperationInProgress = isDatabaseOperationInProgress
+        exporter = dependencies.exporter
+        restorationPreparer = dependencies.restorationPreparer
+        studyService = dependencies.studyService
+        speechPreferencesService = dependencies.speechPreferencesService
+        adaptivePreferencesService = dependencies.adaptivePreferencesService
+        aiConfigurationService = dependencies.aiConfigurationService
+        aiConnectionTestService = dependencies.aiConnectionTestService
+        aiModelCatalogService = dependencies.aiModelCatalogService
+        speechService = dependencies.speechService
+    }
 
     @Environment(\.scenePhase) private var scenePhase
 
@@ -394,7 +416,7 @@ struct SettingsView: View {
                 Text("当前资料库会先生成回滚快照，再替换为 \(snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)) 的内容。")
             }
             .task {
-                appearancePreference = dependencies.appearancePreference
+                appearancePreference = operations.currentAppearancePreference()
                 refreshPendingSharedCaptures()
                 await loadLearningSettings()
                 await loadSpeechPreferences()
@@ -519,10 +541,10 @@ struct SettingsView: View {
         appearanceStatus = nil
         Task {
             do {
-                try await dependencies.setAppearancePreference(appearance)
+                try await operations.setAppearancePreference(appearance)
                 appearanceStatus = "显示模式已保存并立即应用。"
             } catch {
-                appearancePreference = dependencies.appearancePreference
+                appearancePreference = operations.currentAppearancePreference()
                 errorMessage = "无法保存显示模式：\(error.localizedDescription)"
             }
             isSavingAppearance = false
@@ -808,7 +830,7 @@ struct SettingsView: View {
             || isSelectingBackup
             || isPreparingRestoration
             || preparedRestoration != nil
-            || dependencies.isDatabaseOperationInProgress
+            || isDatabaseOperationInProgress
     }
 
     private func loadLearningSettings() async {
@@ -1293,7 +1315,7 @@ struct SettingsView: View {
     /// The pending queue lives outside the database — the count refreshes on
     /// appear and foreground so the export scope note stays honest.
     private func refreshPendingSharedCaptures() {
-        pendingSharedCaptureCount = dependencies.pendingSharedCaptureCount()
+        pendingSharedCaptureCount = operations.pendingSharedCaptureCount()
     }
 
     private func prepareExport() {
@@ -1349,7 +1371,7 @@ struct SettingsView: View {
     }
 
     private func applyPreparedRestoration(_ preparation: PreparedRestoration) async throws {
-        try await dependencies.applyPreparedRestoration(preparation)
+        try await operations.applyPreparedRestoration(preparation)
         self.preparationForCleanup = nil
         try? await restorationPreparer.discard(preparation)
         await loadLocalSnapshots()
@@ -1359,7 +1381,7 @@ struct SettingsView: View {
     private func loadLocalSnapshots() async {
         isLoadingSnapshots = true
         do {
-            localSnapshots = try await dependencies.localSnapshots()
+            localSnapshots = try await operations.localSnapshots()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1371,7 +1393,7 @@ struct SettingsView: View {
         statusMessage = nil
         Task {
             do {
-                let snapshot = try await dependencies.createLocalSnapshot()
+                let snapshot = try await operations.createLocalSnapshot()
                 statusMessage = snapshot == nil ? "今天已经有一份本机快照。" : "本机快照已创建。"
                 await loadLocalSnapshots()
             } catch {
@@ -1386,7 +1408,7 @@ struct SettingsView: View {
         statusMessage = nil
         Task {
             do {
-                try await dependencies.restoreLocalSnapshot(snapshot)
+                try await operations.restoreLocalSnapshot(snapshot)
                 statusMessage = "本机快照恢复成功，今日任务已重新校正。"
                 await loadLocalSnapshots()
             } catch {

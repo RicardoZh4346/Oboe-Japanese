@@ -4,7 +4,7 @@ import GRDB
 import OboeDomain
 import OboeInfrastructure
 
-extension AppDependencies {
+extension AppRuntimeController {
     /// `OBOE_UI_TEST_TODAY_SEED`：v0.5.5 首页五状态的确定性夹具。
     /// 取值：
     /// - `empty-deck`：一个无任何卡片的主牌组（「这个牌组还没有卡片」）；

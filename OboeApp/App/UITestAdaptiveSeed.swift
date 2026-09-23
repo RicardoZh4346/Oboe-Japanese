@@ -4,7 +4,7 @@ import GRDB
 import OboeDomain
 import OboeInfrastructure
 
-extension AppDependencies {
+extension AppRuntimeController {
     /// `OBOE_UI_TEST_ADAPTIVE_SEED`: deterministic adaptive fixture for UI
     /// tests (T03) — one deck, one vocabulary note with a leech ja→zh card
     /// (lapses 6, six due-review Agains) and a warning zh→ja card (lapses 3,
@@ -957,7 +957,7 @@ extension AppDependencies {
 /// v0.5.5：主牌组 scope 与牌组摘要都以 `note_decks` 为权威成员关系——
 /// seed 直插 notes 时必须同步写入 home-deck membership（生产写入路径如此；
 /// v12 夹具除外，迁移负责回填）。写在 `pool.write` 闭包内调用，故为自由
-/// 函数而非 AppDependencies 方法（闭包 @Sendable，不能捕获 self）。
+/// 函数而非 controller 方法（闭包 @Sendable，不能捕获 self）。
 private func insertHomeDeckMembership(
     noteID: UUID,
     deckID: UUID,

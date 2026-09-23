@@ -71,6 +71,17 @@
 		A00100000000000000000038 /* AIRepairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000038 /* AIRepairView.swift */; };
 		A00100000000000000000041 /* DailyStatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000041 /* DailyStatisticsView.swift */; };
 		A00100000000000000000042 /* UITestTodaySeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000042 /* UITestTodaySeed.swift */; };
+		A00100000000000000000044 /* AppRuntimePhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000044 /* AppRuntimePhase.swift */; };
+		A00100000000000000000045 /* AppRuntimeOperations.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000045 /* AppRuntimeOperations.swift */; };
+		A00100000000000000000046 /* AppBootstrapEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000046 /* AppBootstrapEnvironment.swift */; };
+		A00100000000000000000047 /* AppBootstrapEnvironment+UITest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */; };
+		A00100000000000000000048 /* AppRuntimeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000048 /* AppRuntimeController.swift */; };
+		A00100000000000000000049 /* AppSceneRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000049 /* AppSceneRoot.swift */; };
+		A0010000000000000000004A /* AppFeatureContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004A /* AppFeatureContainer.swift */; };
+		A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004B /* TodayFeatureDependencies.swift */; };
+		A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004C /* DeckFeatureDependencies.swift */; };
+		A0010000000000000000004D /* SettingsFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004D /* SettingsFeatureDependencies.swift */; };
+		A0010000000000000000004E /* SharedFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004E /* SharedFeatureDependencies.swift */; };
 		A00100000000000000000043 /* DeckNameEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000043 /* DeckNameEditor.swift */; };
 		EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD40144146D14359888E78DD /* SecondaryPage.swift */; };
 		167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */; };
@@ -159,6 +170,17 @@
 		A00200000000000000000038 /* AIRepairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIRepairView.swift; sourceTree = "<group>"; };
 		A00200000000000000000041 /* DailyStatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStatisticsView.swift; sourceTree = "<group>"; };
 		A00200000000000000000042 /* UITestTodaySeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestTodaySeed.swift; sourceTree = "<group>"; };
+		A00200000000000000000044 /* AppRuntimePhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimePhase.swift; sourceTree = "<group>"; };
+		A00200000000000000000045 /* AppRuntimeOperations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeOperations.swift; sourceTree = "<group>"; };
+		A00200000000000000000046 /* AppBootstrapEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBootstrapEnvironment.swift; sourceTree = "<group>"; };
+		A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppBootstrapEnvironment+UITest.swift"; sourceTree = "<group>"; };
+		A00200000000000000000048 /* AppRuntimeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeController.swift; sourceTree = "<group>"; };
+		A00200000000000000000049 /* AppSceneRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSceneRoot.swift; sourceTree = "<group>"; };
+		A0020000000000000000004A /* AppFeatureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeatureContainer.swift; sourceTree = "<group>"; };
+		A0020000000000000000004B /* TodayFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayFeatureDependencies.swift; sourceTree = "<group>"; };
+		A0020000000000000000004C /* DeckFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckFeatureDependencies.swift; sourceTree = "<group>"; };
+		A0020000000000000000004D /* SettingsFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureDependencies.swift; sourceTree = "<group>"; };
+		A0020000000000000000004E /* SharedFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedFeatureDependencies.swift; sourceTree = "<group>"; };
 		A00200000000000000000043 /* DeckNameEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckNameEditor.swift; sourceTree = "<group>"; };
 		BD40144146D14359888E78DD /* SecondaryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryPage.swift; sourceTree = "<group>"; };
 		EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelPickerView.swift; sourceTree = "<group>"; };
@@ -225,6 +247,7 @@
 				A0020000000000000000002F /* Info.plist */,
 				A00500000000000000000003 /* App */,
 				A00500000000000000000004 /* Features */,
+				A00500000000000000000017 /* FeatureDependencies */,
 				A0050000000000000000000A /* SharedUI */,
 				A0050000000000000000000B /* Resources */,
 			);
@@ -238,8 +261,26 @@
 				A00200000000000000000002 /* RootTabView.swift */,
 				A00200000000000000000034 /* UITestAdaptiveSeed.swift */,
 				A00200000000000000000042 /* UITestTodaySeed.swift */,
+				A00200000000000000000044 /* AppRuntimePhase.swift */,
+				A00200000000000000000045 /* AppRuntimeOperations.swift */,
+				A00200000000000000000046 /* AppBootstrapEnvironment.swift */,
+				A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */,
+				A00200000000000000000048 /* AppRuntimeController.swift */,
+				A00200000000000000000049 /* AppSceneRoot.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A00500000000000000000017 /* FeatureDependencies */ = {
+			isa = PBXGroup;
+			children = (
+				A0020000000000000000004A /* AppFeatureContainer.swift */,
+				A0020000000000000000004B /* TodayFeatureDependencies.swift */,
+				A0020000000000000000004C /* DeckFeatureDependencies.swift */,
+				A0020000000000000000004D /* SettingsFeatureDependencies.swift */,
+				A0020000000000000000004E /* SharedFeatureDependencies.swift */,
+			);
+			path = FeatureDependencies;
 			sourceTree = "<group>";
 		};
 		A00500000000000000000004 /* Features */ = {
@@ -463,6 +504,17 @@
 				A00100000000000000000038 /* AIRepairView.swift in Sources */,
 				A00100000000000000000041 /* DailyStatisticsView.swift in Sources */,
 				A00100000000000000000042 /* UITestTodaySeed.swift in Sources */,
+				A00100000000000000000044 /* AppRuntimePhase.swift in Sources */,
+				A00100000000000000000045 /* AppRuntimeOperations.swift in Sources */,
+				A00100000000000000000046 /* AppBootstrapEnvironment.swift in Sources */,
+				A00100000000000000000047 /* AppBootstrapEnvironment+UITest.swift in Sources */,
+				A00100000000000000000048 /* AppRuntimeController.swift in Sources */,
+				A00100000000000000000049 /* AppSceneRoot.swift in Sources */,
+				A0010000000000000000004A /* AppFeatureContainer.swift in Sources */,
+				A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */,
+				A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */,
+				A0010000000000000000004D /* SettingsFeatureDependencies.swift in Sources */,
+				A0010000000000000000004E /* SharedFeatureDependencies.swift in Sources */,
 				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 				EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */,
 				167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */,
