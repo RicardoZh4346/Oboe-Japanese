@@ -548,10 +548,9 @@ private struct KnowledgePointLifecycleSection: View {
                 }
             }
         }
-        .confirmationDialog(
+        .alert(
             "确定删除这个知识点吗？",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
+            isPresented: $isConfirmingDelete
         ) {
             Button(deleteButtonTitle, role: .destructive) {
                 deleteKnowledgePoint()

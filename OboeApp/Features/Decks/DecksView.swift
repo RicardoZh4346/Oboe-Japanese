@@ -761,10 +761,9 @@ private struct DeckDetailView: View {
                         await model.renameDeck(id: deck.id, to: name)
                     }
                 }
-                .confirmationDialog(
+                .alert(
                     "确定删除“\(deck.name)”吗？",
-                    isPresented: $isConfirmingDelete,
-                    titleVisibility: .visible
+                    isPresented: $isConfirmingDelete
                 ) {
                     Button("确认删除", role: .destructive) {
                         Task {
@@ -777,10 +776,9 @@ private struct DeckDetailView: View {
                 } message: {
                     Text("空牌组删除后无法撤销。")
                 }
-                .confirmationDialog(
+                .alert(
                     "删除非空牌组“\(deck.name)”",
-                    isPresented: $isChoosingNonEmptyDeletion,
-                    titleVisibility: .visible
+                    isPresented: $isChoosingNonEmptyDeletion
                 ) {
                     Button("移动内容后删除") {
                         isMovingBeforeDeletion = true
@@ -804,10 +802,9 @@ private struct DeckDetailView: View {
                         }
                     }
                 }
-                .confirmationDialog(
+                .alert(
                     "确认连同牌组内容删除？",
-                    isPresented: $isConfirmingContentDeletion,
-                    titleVisibility: .visible
+                    isPresented: $isConfirmingContentDeletion
                 ) {
                     Button(
                         model.deletionImpacts[deck.id].map {

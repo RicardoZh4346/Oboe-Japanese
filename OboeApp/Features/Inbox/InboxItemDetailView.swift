@@ -63,10 +63,9 @@ struct InboxItemDetailView: View {
                 }
             }
         }
-        .confirmationDialog(
+        .alert(
             "删除这条内容？",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
+            isPresented: $isConfirmingDelete
         ) {
             Button("删除", role: .destructive) {
                 Task { await deleteItem() }

@@ -338,10 +338,9 @@ struct AddContentEditorView: View {
             model.persistCaptureResume()
             speechService.stop()
         }
-        .confirmationDialog(
+        .alert(
             "发现可能重复的知识点",
-            isPresented: $isConfirmingDuplicateCommit,
-            titleVisibility: .visible
+            isPresented: $isConfirmingDuplicateCommit
         ) {
             Button("明确另建义项并保存") {
                 Task { await model.commitCurrentContent() }

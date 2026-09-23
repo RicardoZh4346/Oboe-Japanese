@@ -2237,9 +2237,8 @@ final class OboeNavigationUITests: XCTestCase {
         formalSaveC.tap()
         let confirm = app.buttons["duplicate-commit-confirm-button"]
         XCTAssertTrue(confirm.waitForExistence(timeout: 3), "另建义项必须先经确认弹窗")
-        // confirmationDialog 的「取消」在 iOS 26 不进应用无障碍树；
-        // 点击弹层遮罩等效取消，应回到添加编辑器。
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15)).tap()
+        // 居中 alert 的「取消」在无障碍树内可直接点，应回到添加编辑器。
+        app.alerts["发现可能重复的知识点"].buttons["取消"].tap()
         XCTAssertTrue(
             app.navigationBars["添加"].waitForExistence(timeout: 3),
             "取消确认后应停留在添加编辑器"

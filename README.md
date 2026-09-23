@@ -18,7 +18,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 - **主牌组学习范围**：今日学习只覆盖主牌组；无牌组时不能制卡或学习，牌组详情仍可按单个牌组学习。
 - **重复内容复用**：添加已存在的单词或语法时可直接「加入当前牌组」——同一 Note 归属多个牌组共享一份卡片、调度进度与复习日志，不复制数据；仍可选择明确另建义项。
 - **主动回忆默认开启**：新安装的「中文→日文输入」与「听力输入」回忆选项默认开启；已有用户的开关选择保持不变。
-- **AI 服务扩展**：除 DeepSeek 与自定义兼容服务外，新增 Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen 与 Grok 预设；填入 API Key 后先获取模型列表再选择模型，「保存并测试」成功后才可启用；Claude 使用 Anthropic Messages 协议。
+- **AI 服务扩展**：除 DeepSeek 与自定义兼容服务外，新增 Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen 与 Grok 预设；预设服务地址预填官方 URL、可改为代理/网关地址；填入 API Key 后先获取模型列表再选择模型，「保存并测试」成功后才可启用；Claude 使用 Anthropic Messages 协议。
 - **兼容不变**：数据库仍为 schema v13、备份仍为 v6，v1～v6 备份继续可恢复，旧库升级保留全部设置与牌组归属。
 
 ## 主要功能

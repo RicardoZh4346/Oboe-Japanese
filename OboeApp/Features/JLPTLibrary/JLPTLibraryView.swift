@@ -261,10 +261,9 @@ private struct JLPTLevelView: View {
                 .disabled(isImporting)
             }
         }
-        .confirmationDialog(
+        .alert(
             "导入 \(level.rawValue) 全部可用词汇？",
-            isPresented: $isConfirmingLevelImport,
-            titleVisibility: .visible
+            isPresented: $isConfirmingLevelImport
         ) {
             Button("选择牌组并导入") { isChoosingLevelImportDeck = true }
             Button("取消", role: .cancel) {}

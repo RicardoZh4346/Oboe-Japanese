@@ -66,10 +66,9 @@ struct ImageCaptureView: View {
                     )
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "重新识别将放弃你修改的文本",
-                isPresented: $model.isRerecognizeConfirmPresented,
-                titleVisibility: .visible
+                isPresented: $model.isRerecognizeConfirmPresented
             ) {
                 Button("放弃修改并重新识别", role: .destructive) {
                     model.confirmRerecognize()

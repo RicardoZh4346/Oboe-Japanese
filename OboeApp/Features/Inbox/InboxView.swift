@@ -139,7 +139,7 @@ struct InboxView: View {
                 }
             }
         }
-        .confirmationDialog(
+        .alert(
             "删除这条内容？",
             isPresented: Binding(
                 get: { model.pendingDeletion != nil },
@@ -148,8 +148,7 @@ struct InboxView: View {
                         model.pendingDeletion = nil
                     }
                 }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("删除", role: .destructive) {
                 if let item = model.pendingDeletion {
