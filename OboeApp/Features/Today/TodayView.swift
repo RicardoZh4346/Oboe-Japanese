@@ -82,7 +82,11 @@ struct TodayView: View {
                 if model.isLoading, model.plan == nil {
                     ProgressView("正在生成今日计划…")
                 } else if let plan = model.plan {
-                    home(plan)
+                    // regular 下首页内容限宽居中——磁贴与统计摘要不随
+                    // detail 列全宽拉伸。
+                    ReadableContentContainer(role: .article) {
+                        home(plan)
+                    }
                 } else {
                     ContentUnavailableView(
                         "无法载入今日计划",

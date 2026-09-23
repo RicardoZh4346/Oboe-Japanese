@@ -110,4 +110,40 @@ final class SceneNavigationStateTests: XCTestCase {
         XCTAssertNil(state.selectedNoteID)
         XCTAssertNil(state.selectedNoteKind)
     }
+
+    /// PR 7：壳层切换/resize 重建视图树时，同 scope 的 Review 会话
+    /// 要拿到同一实例——学习进度跨壳层续存。
+    func testSessionCacheReturnsSameInstancePerScope() {
+        let state = SceneNavigationState()
+        let scope = StudyScope(deckID: UUID(), title: "N5")
+
+        let first = state.cachedSession(for: scope) { NSObject() }
+        let second = state.cachedSession(for: scope) { NSObject() }
+
+        XCTAssertTrue(first === second)
+    }
+
+    func testSessionCacheIsolatesScopes() {
+        let state = SceneNavigationState()
+        let scopeA = StudyScope(deckID: UUID(), title: "A")
+        let scopeB = StudyScope(deckID: UUID(), title: "B")
+
+        let a = state.cachedSession(for: scopeA) { NSObject() }
+        let b = state.cachedSession(for: scopeB) { NSObject() }
+
+        XCTAssertFalse(a === b)
+    }
+
+    /// 世代变更清空会话缓存——缓存的 model 持有旧容器 service，
+    /// 数据库替换后必须丢弃。
+    func testGenerationChangeClearsSessionCache() {
+        let state = SceneNavigationState()
+        let scope = StudyScope(deckID: UUID(), title: "N5")
+        let before = state.cachedSession(for: scope) { NSObject() }
+
+        state.databaseGenerationDidChange(to: 1)
+        let after = state.cachedSession(for: scope) { NSObject() }
+
+        XCTAssertFalse(before === after)
+    }
 }

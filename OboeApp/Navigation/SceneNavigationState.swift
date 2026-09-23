@@ -30,6 +30,15 @@ final class SceneNavigationState {
     var decksPath = NavigationPath()
     var settingsPath = NavigationPath()
 
+    /// Review 会话按 scope 缓存：壳层在 compact/regular 间切换或窗口
+    /// resize 重建视图树时，页面内 @State model 会随树销毁——缓存保证
+    /// 学习进度不丢。`@ObservationIgnored`：创建只发生在页面 body 求值
+    /// 期，不需要反向通知；页面刷新由 model 自身 @Observable 驱动。
+    /// 世代变更时清空（旧 service 引用随容器失效）。
+    /// 底层用 AnyObject 泛型缓存，typed 访问由 `reviewSession` 提供。
+    @ObservationIgnored
+    private var sessionCache: [StudyScope: AnyObject] = [:]
+
     /// 当前导航状态对应的数据库世代。
     private(set) var generation = 0
 
@@ -45,6 +54,7 @@ final class SceneNavigationState {
         todayPath = NavigationPath()
         decksPath = NavigationPath()
         settingsPath = NavigationPath()
+        sessionCache.removeAll()
     }
 
     /// 删除当前选中牌组后的 reducer：清空指向该牌组的 sidebar 选择，
@@ -87,5 +97,27 @@ final class SceneNavigationState {
     func selectNote(id: UUID, kind: KnowledgePointKind) {
         selectedNoteID = id
         selectedNoteKind = kind
+    }
+
+    /// 取 scope 对应的 Review 会话；无缓存时用 make 创建并缓存。
+    /// 同一 scope 重复进入会拿到同一实例——页面 `.task` 里的 refresh
+    /// 负责刷新过期数据，会话容器只负责生命周期续存。
+    func reviewSession(
+        for scope: StudyScope,
+        make: () -> ReviewViewModel
+    ) -> ReviewViewModel {
+        cachedSession(for: scope, make: make)
+    }
+
+    /// scope 键控的对象缓存：同 scope 重复访问返回同一实例。
+    /// 泛型化让缓存语义可以在没有真实 service 的单测里验证。
+    func cachedSession<T: AnyObject>(
+        for scope: StudyScope,
+        make: () -> T
+    ) -> T {
+        if let existing = sessionCache[scope] as? T { return existing }
+        let instance = make()
+        sessionCache[scope] = instance
+        return instance
     }
 }

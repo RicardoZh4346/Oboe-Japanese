@@ -19,7 +19,10 @@ struct ReviewView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
-    @State private var model: ReviewViewModel
+    /// 会话容器在 scene 导航状态上——compact/regular 壳层切换或窗口
+    /// resize 重建视图树时，@State model 会随树销毁；scene 级缓存让
+    /// 进行中的学习会话跨壳层续存（resize 不重置）。
+    @Environment(SceneNavigationState.self) private var navigation
     /// The card whose repair sheet is open — item-based so the sheet always
     /// belongs to the card that spawned it.
     @State private var aiRepairCardID: UUID?
@@ -47,8 +50,11 @@ struct ReviewView: View {
         self.repairNoteEditor = repairNoteEditor
         self.speechService = speechService
         self.scope = scope
-        _model = State(
-            initialValue: ReviewViewModel(
+    }
+
+    private var model: ReviewViewModel {
+        navigation.reviewSession(for: scope) {
+            ReviewViewModel(
                 service: service,
                 historyService: historyService,
                 speechPreferencesService: speechPreferencesService,
@@ -57,7 +63,7 @@ struct ReviewView: View {
                 speechService: speechService,
                 scope: scope
             )
-        )
+        }
     }
 
     var body: some View {
@@ -65,9 +71,14 @@ struct ReviewView: View {
             if model.isLoading, model.plan == nil {
                 ProgressView("正在载入下一张…")
             } else if let card = model.card {
-                reviewContent(card)
+                // 聚焦工作流限宽居中——iPad 大屏不出现全宽卡片。
+                ReadableContentContainer(role: .review) {
+                    reviewContent(card)
+                }
             } else if let plan = model.plan {
-                completionState(plan)
+                ReadableContentContainer(role: .review) {
+                    completionState(plan)
+                }
             } else {
                 ContentUnavailableView(
                     "无法开始学习",
