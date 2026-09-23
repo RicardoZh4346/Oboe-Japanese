@@ -375,16 +375,55 @@ public actor AIConfigurationService {
         guard TimeZone(identifier: defaultTimeZoneID) != nil else {
             throw StudyDayPlanningError.invalidTimeZone(defaultTimeZoneID)
         }
-        let configuration = try await repository.loadOrCreateAIConfiguration(
+        var configuration = try await repository.loadOrCreateAIConfiguration(
             defaultTimeZoneID: defaultTimeZoneID
         )
         let credential = try await credentialStore.readCredential(
             for: configuration.credentialReference
         )
+        let hasAPIKey = credential?.isEmpty == false
+        if Self.isLegacyAutoInsertedConfiguration(
+            configuration, hasAPIKey: hasAPIKey
+        ) {
+            // 落库一次，让残留占位值不再回显。
+            configuration = try await clearPersistedModelID(of: configuration)
+        }
         return AIConfigurationStatus(
             configuration: configuration,
-            hasAPIKey: credential?.isEmpty == false
+            hasAPIKey: hasAPIKey
         )
+    }
+
+    /// v0.5 及更早版本在 AI 列缺失时会把示例模型名「deepseek-v4-pro」
+    /// 作为默认草稿值落库。从未保存过 Key 且未启用，说明该行是自动
+    /// 插入的占位而非用户选择——归一化为「未选择」。已存 Key 或已启用
+    /// 的配置原样保留，避免误清用户曾确认过的值。
+    private static func isLegacyAutoInsertedConfiguration(
+        _ configuration: AIConfiguration,
+        hasAPIKey: Bool
+    ) -> Bool {
+        !hasAPIKey
+            && !configuration.isEnabled
+            && configuration.serviceKind == .deepSeek
+            && configuration.modelID == "deepseek-v4-pro"
+    }
+
+    private func clearPersistedModelID(
+        of configuration: AIConfiguration
+    ) async throws -> AIConfiguration {
+        let cleared = try AIConfigurationValidator.validate(
+            AIConfigurationDraft(
+                isEnabled: false,
+                serviceKind: configuration.serviceKind,
+                serviceName: configuration.serviceName,
+                baseURL: configuration.baseURL.absoluteString,
+                modelID: nil,
+                responseFormatMode: configuration.responseFormatMode
+            ),
+            credentialID: configuration.credentialReference.id
+        )
+        try await repository.saveAIConfiguration(cleared)
+        return cleared
     }
 
     public func save(

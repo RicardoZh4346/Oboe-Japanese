@@ -129,6 +129,52 @@ final class AIConfigurationTests: XCTestCase {
         XCTAssertEqual(switchedKey, "custom-secret")
     }
 
+    /// v0.5 及更早版本首次载入会把示例模型名「deepseek-v4-pro」落库；
+    /// 从未保存 Key 的未启用行应被归一化为「未选择」且持久化清除。
+    func testLegacyAutoInsertedModelIsClearedWhenNoKeyWasEverSaved() async throws {
+        var legacyDraft = AIConfigurationDraft.deepSeekDefault
+        legacyDraft.modelID = "deepseek-v4-pro"
+        let initial = try AIConfigurationValidator.validate(
+            legacyDraft, credentialID: UUID()
+        )
+        let repository = FakeAIConfigurationRepository(configuration: initial)
+        let credentials = FakeAICredentialStore()
+        let service = AIConfigurationService(
+            repository: repository,
+            credentialStore: credentials
+        )
+
+        let loaded = try await service.load(defaultTimeZoneID: "Asia/Shanghai")
+        XCTAssertNil(loaded.configuration.modelID)
+        XCTAssertFalse(loaded.configuration.isEnabled)
+
+        let reloaded = try await service.load(defaultTimeZoneID: "Asia/Shanghai")
+        XCTAssertNil(reloaded.configuration.modelID)
+    }
+
+    /// 存过 Key 的「deepseek-v4-pro」视为用户确认过的选择，原样保留；
+    /// 已启用状态同样不动（避免静默关闭曾可用的配置）。
+    func testLegacyModelNameIsKeptWhenKeyExistsOrEnabled() async throws {
+        var legacyDraft = AIConfigurationDraft.deepSeekDefault
+        legacyDraft.modelID = "deepseek-v4-pro"
+        let initial = try AIConfigurationValidator.validate(
+            legacyDraft, credentialID: UUID()
+        )
+        let repository = FakeAIConfigurationRepository(configuration: initial)
+        let credentials = FakeAICredentialStore()
+        let service = AIConfigurationService(
+            repository: repository,
+            credentialStore: credentials
+        )
+        try await credentials.saveCredential(
+            "sk-x", for: initial.credentialReference
+        )
+
+        let loaded = try await service.load(defaultTimeZoneID: "Asia/Shanghai")
+        XCTAssertEqual(loaded.configuration.modelID, "deepseek-v4-pro")
+        XCTAssertTrue(loaded.hasAPIKey)
+    }
+
     func testRemovingCredentialDisablesAIWithoutChangingOfflineConfiguration() async throws {
         let initial = try AIConfigurationValidator.validate(
             .deepSeekDefault,
