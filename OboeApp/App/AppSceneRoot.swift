@@ -2,8 +2,10 @@ import OboeDomain
 import OboeInfrastructure
 import SwiftUI
 
-/// 场景根：按运行期阶段分发到 compact 壳层（RootTabView）、错误页或
-/// 加载页。数据库操作遮罩与外观偏好挂在这里——无论壳层形态如何都生效。
+/// 场景根：按运行期阶段分发到壳层、错误页或加载页。壳层形态由
+/// `LayoutPolicy` 决定——compact 走 `CompactShell`（三 Tab），
+/// regular/wide 走 `RegularShell`（NavigationSplitView）。数据库
+/// 操作遮罩与外观偏好挂在这里——无论壳层形态如何都生效。
 struct AppSceneRoot: View {
     let runtime: AppRuntimeController
 
@@ -18,17 +20,35 @@ struct AppSceneRoot: View {
         // 壳层边界采集容器尺寸，向全树注入 LayoutPolicy——业务页面
         // 只读 policy token，不自行测屏。
         GeometryReader { proxy in
+            let policy = LayoutPolicy.resolve(
+                containerWidth: proxy.size.width,
+                horizontalSizeClass: horizontalSizeClass,
+                dynamicTypeSize: dynamicTypeSize
+            )
             Group {
                 switch runtime.phase {
                 case .ready(let container):
-                    RootTabView(
-                        container: container,
-                        operations: runtime.operations,
-                        jlptEnrichmentStatus: runtime.jlptEnrichmentStatus,
-                        pendingContinueItemID: runtime.pendingContinueItemID,
-                        sharedCapturesAwaitingImport: runtime.sharedCapturesAwaitingImport,
-                        isDatabaseOperationInProgress: runtime.isDatabaseOperationInProgress
-                    )
+                    Group {
+                        if policy.usesSplitNavigation {
+                            RegularShell(
+                                container: container,
+                                operations: runtime.operations,
+                                jlptEnrichmentStatus: runtime.jlptEnrichmentStatus,
+                                pendingContinueItemID: runtime.pendingContinueItemID,
+                                sharedCapturesAwaitingImport: runtime.sharedCapturesAwaitingImport,
+                                isDatabaseOperationInProgress: runtime.isDatabaseOperationInProgress
+                            )
+                        } else {
+                            CompactShell(
+                                container: container,
+                                operations: runtime.operations,
+                                jlptEnrichmentStatus: runtime.jlptEnrichmentStatus,
+                                pendingContinueItemID: runtime.pendingContinueItemID,
+                                sharedCapturesAwaitingImport: runtime.sharedCapturesAwaitingImport,
+                                isDatabaseOperationInProgress: runtime.isDatabaseOperationInProgress
+                            )
+                        }
+                    }
                     .onAppear {
                         // 世代替换时清空绑定旧实体的 route/selection。
                         navigationState.databaseGenerationDidChange(
@@ -51,14 +71,7 @@ struct AppSceneRoot: View {
                         .accessibilityIdentifier("app-loading")
                 }
             }
-            .environment(
-                \.layoutPolicy,
-                LayoutPolicy.resolve(
-                    containerWidth: proxy.size.width,
-                    horizontalSizeClass: horizontalSizeClass,
-                    dynamicTypeSize: dynamicTypeSize
-                )
-            )
+            .environment(\.layoutPolicy, policy)
         }
         .disabled(runtime.isDatabaseOperationInProgress)
         .overlay {

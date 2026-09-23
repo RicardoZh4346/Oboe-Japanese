@@ -1,3 +1,4 @@
+import OboeDomain
 import SwiftUI
 import XCTest
 @testable import Oboe
@@ -71,5 +72,42 @@ final class SceneNavigationStateTests: XCTestCase {
 
         XCTAssertEqual(state.selectedDeck, .library)
         XCTAssertEqual(state.selectedNoteID, noteID)
+    }
+
+    func testSelectDeckSidebarSwitchesSectionAndClearsNote() {
+        // regular sidebar 切牌组：detail 不得残留上一上下文的条目。
+        let state = SceneNavigationState()
+        state.selectNote(id: UUID(), kind: .vocabulary)
+        let deckID = UUID()
+
+        state.selectDeckSidebar(.deck(deckID))
+
+        XCTAssertEqual(state.section, .decks)
+        XCTAssertEqual(state.selectedDeck, .deck(deckID))
+        XCTAssertNil(state.selectedNoteID)
+        XCTAssertNil(state.selectedNoteKind)
+    }
+
+    func testSelectNoteRecordsKindForDetailResolution() {
+        let state = SceneNavigationState()
+        let noteID = UUID()
+
+        state.selectNote(id: noteID, kind: .grammar)
+
+        XCTAssertEqual(state.selectedNoteID, noteID)
+        XCTAssertEqual(state.selectedNoteKind, .grammar)
+    }
+
+    func testDeckDeletionClearsNoteKind() {
+        let state = SceneNavigationState()
+        let deckID = UUID()
+        state.selectDeckSidebar(.deck(deckID))
+        state.selectNote(id: UUID(), kind: .vocabulary)
+
+        state.deckWasDeleted(deckID)
+
+        XCTAssertNil(state.selectedDeck)
+        XCTAssertNil(state.selectedNoteID)
+        XCTAssertNil(state.selectedNoteKind)
     }
 }

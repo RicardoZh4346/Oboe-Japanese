@@ -14,7 +14,7 @@
         B01200000000000000000006 /* LanguageHintField.swift in Tests */ = {isa = PBXBuildFile; fileRef = B01200000000000000000005 /* LanguageHintField.swift */; };
         B01300000000000000000001 /* ListeningQuestionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B01300000000000000000002 /* ListeningQuestionView.swift */; };
 		A00100000000000000000001 /* OboeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000001 /* OboeApp.swift */; };
-		A00100000000000000000002 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* RootTabView.swift */; };
+		A00100000000000000000002 /* CompactShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* CompactShell.swift */; };
 		A00100000000000000000003 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000003 /* TodayView.swift */; };
 		A00100000000000000000004 /* DecksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000004 /* DecksView.swift */; };
 		A00100000000000000000005 /* AddView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000005 /* AddView.swift */; };
@@ -77,6 +77,7 @@
 		A00100000000000000000047 /* AppBootstrapEnvironment+UITest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */; };
 		A00100000000000000000048 /* AppRuntimeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000048 /* AppRuntimeController.swift */; };
 		A00100000000000000000049 /* AppSceneRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000049 /* AppSceneRoot.swift */; };
+		A00100000000000000000070 /* RegularShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000070 /* RegularShell.swift */; };
 		A0010000000000000000004A /* AppFeatureContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004A /* AppFeatureContainer.swift */; };
 		A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004B /* TodayFeatureDependencies.swift */; };
 		A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004C /* DeckFeatureDependencies.swift */; };
@@ -145,7 +146,7 @@
         B01200000000000000000005 /* LanguageHintField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageHintField.swift; sourceTree = "<group>"; };
         B01300000000000000000002 /* ListeningQuestionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListeningQuestionView.swift; sourceTree = "<group>"; };
 		A00200000000000000000001 /* OboeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeApp.swift; sourceTree = "<group>"; };
-		A00200000000000000000002 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		A00200000000000000000002 /* CompactShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactShell.swift; sourceTree = "<group>"; };
 		A00200000000000000000003 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		A00200000000000000000004 /* DecksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecksView.swift; sourceTree = "<group>"; };
 		A00200000000000000000005 /* AddView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddView.swift; sourceTree = "<group>"; };
@@ -210,6 +211,7 @@
 		A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppBootstrapEnvironment+UITest.swift"; sourceTree = "<group>"; };
 		A00200000000000000000048 /* AppRuntimeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeController.swift; sourceTree = "<group>"; };
 		A00200000000000000000049 /* AppSceneRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSceneRoot.swift; sourceTree = "<group>"; };
+		A00200000000000000000070 /* RegularShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegularShell.swift; sourceTree = "<group>"; };
 		A0020000000000000000004A /* AppFeatureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeatureContainer.swift; sourceTree = "<group>"; };
 		A0020000000000000000004B /* TodayFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayFeatureDependencies.swift; sourceTree = "<group>"; };
 		A0020000000000000000004C /* DeckFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckFeatureDependencies.swift; sourceTree = "<group>"; };
@@ -330,7 +332,7 @@
 			isa = PBXGroup;
 			children = (
 				A00200000000000000000001 /* OboeApp.swift */,
-				A00200000000000000000002 /* RootTabView.swift */,
+				A00200000000000000000002 /* CompactShell.swift */,
 				A00200000000000000000034 /* UITestAdaptiveSeed.swift */,
 				A00200000000000000000042 /* UITestTodaySeed.swift */,
 				A00200000000000000000044 /* AppRuntimePhase.swift */,
@@ -339,6 +341,7 @@
 				A00200000000000000000047 /* AppBootstrapEnvironment+UITest.swift */,
 				A00200000000000000000048 /* AppRuntimeController.swift */,
 				A00200000000000000000049 /* AppSceneRoot.swift */,
+				A00200000000000000000070 /* RegularShell.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -579,7 +582,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00100000000000000000001 /* OboeApp.swift in Sources */,
-				A00100000000000000000002 /* RootTabView.swift in Sources */,
+				A00100000000000000000002 /* CompactShell.swift in Sources */,
 				A00100000000000000000003 /* TodayView.swift in Sources */,
 				A00100000000000000000004 /* DecksView.swift in Sources */,
 				A00100000000000000000040 /* DeckMembershipPicker.swift in Sources */,
@@ -631,6 +634,7 @@
 				A00100000000000000000047 /* AppBootstrapEnvironment+UITest.swift in Sources */,
 				A00100000000000000000048 /* AppRuntimeController.swift in Sources */,
 				A00100000000000000000049 /* AppSceneRoot.swift in Sources */,
+				A00100000000000000000070 /* RegularShell.swift in Sources */,
 				A0010000000000000000004A /* AppFeatureContainer.swift in Sources */,
 				A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */,
 				A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */,

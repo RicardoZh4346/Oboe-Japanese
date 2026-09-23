@@ -9,6 +9,9 @@ final class OboeNavigationUITests: XCTestCase {
 
     /// 一级导航 smoke。名称保持稳定（不带 Tab 数量），CI workflow 直接
     /// 引用本方法名；Tab 数量变化时只改断言，不改名字。
+    ///
+    /// 壳层自适应：compact（iPhone、iPad 窄分屏）走底部 tab bar；
+    /// regular（iPad 常规宽度）走 NavigationSplitView sidebar。
     @MainActor
     func testPrimaryNavigationSmoke() {
         let app = XCUIApplication()
@@ -17,19 +20,66 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        // v0.5.5：「添加」入口迁入牌组详情，一级 tab 收敛为三个。
-        // 今日页导航标题带连续天数（「今日（已连续 N 天）」），用前缀匹配。
-        let expectedTabs = ["今日", "牌组", "设置"]
-        for tabName in expectedTabs {
-            let tab = app.tabBars.buttons[tabName]
-            XCTAssertTrue(tab.waitForExistence(timeout: 2), "缺少 \(tabName) 入口")
-            tab.tap()
-            let bar = app.navigationBars.matching(
-                NSPredicate(format: "identifier BEGINSWITH %@", tabName)
-            ).firstMatch
+        if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
+            // compact 壳层：三 tab 顺序切换，导航标题前缀匹配。
+            let expectedTabs = ["今日", "牌组", "设置"]
+            for tabName in expectedTabs {
+                let tab = app.tabBars.buttons[tabName]
+                XCTAssertTrue(tab.waitForExistence(timeout: 2), "缺少 \(tabName) 入口")
+                tab.tap()
+                let bar = app.navigationBars.matching(
+                    NSPredicate(format: "identifier BEGINSWITH %@", tabName)
+                ).firstMatch
+                XCTAssertTrue(
+                    bar.waitForExistence(timeout: 5),
+                    "切换到 \(tabName) 后未显示对应页面"
+                )
+            }
+        } else {
+            // regular 壳层：sidebar 入口 + 分栏页面断言。竖屏下 iPad
+            // 把 sidebar 当浮层、选中即收起（平台标准行为）——切横屏
+            // 让三栏常驻，验证完整分栏语义。
+            XCUIDevice.shared.orientation = .landscapeLeft
+            // sidebar 行内 Image/StaticText 共享同一 identifier，Image
+            // 不可点击——用 staticTexts 查询锁定文本元素。
+            let todayItem = app.staticTexts["sidebar-today"]
+            let settingsItem = app.staticTexts["sidebar-settings"]
+            let libraryItem = app.staticTexts["sidebar-jlpt-library"]
+            XCTAssertTrue(todayItem.waitForExistence(timeout: 5), "缺少 sidebar 今日入口")
+            XCTAssertTrue(settingsItem.exists, "缺少 sidebar 设置入口")
+            XCTAssertTrue(libraryItem.exists, "缺少 sidebar 词库入口")
+
+            todayItem.tap()
             XCTAssertTrue(
-                bar.waitForExistence(timeout: 5),
-                "切换到 \(tabName) 后未显示对应页面"
+                app.navigationBars.matching(
+                    NSPredicate(format: "identifier BEGINSWITH %@", "今日")
+                ).firstMatch.waitForExistence(timeout: 5),
+                "sidebar 今日选中后未显示今日页"
+            )
+
+            libraryItem.tap()
+            // 词库首次进入有「使用前说明」浮层，先关掉。
+            let acknowledge = app.buttons["我知道了"]
+            if acknowledge.waitForExistence(timeout: 2) {
+                acknowledge.tap()
+            }
+            // content 列应渲染词库列表（等级行直接证明内容加载）。
+            XCTAssertTrue(
+                app.buttons["jlpt-level-N5"].waitForExistence(timeout: 5),
+                "sidebar 词库选中后 content 列未显示词库页"
+            )
+            // detail 列保持空态占位，不残留上个上下文的条目。
+            XCTAssertTrue(
+                app.descendants(matching: .any)["decks-detail-empty"].firstMatch.exists,
+                "decks 无选中条目时 detail 列应显示空态"
+            )
+
+            settingsItem.tap()
+            XCTAssertTrue(
+                app.navigationBars.matching(
+                    NSPredicate(format: "identifier BEGINSWITH %@", "设置")
+                ).firstMatch.waitForExistence(timeout: 5),
+                "sidebar 设置选中后未显示设置页"
             )
         }
     }

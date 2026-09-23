@@ -8,9 +8,9 @@ private enum PrimaryTab: Hashable {
     case settings
 }
 
-/// compact 壳层：既定的 TabView 实现。只在 `.ready` 分支出现——服务
-/// 依赖从 `AppFeatureContainer` 整体取到，不再有逐个 Optional 展开。
-struct RootTabView: View {
+/// compact 壳层：既定的三 Tab `TabView` 实现。只在 `.ready` 分支出现——
+/// 服务依赖从 `AppFeatureContainer` 整体取到，不再有逐个 Optional 展开。
+struct CompactShell: View {
     let container: AppFeatureContainer
     let operations: AppRuntimeOperations
     let jlptEnrichmentStatus: JLPTEnrichmentStatus
@@ -21,9 +21,20 @@ struct RootTabView: View {
     @State private var selectedTab = PrimaryTab.today
 
     var body: some View {
+        // `.tabBarOnly` 需要 iOS 18；iOS 17 下回退为系统默认样式
+        // （iPad 常规宽度可能呈现 sidebarAdaptable，功能等价）。
+        if #available(iOS 18.0, *) {
+            tabContent
+                .tabViewStyle(.tabBarOnly)
+        } else {
+            tabContent
+        }
+    }
+
+    private var tabContent: some View {
         let today = container.today
         let decks = container.decks
-        TabView(selection: $selectedTab) {
+        return TabView(selection: $selectedTab) {
             TodayView(
                 studyService: today.studyService,
                 historyService: today.historyService,
@@ -91,9 +102,5 @@ struct RootTabView: View {
                 }
                 .tag(PrimaryTab.settings)
         }
-        // iPad 上 TabView 默认 sidebarAdaptable 会把 tab 收进 sidebar；
-        // PR 6 的 RegularShell 接管 regular 宽度之前，固定底部 tab bar
-        // 保持与 iPhone 一致的信息架构。
-        .tabViewStyle(.tabBarOnly)
     }
 }

@@ -20,6 +20,15 @@ struct DeckDetailView: View {
     let aiCardGenerationService: AICardGenerationService
     let sentenceAnalysisService: SentenceAnalysisService
     let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+    /// regular 壳层：知识点行改为 selection 语义（写入 detail 列
+    /// 选择）而非 push；compact 下为 nil，保持 NavigationLink 行为。
+    let onSelectNote: ((KnowledgePointSummary) -> Void)?
+    /// regular 壳层：删除成功后通知壳层清空 sidebar/detail 选择；
+    /// compact 下为 nil，仅 dismiss() 出栈。
+    let onDeleted: (() -> Void)?
+    /// regular 壳层 detail 列编辑后由壳层递增触发本页内容重取；
+    /// compact 恒为 0。
+    let contentRefreshToken: Int
 
     @Environment(\.dismiss) private var dismiss
     @State private var isPresentingAdd = false
@@ -51,7 +60,10 @@ struct DeckDetailView: View {
         speechService: any SpeechService,
         aiCardGenerationService: AICardGenerationService,
         sentenceAnalysisService: SentenceAnalysisService,
-        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        onSelectNote: ((KnowledgePointSummary) -> Void)? = nil,
+        onDeleted: (() -> Void)? = nil,
+        contentRefreshToken: Int = 0
     ) {
         self.deckID = deckID
         self.model = model
@@ -71,6 +83,9 @@ struct DeckDetailView: View {
         self.aiCardGenerationService = aiCardGenerationService
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
+        self.onSelectNote = onSelectNote
+        self.onDeleted = onDeleted
+        self.contentRefreshToken = contentRefreshToken
         _contentModel = State(
             initialValue: DeckContentModel(
                 deckID: deckID,
@@ -185,12 +200,8 @@ struct DeckDetailView: View {
                             .accessibilityIdentifier("deck-add-empty-button")
                         } else {
                             ForEach(contentModel.items) { item in
-                                NavigationLink {
-                                    destination(for: item)
-                                } label: {
-                                    KnowledgePointRow(item: item)
-                                }
-                                .accessibilityIdentifier("knowledge-row-\(item.id.uuidString)")
+                                noteRow(item)
+                                    .accessibilityIdentifier("knowledge-row-\(item.id.uuidString)")
                             }
                         }
                     }
@@ -285,6 +296,7 @@ struct DeckDetailView: View {
                     Button("确认删除", role: .destructive) {
                         Task {
                             if await model.deleteEmptyDeck(id: deck.id) {
+                                onDeleted?()
                                 dismiss()
                             }
                         }
@@ -331,6 +343,7 @@ struct DeckDetailView: View {
                     ) {
                         Task {
                             if await model.deleteDeck(id: deck.id, strategy: .deleteContents) {
+                                onDeleted?()
                                 dismiss()
                             }
                         }
@@ -354,6 +367,13 @@ struct DeckDetailView: View {
                 }
                 .task(id: deckID) {
                     await contentModel.load()
+                }
+                .task(id: contentRefreshToken) {
+                    // regular 壳层 detail 列保存后由壳层令牌触发重取；
+                    // 0 为首载占位（上面 deckID task 已负责）。
+                    guard contentRefreshToken != 0 else { return }
+                    await contentModel.load()
+                    await model.refreshDecks()
                 }
                 .task(id: searchText) {
                     await searchModel.debouncedSearch(searchText)
@@ -386,6 +406,7 @@ struct DeckDetailView: View {
 
     private func dismissAfterMoveIfNeeded() {
         if didDeleteAfterMove {
+            onDeleted?()
             dismiss()
         }
     }
@@ -405,14 +426,29 @@ struct DeckDetailView: View {
     }
 
     @ViewBuilder
-    private var searchResults: some View {
-        ForEach(searchModel.items) { item in
+    private func noteRow(_ item: KnowledgePointSummary) -> some View {
+        if let onSelectNote {
+            // regular 壳层：行选择写入 detail 列，不在本列内 push。
+            Button {
+                onSelectNote(item)
+            } label: {
+                KnowledgePointRow(item: item)
+            }
+            .buttonStyle(.plain)
+        } else {
             NavigationLink {
                 destination(for: item)
             } label: {
                 KnowledgePointRow(item: item)
             }
-            .accessibilityIdentifier("deck-search-result-\(item.id.uuidString)")
+        }
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        ForEach(searchModel.items) { item in
+            noteRow(item)
+                .accessibilityIdentifier("deck-search-result-\(item.id.uuidString)")
         }
         if searchModel.nextOffset != nil {
             Button {

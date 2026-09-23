@@ -1,3 +1,4 @@
+import OboeDomain
 import Observation
 import SwiftUI
 
@@ -13,9 +14,15 @@ final class SceneNavigationState {
     var section: AppSection = .today
     var selectedDeck: DeckSidebarSelection?
     var selectedNoteID: UUID?
+    /// detail 列解析到具体编辑器需要 kind——与 noteID 一起记录，
+    /// 避免 detail 列再查一次库。
+    var selectedNoteKind: KnowledgePointKind?
     var selectedInboxItemID: UUID?
     var selectedSettingsRoute: SettingsRoute?
-    var splitVisibility: NavigationSplitViewVisibility = .all
+    /// 初始为 `.doubleColumn`：两栏 split（today/settings）下即
+    /// sidebar+detail 同显；三栏 split（decks）由 reducer 显式置 `.all`。
+    /// 注意三栏语义下 `.doubleColumn` 折叠的是 sidebar 而非 content。
+    var splitVisibility: NavigationSplitViewVisibility = .doubleColumn
     var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
 
     /// compact 壳层三 Tab 各自的栈路径；切 Tab 不丢深度。
@@ -33,6 +40,7 @@ final class SceneNavigationState {
         generation = newGeneration
         selectedDeck = nil
         selectedNoteID = nil
+        selectedNoteKind = nil
         selectedInboxItemID = nil
         todayPath = NavigationPath()
         decksPath = NavigationPath()
@@ -46,10 +54,38 @@ final class SceneNavigationState {
         guard selectedDeck == .deck(deckID) else { return }
         selectedDeck = nil
         selectedNoteID = nil
+        selectedNoteKind = nil
     }
 
-    /// compact 壳层的 Tab 选择与 section 的映射。
+    /// compact 壳层的 Tab 选择与 section 的映射。regular 下 also
+    /// 归一化列可见性——与 section 变更同批写入，新 split 初始化时
+    /// 读到的就是正确值（事后 onChange 会晚一拍，列已按旧值布局）。
     func selectTab(_ section: AppSection) {
         self.section = section
+        // 两栏 split：sidebar+detail 同显。
+        splitVisibility = .doubleColumn
+        // 两栏 split 没有 content 列——preferredCompactColumn 只能取
+        // sidebar/detail，压扁时直接给 detail（功能页本身）。
+        preferredCompactColumn = .detail
+    }
+
+    /// regular sidebar 选中 Decks 区条目：切到 decks section 并清空
+    /// detail 选择——detail 不得继续展示上一个上下文的条目。
+    func selectDeckSidebar(_ selection: DeckSidebarSelection) {
+        section = .decks
+        selectedDeck = selection
+        selectedNoteID = nil
+        selectedNoteKind = nil
+        // 三栏 split：sidebar+content+detail 全显。
+        splitVisibility = .all
+        // 压扁成单列时回到 sidebar（先选目标再看内容）。
+        preferredCompactColumn = .sidebar
+    }
+
+    /// regular detail 列选择：noteID 与 kind 一起记录，detail 列
+    /// 直接解析到具体编辑器，无需再查库。
+    func selectNote(id: UUID, kind: KnowledgePointKind) {
+        selectedNoteID = id
+        selectedNoteKind = kind
     }
 }
