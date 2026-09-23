@@ -576,6 +576,28 @@ private struct DeckDetailView: View {
         model.decks.first { $0.id == deckID }
     }
 
+    private var contentErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { contentModel.errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    contentModel.errorMessage = nil
+                }
+            }
+        )
+    }
+
+    private var searchErrorIsPresented: Binding<Bool> {
+        Binding(
+            get: { searchModel.errorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    searchModel.errorMessage = nil
+                }
+            }
+        )
+    }
+
     var body: some View {
         Group {
             if let deck {
@@ -833,14 +855,7 @@ private struct DeckDetailView: View {
                 }
                 .alert(
                     "无法载入牌组内容",
-                    isPresented: Binding(
-                        get: { contentModel.errorMessage != nil },
-                        set: { isPresented in
-                            if !isPresented {
-                                contentModel.errorMessage = nil
-                            }
-                        }
-                    )
+                    isPresented: contentErrorIsPresented
                 ) {
                     Button("好", role: .cancel) {}
                 } message: {
@@ -848,14 +863,7 @@ private struct DeckDetailView: View {
                 }
                 .alert(
                     "无法搜索",
-                    isPresented: Binding(
-                        get: { searchModel.errorMessage != nil },
-                        set: { isPresented in
-                            if !isPresented {
-                                searchModel.errorMessage = nil
-                            }
-                        }
-                    )
+                    isPresented: searchErrorIsPresented
                 ) {
                     Button("好", role: .cancel) {}
                 } message: {
