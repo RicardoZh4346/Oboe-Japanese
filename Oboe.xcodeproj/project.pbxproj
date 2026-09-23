@@ -86,6 +86,23 @@
 		EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD40144146D14359888E78DD /* SecondaryPage.swift */; };
 		167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */; };
 		7775AE95FA9F47FE8457891D /* OboeSettingsAIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */; };
+		A0010000000000000000004F /* DeckListModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004F /* DeckListModel.swift */; };
+		A00100000000000000000050 /* DeckRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000050 /* DeckRow.swift */; };
+		A00100000000000000000051 /* DeckDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000051 /* DeckDetailView.swift */; };
+		A00100000000000000000052 /* DeckContentModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000052 /* DeckContentModel.swift */; };
+		A00100000000000000000053 /* KnowledgePointRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000053 /* KnowledgePointRow.swift */; };
+		A00100000000000000000054 /* KnowledgeSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000054 /* KnowledgeSearchView.swift */; };
+		A00100000000000000000055 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000055 /* FavoritesView.swift */; };
+		A00100000000000000000056 /* DeckMoveBeforeDeletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000056 /* DeckMoveBeforeDeletionSheet.swift */; };
+		A00100000000000000000057 /* AddContentFormState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000057 /* AddContentFormState.swift */; };
+		A00100000000000000000058 /* AddContentAISession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000058 /* AddContentAISession.swift */; };
+		A00100000000000000000059 /* SentenceAnalysisSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000059 /* SentenceAnalysisSession.swift */; };
+		A0010000000000000000005A /* CaptureDraftCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005A /* CaptureDraftCoordinator.swift */; };
+		A0010000000000000000005B /* AddContentCommitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005B /* AddContentCommitCoordinator.swift */; };
+		A0010000000000000000005C /* ReviewQueueCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005C /* ReviewQueueCoordinator.swift */; };
+		A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */; };
+		A0010000000000000000005E /* ReviewAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005E /* ReviewAudioController.swift */; };
+		A0010000000000000000005F /* ReviewPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005F /* ReviewPresentationState.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -185,6 +202,23 @@
 		BD40144146D14359888E78DD /* SecondaryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryPage.swift; sourceTree = "<group>"; };
 		EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelPickerView.swift; sourceTree = "<group>"; };
 		250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeSettingsAIUITests.swift; sourceTree = "<group>"; };
+		A0020000000000000000004F /* DeckListModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckListModel.swift; sourceTree = "<group>"; };
+		A00200000000000000000050 /* DeckRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckRow.swift; sourceTree = "<group>"; };
+		A00200000000000000000051 /* DeckDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckDetailView.swift; sourceTree = "<group>"; };
+		A00200000000000000000052 /* DeckContentModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckContentModel.swift; sourceTree = "<group>"; };
+		A00200000000000000000053 /* KnowledgePointRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgePointRow.swift; sourceTree = "<group>"; };
+		A00200000000000000000054 /* KnowledgeSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSearchView.swift; sourceTree = "<group>"; };
+		A00200000000000000000055 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
+		A00200000000000000000056 /* DeckMoveBeforeDeletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckMoveBeforeDeletionSheet.swift; sourceTree = "<group>"; };
+		A00200000000000000000057 /* AddContentFormState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentFormState.swift; sourceTree = "<group>"; };
+		A00200000000000000000058 /* AddContentAISession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentAISession.swift; sourceTree = "<group>"; };
+		A00200000000000000000059 /* SentenceAnalysisSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceAnalysisSession.swift; sourceTree = "<group>"; };
+		A0020000000000000000005A /* CaptureDraftCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureDraftCoordinator.swift; sourceTree = "<group>"; };
+		A0020000000000000000005B /* AddContentCommitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentCommitCoordinator.swift; sourceTree = "<group>"; };
+		A0020000000000000000005C /* ReviewQueueCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQueueCoordinator.swift; sourceTree = "<group>"; };
+		A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSubmissionCoordinator.swift; sourceTree = "<group>"; };
+		A0020000000000000000005E /* ReviewAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAudioController.swift; sourceTree = "<group>"; };
+		A0020000000000000000005F /* ReviewPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewPresentationState.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -304,11 +338,11 @@
 			sourceTree = "<group>";
 		};
 		A00500000000000000000005 /* Today */ = {isa = PBXGroup; children = (A00200000000000000000003 /* TodayView.swift */, A00200000000000000000041 /* DailyStatisticsView.swift */,); path = Today; sourceTree = "<group>"; };
-		A00500000000000000000006 /* Decks */ = {isa = PBXGroup; children = (A00200000000000000000004 /* DecksView.swift */, A00200000000000000000040 /* DeckMembershipPicker.swift */,); path = Decks; sourceTree = "<group>"; };
+		A00500000000000000000006 /* Decks */ = {isa = PBXGroup; children = (A00200000000000000000004 /* DecksView.swift */, A0020000000000000000004F /* DeckListModel.swift */, A00200000000000000000050 /* DeckRow.swift */, A00200000000000000000051 /* DeckDetailView.swift */, A00200000000000000000052 /* DeckContentModel.swift */, A00200000000000000000053 /* KnowledgePointRow.swift */, A00200000000000000000054 /* KnowledgeSearchView.swift */, A00200000000000000000055 /* FavoritesView.swift */, A00200000000000000000056 /* DeckMoveBeforeDeletionSheet.swift */, A00200000000000000000040 /* DeckMembershipPicker.swift */,); path = Decks; sourceTree = "<group>"; };
 		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
 		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (A00200000000000000000026 /* SentenceAnalysisSections.swift */,); path = SentenceAnalysis; sourceTree = "<group>"; };
-		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
-		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
+		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000057 /* AddContentFormState.swift */, A00200000000000000000058 /* AddContentAISession.swift */, A00200000000000000000059 /* SentenceAnalysisSession.swift */, A0020000000000000000005A /* CaptureDraftCoordinator.swift */, A0020000000000000000005B /* AddContentCommitCoordinator.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
+		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
 		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */, BD40144146D14359888E78DD /* SecondaryPage.swift */,); path = SharedUI; sourceTree = "<group>"; };
 		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */,); path = Resources; sourceTree = "<group>"; };
 		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */,); path = OboeUITests; sourceTree = "<group>"; };
@@ -515,6 +549,23 @@
 				A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */,
 				A0010000000000000000004D /* SettingsFeatureDependencies.swift in Sources */,
 				A0010000000000000000004E /* SharedFeatureDependencies.swift in Sources */,
+				A0010000000000000000004F /* DeckListModel.swift in Sources */,
+				A00100000000000000000050 /* DeckRow.swift in Sources */,
+				A00100000000000000000051 /* DeckDetailView.swift in Sources */,
+				A00100000000000000000052 /* DeckContentModel.swift in Sources */,
+				A00100000000000000000053 /* KnowledgePointRow.swift in Sources */,
+				A00100000000000000000054 /* KnowledgeSearchView.swift in Sources */,
+				A00100000000000000000055 /* FavoritesView.swift in Sources */,
+				A00100000000000000000056 /* DeckMoveBeforeDeletionSheet.swift in Sources */,
+				A00100000000000000000057 /* AddContentFormState.swift in Sources */,
+				A00100000000000000000058 /* AddContentAISession.swift in Sources */,
+				A00100000000000000000059 /* SentenceAnalysisSession.swift in Sources */,
+				A0010000000000000000005A /* CaptureDraftCoordinator.swift in Sources */,
+				A0010000000000000000005B /* AddContentCommitCoordinator.swift in Sources */,
+				A0010000000000000000005C /* ReviewQueueCoordinator.swift in Sources */,
+				A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */,
+				A0010000000000000000005E /* ReviewAudioController.swift in Sources */,
+				A0010000000000000000005F /* ReviewPresentationState.swift in Sources */,
 				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 				EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */,
 				167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */,
