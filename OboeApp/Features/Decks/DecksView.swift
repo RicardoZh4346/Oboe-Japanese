@@ -601,7 +601,8 @@ private struct DeckDetailView: View {
     var body: some View {
         Group {
             if let deck {
-                List {
+                let baseView = AnyView(
+                    List {
                     Section {
                         if model.primaryDeckID == deck.id {
                             Label("当前主牌组", systemImage: "star.fill")
@@ -756,12 +757,15 @@ private struct DeckDetailView: View {
                     placement: .navigationBarDrawer(displayMode: .always),
                     prompt: "搜索本牌组"
                 )
-                .sheet(isPresented: $isPresentingRename) {
-                    DeckNameEditor(title: "重命名牌组", initialName: deck.name) { name in
-                        await model.renameDeck(id: deck.id, to: name)
+                    .sheet(isPresented: $isPresentingRename) {
+                        DeckNameEditor(title: "重命名牌组", initialName: deck.name) { name in
+                            await model.renameDeck(id: deck.id, to: name)
+                        }
                     }
-                }
-                .alert(
+                )
+
+                let deletionView = AnyView(
+                    baseView.alert(
                     "确定删除“\(deck.name)”吗？",
                     isPresented: $isConfirmingDelete
                 ) {
@@ -827,22 +831,13 @@ private struct DeckDetailView: View {
                         Text("例句、标签关联、卡片和当前任务会删除；评分历史仅保留不可变标识。操作不可撤销，可通过已有备份恢复。")
                     }
                 }
+                )
+
+                deletionView
                 .sheet(isPresented: $isMovingBeforeDeletion, onDismiss: {
-                    if didDeleteAfterMove {
-                        dismiss()
-                    }
+                    dismissAfterMoveIfNeeded()
                 }) {
-                    DeckMoveBeforeDeletionSheet(
-                        sourceDeck: deck,
-                        destinations: model.decks.filter { $0.id != deck.id }
-                    ) { destinationID in
-                        await model.deleteDeck(
-                            id: deck.id,
-                            strategy: .moveContents(to: destinationID)
-                        )
-                    } onDeleted: {
-                        didDeleteAfterMove = true
-                    }
+                    moveBeforeDeletionSheet(for: deck)
                 }
                 .task(id: deckID) {
                     await contentModel.load()
@@ -874,6 +869,26 @@ private struct DeckDetailView: View {
             }
         }
         .secondaryPage()
+    }
+
+    private func dismissAfterMoveIfNeeded() {
+        if didDeleteAfterMove {
+            dismiss()
+        }
+    }
+
+    private func moveBeforeDeletionSheet(for deck: DeckSummary) -> some View {
+        DeckMoveBeforeDeletionSheet(
+            sourceDeck: deck,
+            destinations: model.decks.filter { $0.id != deck.id }
+        ) { destinationID in
+            await model.deleteDeck(
+                id: deck.id,
+                strategy: .moveContents(to: destinationID)
+            )
+        } onDeleted: {
+            didDeleteAfterMove = true
+        }
     }
 
     @ViewBuilder
