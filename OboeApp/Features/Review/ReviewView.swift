@@ -209,16 +209,18 @@ struct ReviewView: View {
             value: card.content.cardID
         )
         .background(OboeTheme.Colors.pageBackground)
-        .sheet(
+        .adaptivePresentation(
+            role: .focusedWorkflow,
             isPresented: Binding(
                 get: { aiRepairCardID != nil },
                 set: { shown in if !shown { aiRepairCardID = nil } }
-            )
-        ) {
-            // Returning from repair keeps studying — refresh the same card
-            // so an in-sheet manual edit is reflected without advancing.
-            Task { await model.refresh(preservingCurrentCard: true) }
-        } content: {
+            ),
+            onDismiss: {
+                // Returning from repair keeps studying — refresh the same card
+                // so an in-sheet manual edit is reflected without advancing.
+                Task { await model.refresh(preservingCurrentCard: true) }
+            },
+            content: {
             if let aiRepairService, let aiRepairCardID {
                 NavigationStack {
                     AIRepairView(
@@ -240,7 +242,8 @@ struct ReviewView: View {
                 }
                 .presentationDetents([.large])
             }
-        }
+            }
+        )
     }
 
     private func bottomBar(_ card: LoadedReviewCard) -> some View {

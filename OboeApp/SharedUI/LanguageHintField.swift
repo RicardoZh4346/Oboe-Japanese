@@ -160,7 +160,9 @@ struct LanguageHintEditor: UIViewRepresentable {
         uiView: UITextView,
         context: Context
     ) -> CGSize? {
-        let width = proposal.width ?? UIScreen.main.bounds.width - 64
+        // 不使用 UIScreen.main 回退：proposal 没有宽度时返回 nil，
+        // 交给 SwiftUI 默认布局（容器宽度由父视图/列决定）。
+        guard let width = proposal.width else { return nil }
         let fitting = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )

@@ -97,7 +97,7 @@ struct JLPTLibraryView: View {
             scheduleEnrichment()
             await refresh()
         }
-        .sheet(isPresented: $isShowingNotice) { noticeSheet }
+        .adaptivePresentation(role: .inspector, isPresented: $isShowingNotice) { noticeSheet }
         .alert("无法读取词库", isPresented: errorBinding) {
             Button("好", role: .cancel) {}
         } message: {

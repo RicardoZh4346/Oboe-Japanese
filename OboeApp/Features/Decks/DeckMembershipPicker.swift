@@ -131,7 +131,7 @@ struct DeckMembershipField: View {
         }
         .disabled(decks.isEmpty)
         .accessibilityIdentifier(rowAccessibilityID)
-        .sheet(isPresented: $isPresented) {
+        .adaptivePresentation(role: .quickPicker, isPresented: $isPresented) {
             NavigationStack {
                 Form {
                     DeckMembershipList(

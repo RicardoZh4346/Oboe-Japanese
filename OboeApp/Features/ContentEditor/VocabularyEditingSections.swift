@@ -31,7 +31,7 @@ struct VocabularyPartOfSpeechField: View {
         .accessibilityValue(summary)
         .accessibilityHint("双击打开词性多选列表")
         .accessibilityIdentifier(accessibilityIdentifier)
-        .sheet(isPresented: $isPresented) {
+        .adaptivePresentation(role: .quickPicker, isPresented: $isPresented) {
             VocabularyPartOfSpeechPickerSheet(
                 draft: $draft,
                 legacyUnknown: legacyUnknown,
