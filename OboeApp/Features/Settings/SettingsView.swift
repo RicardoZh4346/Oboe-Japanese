@@ -667,18 +667,42 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var aiCapabilityFields: some View {
-        if aiDraft.serviceKind == .deepSeek {
-            LabeledContent("结构化输出", value: AIResponseFormatMode.jsonObject.displayName)
-                .accessibilityIdentifier("ai-response-format-fixed")
+        // 候选按供应商能力集过滤；DeepSeek 固定 JSON Object（产品决策），
+        // 能力集只有单一模式的供应商（Claude/Gemini 仅提示词 JSON）也
+        // 直接显示固定值——预设供应商的模式本就被 validator 强制。
+        let modes = aiSelectableResponseFormatModes
+        if aiDraft.serviceKind == .deepSeek || modes.count == 1 {
+            LabeledContent(
+                "结构化输出",
+                value: aiFixedResponseFormatMode(modes).displayName
+            )
+            .accessibilityIdentifier("ai-response-format-fixed")
         } else {
             Picker("结构化输出", selection: $aiDraft.responseFormatMode) {
-                ForEach(AIResponseFormatMode.allCases, id: \.self) { mode in
+                ForEach(modes, id: \.self) { mode in
                     Text(mode.displayName).tag(mode)
                 }
             }
             .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
             .accessibilityIdentifier("ai-response-format-picker")
         }
+    }
+
+    /// 当前供应商可选的结构化输出模式：能力集按 allCases 声明顺序过滤。
+    private var aiSelectableResponseFormatModes: [AIResponseFormatMode] {
+        let supported = AIProviderPresetRegistry
+            .capabilities(for: aiDraft.serviceKind)
+            .supportedOutputModes
+        return AIResponseFormatMode.allCases.filter { supported.contains($0) }
+    }
+
+    /// 固定展示时的模式：预设取注册表强制值，否则取唯一可选项/草稿值。
+    private func aiFixedResponseFormatMode(
+        _ modes: [AIResponseFormatMode]
+    ) -> AIResponseFormatMode {
+        AIProviderPresetRegistry.preset(for: aiDraft.serviceKind)?.responseFormatMode
+            ?? modes.first
+            ?? aiDraft.responseFormatMode
     }
 
     @ViewBuilder

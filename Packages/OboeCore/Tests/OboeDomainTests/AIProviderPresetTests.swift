@@ -118,6 +118,65 @@ final class AIProviderPresetTests: XCTestCase {
         XCTAssertEqual(configuration.modelID, "claude-sonnet-test")
     }
 
+    /// 能力声明契约：所有预设都支持模型目录与生成（协议族↔能力的一致性
+    /// 由该断言把守）；预设的强制 responseFormatMode 必须落在其能力集内；
+    /// Anthropic/Gemini 协议没有 response_format，不得声明 jsonSchema/jsonObject；
+    /// 本项目不支持流式。
+    func testPresetCapabilitiesAreConsistentWithProtocolKind() {
+        for preset in AIProviderPresetRegistry.all {
+            let capabilities = preset.capabilities
+            XCTAssertTrue(
+                capabilities.supportsModelCatalog,
+                "\(preset.serviceKind) 应支持模型目录"
+            )
+            XCTAssertTrue(
+                capabilities.supportsGeneration,
+                "\(preset.serviceKind) 应支持文本生成"
+            )
+            XCTAssertFalse(
+                capabilities.supportsStreaming,
+                "\(preset.serviceKind) 不支持流式"
+            )
+            XCTAssertTrue(
+                capabilities.supportedOutputModes.contains(preset.responseFormatMode),
+                "\(preset.serviceKind) 的强制模式必须在能力集内"
+            )
+            switch preset.protocolKind {
+            case .anthropic, .gemini:
+                XCTAssertEqual(
+                    capabilities.supportedOutputModes,
+                    [.promptedJSON],
+                    "\(preset.serviceKind) 协议无 response_format，只支持提示词 JSON"
+                )
+            case .openAICompatible, .xAI, .dashScope:
+                XCTAssertEqual(
+                    capabilities.supportedOutputModes,
+                    Set(AIResponseFormatMode.allCases),
+                    "\(preset.serviceKind) 兼容 response_format，支持全部模式"
+                )
+            }
+        }
+    }
+
+    /// custom 无预设：能力按 OpenAI 兼容默认处理（目录/生成/三种模式），
+    /// 与 adapter 分发的 fallback 语义一致。
+    func testCustomCapabilitiesFallBackToOpenAICompatibleDefaults() {
+        let capabilities = AIProviderPresetRegistry.capabilities(for: .custom)
+        XCTAssertTrue(capabilities.supportsModelCatalog)
+        XCTAssertTrue(capabilities.supportsGeneration)
+        XCTAssertFalse(capabilities.supportsStreaming)
+        XCTAssertEqual(
+            capabilities.supportedOutputModes,
+            Set(AIResponseFormatMode.allCases)
+        )
+        for kind in AIServiceKind.allCases where kind != .custom {
+            XCTAssertEqual(
+                AIProviderPresetRegistry.capabilities(for: kind),
+                AIProviderPresetRegistry.preset(for: kind)?.capabilities
+            )
+        }
+    }
+
     func testServiceKindDisplayNamesComeFromRegistry() {
         XCTAssertEqual(AIServiceKind.openAI.displayName, "ChatGPT / OpenAI API")
         XCTAssertEqual(AIServiceKind.qwen.displayName, "Qwen（通义千问）")

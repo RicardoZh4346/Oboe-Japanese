@@ -37,7 +37,7 @@ public enum AIProtocolKind: String, CaseIterable, Codable, Sendable {
     case xAI = "xai"
 }
 
-public enum AIResponseFormatMode: String, CaseIterable, Codable, Sendable {
+public enum AIResponseFormatMode: String, CaseIterable, Codable, Sendable, Hashable {
     case jsonSchema = "json_schema"
     case jsonObject = "json_object"
     case promptedJSON = "prompted_json"

@@ -437,27 +437,34 @@ final class AIMessageAdapterTests: XCTestCase {
         }
     }
 
-    // MARK: - 协议分发：xAI / DashScope 走 OpenAI 兼容，Gemini 明确拒绝
+    // MARK: - 协议分发：xAI / DashScope 走 OpenAI 兼容，Gemini 走原生 generateContent
 
-    func testGeminiConfigurationFailsFastWithoutSending() async throws {
+    /// Gemini 配置走原生 generateContent adapter：请求确实发出，
+    /// 端点为 `{base}/v1beta/models/{model}:generateContent`，
+    /// 凭据在 `x-goog-api-key` 头中。
+    func testGeminiConfigurationUsesNativeGenerateContentAdapter() async throws {
         var draft = AIConfigurationDraft.preset(.gemini)
         draft.isEnabled = true
-        draft.modelID = "gemini-test"
+        draft.modelID = "gemini-2.5-flash"
         let configuration = try AIConfigurationValidator.resolve(draft, credentialID: UUID())
 
         let transport = AdapterCapturingTransport(
-            response: Self.openAIResponse(#"{"ok":true}"#)
+            response: Self.geminiResponse(#"{"ok":true}"#)
         )
-        do {
-            _ = try await ChatCompletionsAIConnectionClient(
-                transport: transport
-            ).testConnection(configuration: configuration, credential: "key")
-            XCTFail("Expected unsupportedConfiguration")
-        } catch let error as AIConnectionError {
-            XCTAssertEqual(error, .unsupportedConfiguration(statusCode: 0))
-        }
+        _ = try await ChatCompletionsAIConnectionClient(
+            transport: transport
+        ).testConnection(configuration: configuration, credential: "gemini-key")
         let sent = await transport.lastRequest()
-        XCTAssertNil(sent, "Gemini 尚无执行 adapter，不应发出任何请求")
+        let request = try XCTUnwrap(sent, "Gemini 已有执行 adapter，应发出请求")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        )
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "x-goog-api-key"),
+            "gemini-key"
+        )
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
     }
 
     func testDashScopeAndXAIRouteThroughOpenAICompatibleEndpoints() async throws {
@@ -655,6 +662,31 @@ final class AIMessageAdapterTests: XCTestCase {
             headers: [:],
             body: try! JSONSerialization.data(withJSONObject: object)
         )
+    }
+
+    /// Gemini generateContent 响应信封：单个候选、单文本 part。
+    static func geminiResponse(
+        _ text: String,
+        finishReason: String? = "STOP"
+    ) -> AIHTTPResponse {
+        geminiResponse(
+            parts: [["text": text]],
+            finishReason: finishReason
+        )
+    }
+
+    static func geminiResponse(
+        parts: [[String: Any]],
+        finishReason: String? = "STOP"
+    ) -> AIHTTPResponse {
+        var candidate: [String: Any] = [
+            "content": ["role": "model", "parts": parts]
+        ]
+        candidate["finishReason"] = finishReason ?? NSNull()
+        let data = try! JSONSerialization.data(withJSONObject: [
+            "candidates": [candidate]
+        ])
+        return AIHTTPResponse(statusCode: 200, headers: [:], body: data)
     }
 
     private static func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {

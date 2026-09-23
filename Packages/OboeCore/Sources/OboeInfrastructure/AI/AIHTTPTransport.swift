@@ -145,7 +145,8 @@ final class SameOriginRedirectDelegate: NSObject, URLSessionTaskDelegate, @unche
     }
 
     /// 只放行同源 HTTPS 重定向，并把原请求的凭据/协议头带回
-    /// （`Authorization` 以及 Anthropic 的 `x-api-key`/`anthropic-version`）。
+    /// （`Authorization` 以及各原生协议头：Anthropic 的
+    /// `x-api-key`/`anthropic-version`、Gemini 的 `x-goog-api-key`）。
     static func redirectedRequest(
         originalRequest: URLRequest,
         proposedRequest: URLRequest
@@ -156,7 +157,9 @@ final class SameOriginRedirectDelegate: NSObject, URLSessionTaskDelegate, @unche
             return nil
         }
         var redirected = proposedRequest
-        for header in ["Authorization", "x-api-key", "anthropic-version"] {
+        for header in [
+            "Authorization", "x-api-key", "anthropic-version", "x-goog-api-key"
+        ] {
             redirected.setValue(
                 originalRequest.value(forHTTPHeaderField: header),
                 forHTTPHeaderField: header

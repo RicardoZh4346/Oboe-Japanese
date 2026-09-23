@@ -23,6 +23,12 @@ public struct HTTPAIModelCatalogClient: AIModelCatalogClient, Sendable {
         configuration: AIConfiguration,
         credential: String
     ) async throws -> [AIModelDescriptor] {
+        // 能力 fail-fast：供应商不支持模型目录时直接拒绝，不发请求。
+        // custom 取 OpenAI 兼容默认能力（支持目录），不会被误拦。
+        guard AIProviderPresetRegistry.capabilities(for: configuration.serviceKind)
+            .supportsModelCatalog else {
+            throw AIModelCatalogError.unsupportedConfiguration(statusCode: 0)
+        }
         guard !credential.isEmpty,
               credential.unicodeScalars.allSatisfy({
                   !CharacterSet.controlCharacters.contains($0)

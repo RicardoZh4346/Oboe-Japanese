@@ -26,6 +26,8 @@ public struct AIProviderPreset: Equatable, Sendable {
     public let responseFormatMode: AIResponseFormatMode
     /// 面向用户的补充说明（如 Qwen 的地域绑定提示），可为空。
     public let note: String?
+    /// 供应商能力声明；缺省按 `protocolKind` 推导，需偏离时显式传入。
+    public let capabilities: AIProviderCapabilities
 
     public init(
         serviceKind: AIServiceKind,
@@ -35,7 +37,8 @@ public struct AIProviderPreset: Equatable, Sendable {
         modelListPath: String,
         apiKeyHeaderStyle: AIAPIKeyHeaderStyle,
         responseFormatMode: AIResponseFormatMode,
-        note: String? = nil
+        note: String? = nil,
+        capabilities: AIProviderCapabilities? = nil
     ) {
         self.serviceKind = serviceKind
         self.displayName = displayName
@@ -45,6 +48,7 @@ public struct AIProviderPreset: Equatable, Sendable {
         self.apiKeyHeaderStyle = apiKeyHeaderStyle
         self.responseFormatMode = responseFormatMode
         self.note = note
+        self.capabilities = capabilities ?? .defaults(for: protocolKind)
     }
 }
 
@@ -130,5 +134,11 @@ public enum AIProviderPresetRegistry {
 
     public static func preset(for kind: AIServiceKind) -> AIProviderPreset? {
         all.first { $0.serviceKind == kind }
+    }
+
+    /// 供应商能力查询：预设取注册表声明；custom 无预设，按 OpenAI 兼容
+    /// 默认能力处理（目录/生成/三种输出模式）——与 adapter 分发语义一致。
+    public static func capabilities(for kind: AIServiceKind) -> AIProviderCapabilities {
+        preset(for: kind)?.capabilities ?? .openAICompatible
     }
 }

@@ -18,7 +18,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 - **主牌组学习范围**：今日学习只覆盖主牌组；无牌组时不能制卡或学习，牌组详情仍可按单个牌组学习。
 - **重复内容复用**：添加已存在的单词或语法时可直接「加入当前牌组」——同一 Note 归属多个牌组共享一份卡片、调度进度与复习日志，不复制数据；仍可选择明确另建义项。
 - **主动回忆默认开启**：新安装的「中文→日文输入」与「听力输入」回忆选项默认开启；已有用户的开关选择保持不变。
-- **AI 服务扩展**：除 DeepSeek 与自定义兼容服务外，新增 Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen 与 Grok 预设；预设服务地址预填官方 URL、可改为代理/网关地址；填入 API Key 后先获取模型列表再选择模型，「保存并测试」成功后才可启用；Claude 使用 Anthropic Messages 协议。
+- **AI 服务扩展**：除 DeepSeek 与自定义兼容服务外，新增 Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen 与 Grok 预设；预设服务地址预填官方 URL、可改为代理/网关地址；填入 API Key 后先获取模型列表再选择模型，「保存并测试」成功后才可启用；Claude 使用 Anthropic Messages 协议，Gemini 使用 Google 原生 generateContent 协议。
 - **兼容不变**：数据库仍为 schema v13、备份仍为 v6，v1～v6 备份继续可恢复，旧库升级保留全部设置与牌组归属。
 
 ## 主要功能
@@ -42,7 +42,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 - 收集箱统一承接四种来源，可搜索、编辑、归档、删除和继续处理；
 - 受控词性集合（名词、动词、形容词等）应用于手动编辑、AI 生成/修卡、句子分析和 JLPT 导入；
 - 词汇音调按假名读音 mora 数提供 0–N 选项，详情页显示音调位置；
-- 多供应商 AI：DeepSeek、Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen、Grok 及自定义 OpenAI 兼容服务；填 Key 后获取模型列表选择模型；
+- 多供应商 AI：DeepSeek、Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen、Grok 及自定义 OpenAI 兼容服务；填 Key 后获取模型列表选择模型；Claude 使用 Anthropic Messages、Gemini 使用 Google 原生 generateContent 协议；
 - AI 单词/语法候选、句子分析和选中项目批量制卡，保存前均由用户确认。
 
 ### 本地资料与数据安全

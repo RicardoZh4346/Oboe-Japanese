@@ -283,6 +283,127 @@ struct AnthropicMessagesEnvelope: Decodable {
     }
 }
 
+// MARK: - Gemini generateContent
+
+/// Google Gemini 原生协议：
+/// `POST {base}/v1beta/models/{model}:generateContent`，`x-goog-api-key`
+/// 头鉴权；system 提示词走顶层 `systemInstruction`，用户文本为
+/// `contents[].parts[]`。首版不发送 `responseSchema`/`responseMimeType`
+/// 等结构化输出字段——JSON 契约与 Anthropic 一样靠提示词 + 严格
+/// decoder 保证，不虚构供应商能力。
+struct GeminiGenerateContentAdapter: AIMessageAdapter {
+    func endpointURL(for configuration: ResolvedAIConfiguration) throws -> URL {
+        let encodedModel = try Self.pathSegment(forModelID: configuration.modelID)
+        // 静态前缀复用共享拼接（处理尾斜杠与 baseURL 已含该路径的情形）；
+        // 模型段已 percent-encode，必须经 percentEncodedPath 追加——
+        // 走 path setter 会把 % 二次编码。
+        let modelsBase = try appendingEndpointPath(
+            "v1beta/models",
+            to: configuration.baseURL
+        )
+        guard var components = URLComponents(
+            url: modelsBase,
+            resolvingAgainstBaseURL: false
+        ) else {
+            throw AIConnectionError.malformedResponse
+        }
+        components.percentEncodedPath += "/\(encodedModel):generateContent"
+        guard let url = components.url else {
+            throw AIConnectionError.malformedResponse
+        }
+        return url
+    }
+
+    /// 模型 ID 编码为单个路径段。`/` 直接拒绝——`models/x` 这类残留
+    /// 形式绝不能被当成路径分隔符注入；其余非路径段字符（空格等）
+    /// percent-encode。空 ID 或编码失败一律 fail-fast，不发畸形请求。
+    static func pathSegment(forModelID modelID: String) throws -> String {
+        guard !modelID.isEmpty, !modelID.contains("/") else {
+            throw AIConnectionError.unsupportedConfiguration(statusCode: 0)
+        }
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        guard let encoded = modelID.addingPercentEncoding(
+            withAllowedCharacters: allowed
+        ), !encoded.isEmpty else {
+            throw AIConnectionError.unsupportedConfiguration(statusCode: 0)
+        }
+        return encoded
+    }
+
+    func applyProtocolHeaders(to request: inout URLRequest, credential: String) {
+        request.setValue(credential, forHTTPHeaderField: "x-goog-api-key")
+    }
+
+    func requestBody(
+        for exchange: AIMessageExchange,
+        configuration: ResolvedAIConfiguration
+    ) throws -> Data {
+        let body: [String: Any] = [
+            "systemInstruction": ["parts": [["text": exchange.systemPrompt]]],
+            "contents": [
+                ["role": "user", "parts": [["text": exchange.userPrompt]]]
+            ],
+            "generationConfig": [
+                "maxOutputTokens": exchange.maximumOutputTokens
+            ]
+        ]
+        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    func content(fromResponseBody body: Data) throws -> String {
+        let envelope: GeminiGenerateContentEnvelope
+        do {
+            envelope = try JSONDecoder().decode(
+                GeminiGenerateContentEnvelope.self,
+                from: body
+            )
+        } catch {
+            throw AIConnectionError.malformedResponse
+        }
+        // candidates 缺失或为空（含 promptFeedback 拦截的情形）→ 空响应。
+        guard let candidate = envelope.candidates?.first else {
+            throw AIConnectionError.emptyResponse
+        }
+        // MAX_TOKENS → 截断；其余非 STOP 的 finishReason
+        // （SAFETY/RECITATION/OTHER 等）对本契约都是非法收尾。
+        // finishReason 缺失同样视为非法：非流式响应中完成态 candidate
+        // 必带该字段，与 Anthropic adapter 的严格语义保持一致。
+        if candidate.finishReason == "MAX_TOKENS" {
+            throw AIConnectionError.truncatedResponse
+        }
+        guard candidate.finishReason == "STOP" else {
+            throw AIConnectionError.malformedResponse
+        }
+        let parts = candidate.content?.parts ?? []
+        guard parts.allSatisfy({ $0.text != nil }) else {
+            // 非文本 part（functionCall/inlineData 等）——契约之外。
+            throw AIConnectionError.malformedResponse
+        }
+        let content = parts.compactMap(\.text).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { throw AIConnectionError.emptyResponse }
+        return content
+    }
+}
+
+struct GeminiGenerateContentEnvelope: Decodable {
+    let candidates: [Candidate]?
+
+    struct Candidate: Decodable {
+        let content: Content?
+        let finishReason: String?
+    }
+
+    struct Content: Decodable {
+        let parts: [Part]?
+    }
+
+    struct Part: Decodable {
+        let text: String?
+    }
+}
+
 // MARK: - 分发
 
 /// 按配置的协议族分发执行 adapter。
@@ -291,9 +412,8 @@ struct AnthropicMessagesEnvelope: Decodable {
 /// - `.dashScope`：阿里官方 OpenAI 兼容模式
 ///   （`{base}/compatible-mode/v1/chat/completions`）。
 /// - `.anthropic`：Anthropic Messages。
-/// - `.gemini`：暂无执行 adapter——其 OpenAI 兼容端点位于
-///   `/v1beta/openai/` 且鉴权语义不同，原生执行接入属后续工作；
-///   这里明确抛 `unsupportedConfiguration` 而不是静默发错格式。
+/// - `.gemini`：Google 原生 `generateContent`
+///   （`x-goog-api-key` 鉴权，模型 ID 在 URL 路径中）。
 enum AIMessageAdapterRegistry {
     static func adapter(
         for configuration: ResolvedAIConfiguration
@@ -308,7 +428,7 @@ enum AIMessageAdapterRegistry {
         case .anthropic:
             return AnthropicMessagesAdapter()
         case .gemini:
-            throw AIConnectionError.unsupportedConfiguration(statusCode: 0)
+            return GeminiGenerateContentAdapter()
         }
     }
 
@@ -343,6 +463,18 @@ struct AIRequestExecutor: Sendable {
         configuration: ResolvedAIConfiguration,
         credential: String
     ) async throws -> String {
+        // 能力 fail-fast：供应商不支持生成、或当前输出模式不在其能力集内时
+        // 不发请求直接拒绝。custom 取 OpenAI 兼容默认能力，不会被误拦。
+        let capabilities = AIProviderPresetRegistry.capabilities(
+            for: configuration.serviceKind
+        )
+        guard capabilities.supportsGeneration,
+              capabilities.supportedOutputModes.contains(
+                  configuration.responseFormatMode
+              )
+        else {
+            throw AIConnectionError.capabilityMismatch
+        }
         let adapter = try AIMessageAdapterRegistry.adapter(for: configuration)
         let request = try adapter.makeRequest(
             for: exchange,
