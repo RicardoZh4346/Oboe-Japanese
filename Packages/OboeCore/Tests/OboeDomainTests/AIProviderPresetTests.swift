@@ -104,16 +104,16 @@ final class AIProviderPresetTests: XCTestCase {
         XCTAssertNil(AIConfigurationDraft.deepSeekDefault.modelID)
     }
 
-    func testValidatorForcesPresetNameURLAndFormatRegardlessOfDraft() throws {
+    func testValidatorForcesPresetNameAndFormatButKeepsEditedHTTPSURL() throws {
         var draft = AIConfigurationDraft.preset(.claude)
         draft.serviceName = "随便写"
-        draft.baseURL = "http://evil.example"
+        draft.baseURL = "https://proxy.example.com/anthropic/"
         draft.responseFormatMode = .jsonSchema
         draft.modelID = "claude-sonnet-test"
 
         let configuration = try AIConfigurationValidator.validate(draft, credentialID: UUID())
         XCTAssertEqual(configuration.serviceName, "Claude（Anthropic）")
-        XCTAssertEqual(configuration.baseURL.absoluteString, "https://api.anthropic.com")
+        XCTAssertEqual(configuration.baseURL.absoluteString, "https://proxy.example.com/anthropic")
         XCTAssertEqual(configuration.responseFormatMode, .promptedJSON)
         XCTAssertEqual(configuration.modelID, "claude-sonnet-test")
     }
