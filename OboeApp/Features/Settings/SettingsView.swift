@@ -422,10 +422,9 @@ struct SettingsView: View {
             } message: {
                 Text("之后使用 AI 功能时，当前输入和你选择的语境会发送到所配置的服务。Oboe 不会上传整个牌组或学习历史。")
             }
-            .confirmationDialog(
+            .alert(
                 "删除本机保存的 API Key？",
-                isPresented: $showRemoveAPIKeyConfirmation,
-                titleVisibility: .visible
+                isPresented: $showRemoveAPIKeyConfirmation
             ) {
                 Button("删除 API Key", role: .destructive) {
                     removeAPIKey()
@@ -594,24 +593,11 @@ struct SettingsView: View {
                 .autocorrectionDisabled()
                 .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
                 .accessibilityIdentifier("ai-service-name-field")
-            TextField(
-                "https://example.com/v1",
-                text: Binding(
-                    get: { aiDraft.baseURL },
-                    set: { newValue in
-                        aiDraft.baseURL = newValue
-                        invalidateAIModelSelection()
-                    }
-                )
-            )
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
-                .accessibilityIdentifier("ai-base-url-field")
+            aiBaseURLField(title: "https://example.com/v1")
         } else {
-            LabeledContent("服务地址", value: aiDraft.baseURL)
-                .accessibilityIdentifier("ai-base-url-readonly")
+            // 预设服务预填官方地址但可改（代理/网关场景）；
+            // 改动地址会失效已选模型与已测状态，域名变化需重填 Key。
+            aiBaseURLField(title: "服务地址")
         }
 
         if let providerNote = AIProviderPresetRegistry.preset(for: aiDraft.serviceKind)?.note {
@@ -626,6 +612,28 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("ai-openai-billing-note")
         }
+    }
+
+    /// 服务地址输入框（所有服务可编辑）。仅在文本真正变化时才失效
+    /// 已选模型——SwiftUI 的输入框在二次挂载时可能重放 `set("")`，
+    /// 无守卫会把刚从模型页带回的选择清空。
+    private func aiBaseURLField(title: String) -> some View {
+        TextField(
+            title,
+            text: Binding(
+                get: { aiDraft.baseURL },
+                set: { newValue in
+                    guard newValue != aiDraft.baseURL else { return }
+                    aiDraft.baseURL = newValue
+                    invalidateAIModelSelection()
+                }
+            )
+        )
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .keyboardType(.URL)
+        .disabled(isLoadingAIConfiguration || isSavingAIConfiguration || isTestingAIConnection)
+        .accessibilityIdentifier("ai-base-url-field")
     }
 
     /// 模型选择入口：已选显示 modelID，未选显示「未选择」；
@@ -680,6 +688,9 @@ struct SettingsView: View {
             text: Binding(
                 get: { apiKeyInput },
                 set: { newValue in
+                    // 仅真实编辑才失效已选模型——字段在二级页返回重新挂载时
+                    // 可能重放一次 `set`（值为当前文本），不能据此清空选择。
+                    guard newValue != apiKeyInput else { return }
                     apiKeyInput = newValue
                     invalidateAIModelSelection()
                 }

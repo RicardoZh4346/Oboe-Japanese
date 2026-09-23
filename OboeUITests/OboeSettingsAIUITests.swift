@@ -139,6 +139,41 @@ final class OboeSettingsAIUITests: XCTestCase {
         XCTAssertTrue(keyConfigured.exists)
     }
 
+    // MARK: - 手动输 Key → 获取 → 选择（回归：SecureField 重挂载重放 set 不得清选择）
+
+    @MainActor
+    func testManualKeyEntryThenModelSelectSticks() {
+        let app = launchApp() // 不预置 Key——走 SecureField 手动输入路径
+        openSettings(in: app)
+
+        let keyField = app.secureTextFields["ai-api-key-field"]
+        revealExistence(keyField, in: app)
+        keyField.tap()
+        // 不收键盘——resign 会触发系统 AutoFill「保存密码？」表盖住二级页。
+        keyField.typeText("sk-manual-test")
+
+        openModelPicker(in: app)
+        dismissSystemPasswordSavePrompt(in: app)
+        let fetch = app.buttons["ai-model-fetch-button"]
+        XCTAssertTrue(fetch.waitForExistence(timeout: 5))
+        fetch.tap()
+
+        let optionA = app.buttons["ai-model-option-uitest-deepseek-model-a"]
+        XCTAssertTrue(optionA.waitForExistence(timeout: 10))
+        optionA.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["设置"].waitForExistence(timeout: 5),
+            "点选模型后应回到设置页"
+        )
+        let selectedRow = app.descendants(matching: .any)["ai-model-selection-link"]
+        revealExistence(selectedRow, in: app)
+        XCTAssertTrue(
+            selectedRow.label.contains("uitest-deepseek-model-a"),
+            "点选后模型行仍显示：\(selectedRow.label)"
+        )
+    }
+
     // MARK: - 取消在途获取
 
     @MainActor
@@ -271,23 +306,25 @@ final class OboeSettingsAIUITests: XCTestCase {
         )
     }
 
-    // MARK: - 预设地址只读 / 自定义可编辑 / preset.note（req 2/3）
+    // MARK: - 预设地址可编辑 / 自定义可编辑 / preset.note（req 2/3）
 
     @MainActor
-    func testPresetURLReadOnlyNotesAndCustomEditable() {
+    func testPresetURLEditableNotesAndCustomEditable() {
         let app = launchApp()
         openSettings(in: app)
 
-        // 预设供应商地址只读——没有 ai-base-url-field 输入框。
-        let readonlyURL = app
-            .descendants(matching: .any)["ai-base-url-readonly"]
-        revealExistence(readonlyURL, in: app)
-        XCTAssertTrue(readonlyURL.exists)
-        XCTAssertFalse(app.textFields["ai-base-url-field"].exists)
+        // 预设供应商地址可编辑——输入框预填官方地址。
+        let urlField = app.textFields["ai-base-url-field"]
+        revealExistence(urlField, in: app)
+        XCTAssertTrue(urlField.exists)
+        XCTAssertEqual(
+            urlField.value as? String, "https://api.deepseek.com",
+            "预设服务应预填官方地址，实为 \(urlField.value as? String ?? "nil")"
+        )
 
         let picker = app.descendants(matching: .any)["ai-service-picker"]
 
-        // req 3：Qwen 显示地域/专属域名说明。
+        // req 3：Qwen 显示地域/专属域名说明，地址预填为官方域名。
         picker.tap()
         let qwen = app.buttons["Qwen（通义千问）"]
         XCTAssertTrue(qwen.waitForExistence(timeout: 3))
@@ -295,6 +332,10 @@ final class OboeSettingsAIUITests: XCTestCase {
         let providerNote = app.staticTexts["ai-provider-note"]
         revealExistence(providerNote, in: app)
         XCTAssertTrue(providerNote.exists)
+        revealExistence(urlField, in: app)
+        XCTAssertEqual(
+            urlField.value as? String, "https://dashscope.aliyuncs.com"
+        )
 
         // req 12：OpenAI 计费边界说明。
         picker.tap()
@@ -311,12 +352,45 @@ final class OboeSettingsAIUITests: XCTestCase {
         let custom = app.buttons["自定义兼容服务"]
         XCTAssertTrue(custom.waitForExistence(timeout: 3))
         custom.tap()
-        let urlField = app.textFields["ai-base-url-field"]
         revealExistence(urlField, in: app)
         XCTAssertTrue(urlField.exists)
         XCTAssertTrue(
             app.textFields["ai-service-name-field"].exists
         )
+    }
+
+    // MARK: - 删除已保存 Key：居中的破坏性确认弹窗
+
+    @MainActor
+    func testRemoveAPIKeyShowsAlertAndDeletes() {
+        let app = launchApp(
+            environment: ["OBOE_UI_TEST_AI_KEY": "1"]
+        )
+        openSettings(in: app)
+
+        let keyConfigured = app.descendants(matching: .any)["ai-key-configured"]
+        revealExistence(keyConfigured, in: app)
+        XCTAssertTrue(keyConfigured.exists)
+
+        let remove = app.buttons["ai-remove-key-button"]
+        reveal(remove, in: app)
+        remove.tap()
+
+        // 居中 alert（不是贴边 action sheet）；取消后 Key 仍在。
+        let alert = app.alerts["删除本机保存的 API Key？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        alert.buttons["取消"].tap()
+        XCTAssertFalse(alert.exists)
+        revealExistence(keyConfigured, in: app)
+        XCTAssertTrue(keyConfigured.exists)
+
+        // 确认删除：Key 标记消失、出现「尚未配置」状态。
+        reveal(remove, in: app)
+        remove.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 3))
+        alert.buttons["删除 API Key"].tap()
+        let unconfigured = app.descendants(matching: .any)["ai-key-not-configured"]
+        XCTAssertTrue(unconfigured.waitForExistence(timeout: 5))
     }
 
     // MARK: - 关闭 AI 不删除 Key（req 10）
@@ -412,6 +486,17 @@ final class OboeSettingsAIUITests: XCTestCase {
         XCTAssertTrue(
             app.navigationBars["选择模型"].waitForExistence(timeout: 5)
         )
+    }
+
+    /// iOS 在 SecureField 失焦后可能弹系统「保存密码？」表（系统进程托管，
+    /// 不出现在 app.sheets，但按钮在 app 层级内可查）。出现则点「以后」。
+    @MainActor
+    private func dismissSystemPasswordSavePrompt(in app: XCUIApplication) {
+        let notNow = app.buttons["以后"]
+        if notNow.waitForExistence(timeout: 4) {
+            notNow.tap()
+            _ = notNow.waitForNonExistence(timeout: 3)
+        }
     }
 
     /// List 懒挂载 + 视口边缘行可能已挂载但不可命中：粗扫定位，

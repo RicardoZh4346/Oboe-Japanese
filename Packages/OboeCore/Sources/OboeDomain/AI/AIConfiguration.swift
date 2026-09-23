@@ -17,8 +17,9 @@ public enum AIServiceKind: String, CaseIterable, Codable, Sendable {
         AIProviderPresetRegistry.preset(for: self)?.displayName ?? "自定义兼容服务"
     }
 
-    /// 预设供应商的地址、协议与响应格式一律以注册表为准；
-    /// 只有自定义服务允许用户填写 baseURL / serviceName / responseFormatMode。
+    /// 预设供应商的协议与响应格式以注册表为准；服务地址以预设为初始值、
+    /// 用户可改（代理/网关场景）。只有自定义服务允许填写 serviceName
+    /// 与 responseFormatMode。
     public var isCustomEndpoint: Bool { self == .custom }
 }
 
@@ -266,21 +267,16 @@ extension AIConfigurationError: LocalizedError {
 
 public enum AIConfigurationValidator {
     /// 校验草稿并产出可持久化的 `AIConfiguration`：`modelID` 允许为空。
-    /// 预设供应商的名称、地址、响应格式一律以注册表为准，忽略草稿对应字段。
+    /// 预设供应商的名称与响应格式以注册表为准；服务地址尊重草稿——
+    /// 预设地址只是输入框的初始值，用户可改成代理/网关地址。
     public static func validate(
         _ draft: AIConfigurationDraft,
         credentialID: UUID
     ) throws -> AIConfiguration {
         let preset = AIProviderPresetRegistry.preset(for: draft.serviceKind)
-        let serviceName: String
-        let baseURLText: String
-        if let preset {
-            serviceName = preset.displayName
-            baseURLText = preset.baseURL
-        } else {
-            serviceName = draft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-            baseURLText = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
+        let serviceName = preset?.displayName
+            ?? draft.serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURLText = draft.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !serviceName.isEmpty else { throw AIConfigurationError.serviceNameRequired }
         guard serviceName.count <= 80 else { throw AIConfigurationError.serviceNameTooLong }

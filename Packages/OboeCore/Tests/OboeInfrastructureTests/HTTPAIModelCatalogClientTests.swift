@@ -47,6 +47,43 @@ final class HTTPAIModelCatalogClientTests: XCTestCase {
         }
     }
 
+    func testPresetWithUserEditedBaseURLFetchesFromEditedURL() async throws {
+        // 预设地址只是初始值：用户把 Kimi 改为网关地址后，
+        // 模型列表必须请求编辑后的 baseURL，协议族/路径/鉴权头仍按注册表。
+        var draft = AIConfigurationDraft.preset(.kimi)
+        draft.baseURL = "https://gateway.example.com/moonshot"
+        let configuration = try AIConfigurationValidator.validate(
+            draft, credentialID: UUID()
+        )
+        let recorder = CatalogRequestRecorder()
+        let client = HTTPAIModelCatalogClient(
+            transport: StubCatalogTransport(
+                handler: { _ in
+                    AIHTTPResponse(
+                        statusCode: 200,
+                        headers: [:],
+                        body: Self.openAIListBody(ids: ["m-1"])
+                    )
+                },
+                recorder: recorder
+            )
+        )
+        _ = try await client.fetchModels(
+            configuration: configuration,
+            credential: "catalog-test-key"
+        )
+        let requests = await recorder.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://gateway.example.com/moonshot/models"
+        )
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer catalog-test-key"
+        )
+    }
+
     func testAnthropicUsesAPIKeyHeaderAndVersion() async throws {
         let recorder = CatalogRequestRecorder()
         let configuration = try makeConfiguration(kind: .claude)

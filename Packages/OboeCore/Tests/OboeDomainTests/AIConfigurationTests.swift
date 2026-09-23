@@ -3,10 +3,12 @@ import XCTest
 @testable import OboeDomain
 
 final class AIConfigurationTests: XCTestCase {
-    func testDeepSeekPresetUsesOfficialHTTPSEndpointAndEditableModel() throws {
+    func testDeepSeekPresetPersistsEditedEndpointAndCanonicalName() throws {
+        // 预设地址可编辑（代理/网关场景）：持久化用户改过的地址，
+        // 服务名仍以注册表规范名为准。
         var draft = AIConfigurationDraft.deepSeekDefault
         draft.serviceName = "被忽略"
-        draft.baseURL = "http://unsafe.example"
+        draft.baseURL = "https://proxy.example.com/v1/"
         draft.modelID = "  deepseek-v4-flash  "
 
         let configuration = try AIConfigurationValidator.validate(
@@ -16,9 +18,28 @@ final class AIConfigurationTests: XCTestCase {
 
         XCTAssertEqual(configuration.serviceKind, .deepSeek)
         XCTAssertEqual(configuration.serviceName, "DeepSeek")
-        XCTAssertEqual(configuration.baseURL.absoluteString, "https://api.deepseek.com")
+        XCTAssertEqual(
+            configuration.baseURL.absoluteString, "https://proxy.example.com/v1"
+        )
         XCTAssertEqual(configuration.modelID, "deepseek-v4-flash")
         XCTAssertFalse(configuration.isEnabled)
+
+        // 未编辑时沿用官方地址。
+        var untouched = AIConfigurationDraft.deepSeekDefault
+        untouched.modelID = "deepseek-v4-flash"
+        let official = try AIConfigurationValidator.validate(
+            untouched,
+            credentialID: UUID()
+        )
+        XCTAssertEqual(official.baseURL.absoluteString, "https://api.deepseek.com")
+
+        // 非法地址照常拒绝（预设同样走 HTTPS/凭据/查询校验）。
+        draft.baseURL = "http://unsafe.example"
+        XCTAssertThrowsError(
+            try AIConfigurationValidator.validate(draft, credentialID: UUID())
+        ) {
+            XCTAssertEqual($0 as? AIConfigurationError, .secureHTTPSRequired)
+        }
     }
 
     func testCustomEndpointRequiresHTTPSAndRejectsEmbeddedCredentialsOrQuery() throws {

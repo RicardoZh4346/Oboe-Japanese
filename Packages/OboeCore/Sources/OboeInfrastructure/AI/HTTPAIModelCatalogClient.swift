@@ -81,25 +81,22 @@ public struct HTTPAIModelCatalogClient: AIModelCatalogClient, Sendable {
     static func catalogEndpoint(
         for configuration: AIConfiguration
     ) throws -> AIModelCatalogEndpoint {
-        let baseURL: URL
         let listPath: String
         let protocolKind: AIProtocolKind
         let headerStyle: AIAPIKeyHeaderStyle
         if let preset = AIProviderPresetRegistry.preset(for: configuration.serviceKind) {
-            guard let presetURL = URL(string: preset.baseURL) else {
-                throw AIModelCatalogError.malformedResponse
-            }
-            baseURL = presetURL
+            // 预设服务：协议族/列表路径/鉴权头取注册表；baseURL 尊重持久化
+            // 配置——用户在设置里可把官方地址改为代理/网关地址。
             listPath = preset.modelListPath
             protocolKind = preset.protocolKind
             headerStyle = preset.apiKeyHeaderStyle
         } else {
             // 自定义服务：按 OpenAI 兼容约定在用户 baseURL 后拼 /models。
-            baseURL = configuration.baseURL
             listPath = "models"
             protocolKind = .openAICompatible
             headerStyle = .bearer
         }
+        let baseURL = configuration.baseURL
         let url = try endpointURL(baseURL: baseURL, listPath: listPath)
         let initialQueryItems: [URLQueryItem]
         switch protocolKind {
