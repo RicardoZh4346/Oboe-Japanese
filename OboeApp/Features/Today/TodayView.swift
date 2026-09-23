@@ -91,7 +91,7 @@ struct TodayView: View {
                     )
                 }
             }
-            .navigationTitle("今日")
+            .navigationTitle(streakTitle)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("刷新", systemImage: "arrow.clockwise") {
@@ -189,8 +189,15 @@ struct TodayView: View {
         }
     }
 
-    /// VoiceOver 顺序即此列顺序：连续天数→开始学习状态→主牌组（圆形
-    /// 按钮内部）→ 今日任务 → 每日统计 → 收集箱 → 可选提醒。
+    /// 连续天数并入导航大标题（「今日（已连续 N 天）」）；统计尚未
+    /// 载入时保持「今日」。
+    private var streakTitle: String {
+        guard let streak = model.currentStreak else { return "今日" }
+        return "今日（已连续 \(streak) 天）"
+    }
+
+    /// VoiceOver 顺序即此列顺序：主牌组→开始学习状态（圆形按钮内部）
+    /// → 今日任务 → 每日统计 → 收集箱 → 可选提醒。
     private func homeColumn(_ plan: TodayPlan, density: HomeDensity) -> some View {
         VStack(spacing: density.sectionSpacing) {
             studyEntry(plan, density: density)
@@ -220,7 +227,6 @@ struct TodayView: View {
             ) {
                 TodayStudyButton(
                     hero: hero,
-                    streak: model.currentStreak,
                     primaryDeckName: model.primaryDeckName,
                     density: density
                 )
@@ -230,7 +236,6 @@ struct TodayView: View {
         } else {
             TodayStudyButton(
                 hero: hero,
-                streak: model.currentStreak,
                 primaryDeckName: model.primaryDeckName,
                 density: density
             )
@@ -698,14 +703,13 @@ private enum HomeDensity {
     }
 }
 
-/// 圆形主 CTA（v0.5.5 Step 7）：整合连续学习天数、开始/等待/完成
-/// 状态与主牌组名。可学习时作为 NavigationLink 的 label 进入主牌组
-/// scope；其余状态为纯展示圆盘。辅助字号下退化为整宽卡片保证可读性。
-/// 圆盘在深浅色下都有明确边界：可操作态为 accent 渐变，其余为卡片
-/// 底色 + 描边。
+/// 圆形主 CTA（v0.5.5 Step 7）：整合开始/等待/完成状态与主牌组名；
+/// 连续天数并入导航大标题，不在圆盘内展示。可学习时作为
+/// NavigationLink 的 label 进入主牌组 scope；其余状态为纯展示圆盘。
+/// 辅助字号下退化为整宽卡片保证可读性。圆盘在深浅色下都有明确边界：
+/// 可操作态为 accent 渐变，其余为卡片底色 + 描边。
 private struct TodayStudyButton: View {
     let hero: HeroPresentation
-    let streak: Int?
     let primaryDeckName: String?
     let density: HomeDensity
 
@@ -727,17 +731,27 @@ private struct TodayStudyButton: View {
         }
     }
 
-    /// 圆盘版：自上而下 连续天数 → 图标 → 标题 → 状态 → 主牌组，
-    /// 即 VoiceOver 朗读顺序。
+    /// 圆盘版：自上而下 主牌组 → 标题 → 状态，即 VoiceOver 朗读顺序。
+    /// 可操作态无图标、标题加大；等待/完成等非可操作态保留状态图标。
     private var circleBody: some View {
-        VStack(spacing: OboeTheme.Spacing.xxs) {
-            streakPill
-            Image(systemName: hero.icon)
-                .font(.system(size: density.iconSize, weight: .semibold))
-                .foregroundStyle(hero.isActionable ? .white : hero.iconTint)
-                .accessibilityHidden(true)
+        VStack(
+            spacing: density == .mini
+                ? OboeTheme.Spacing.xs
+                : OboeTheme.Spacing.sm
+        ) {
+            if !hero.isActionable {
+                Image(systemName: hero.icon)
+                    .font(.system(size: density.iconSize, weight: .semibold))
+                    .foregroundStyle(hero.iconTint)
+                    .accessibilityHidden(true)
+            }
+            Text("主牌组 · \(primaryDeckName ?? "未设置")")
+                .font(.caption2)
+                .foregroundStyle(secondaryForeground)
+                .lineLimit(1)
+                .accessibilityIdentifier("today-primary-deck")
             Text(hero.title)
-                .font(density == .mini ? .headline : .title3)
+                .font(circleTitleFont)
                 .fontWeight(.bold)
                 .foregroundStyle(foreground)
             Text(hero.statusText)
@@ -746,11 +760,6 @@ private struct TodayStudyButton: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
                 .accessibilityIdentifier(hero.statusIdentifier)
-            Text("主牌组 · \(primaryDeckName ?? "未设置")")
-                .font(.caption2)
-                .foregroundStyle(secondaryForeground)
-                .lineLimit(1)
-                .accessibilityIdentifier("today-primary-deck")
         }
         .padding(OboeTheme.Spacing.md)
         .frame(width: density.circleDiameter, height: density.circleDiameter)
@@ -769,10 +778,18 @@ private struct TodayStudyButton: View {
         .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
     }
 
+    private var circleTitleFont: Font {
+        switch density {
+        case .regular: .title
+        case .compact: .title2
+        case .mini: .title3
+        case .accessibility: .title3
+        }
+    }
+
     /// 卡片版（辅助字号）：横向排布，文字随字号放大不裁切。
     private var cardBody: some View {
         VStack(alignment: .leading, spacing: OboeTheme.Spacing.sm) {
-            streakPill
             HStack(spacing: OboeTheme.Spacing.md) {
                 Image(systemName: hero.icon)
                     .font(.system(size: density.iconSize, weight: .semibold))
@@ -822,29 +839,6 @@ private struct TodayStudyButton: View {
                 )
         }
         .contentShape(RoundedRectangle(cornerRadius: OboeTheme.Radius.card, style: .continuous))
-    }
-
-    /// 连续天数小胶囊：无数据时不占位（nil 只在统计尚未载入时出现）。
-    @ViewBuilder
-    private var streakPill: some View {
-        if let streak {
-            if hero.isActionable {
-                Text("连续 \(streak) 天")
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(secondaryForeground)
-                    .accessibilityIdentifier("today-streak")
-            } else {
-                Text("连续 \(streak) 天")
-                    .font(.caption.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(secondaryForeground)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.08), in: Capsule())
-                    .accessibilityIdentifier("today-streak")
-            }
-        }
     }
 
     private var circleBackground: AnyView {
