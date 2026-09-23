@@ -54,3 +54,51 @@ jobs:
             echo "::error::navigation smoke test case was not executed or did not pass"
             exit 1
           }
+
+  app-unit-tests:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run OboeAppTests
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:OboeAppTests \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee app-tests.log
+          grep -q "OboeAppTests.xctest.*passed" app-tests.log || {
+            echo "::error::OboeAppTests bundle was not executed or did not pass"
+            exit 1
+          }
+
+  ipad-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run iPad navigation smoke
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPad")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee ipad-smoke.log
+          grep -q "testPrimaryNavigationSmoke.*passed" ipad-smoke.log || {
+            echo "::error::iPad navigation smoke test case was not executed or did not pass"
+            exit 1
+          }

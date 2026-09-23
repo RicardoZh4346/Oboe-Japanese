@@ -91,5 +91,9 @@ struct RootTabView: View {
                 }
                 .tag(PrimaryTab.settings)
         }
+        // iPad 上 TabView 默认 sidebarAdaptable 会把 tab 收进 sidebar；
+        // PR 6 的 RegularShell 接管 regular 宽度之前，固定底部 tab bar
+        // 保持与 iPhone 一致的信息架构。
+        .tabViewStyle(.tabBarOnly)
     }
 }
