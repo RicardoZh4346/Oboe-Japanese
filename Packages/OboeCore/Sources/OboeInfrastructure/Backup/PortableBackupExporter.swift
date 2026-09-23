@@ -82,7 +82,7 @@ public actor PortableBackupExporter {
         fileManager.createFile(atPath: pendingURL.path, contents: nil)
 
         do {
-            let result = try writeBackup(
+            let result = try Self.writeBackupRecords(
                 from: snapshot.url,
                 to: pendingURL,
                 appVersion: appVersion,
@@ -110,7 +110,9 @@ public actor PortableBackupExporter {
         }
     }
 
-    private func writeBackup(
+    /// 把一致的快照库写成完整 v6 NDJSON 流（manifest 行 + 记录行 + footer）。
+    /// 提为 static 供 v7 包导出复用——`records.ndjson` 与该文件逐字节同构。
+    static func writeBackupRecords(
         from snapshotURL: URL,
         to outputURL: URL,
         appVersion: String,
@@ -142,7 +144,7 @@ public actor PortableBackupExporter {
             let manifest: [String: Any] = [
                 "recordType": "manifest",
                 "format": PortableBackupFormat.identifier,
-                "formatVersion": Self.formatVersion,
+                "formatVersion": PortableBackupFormat.currentVersion,
                 "appVersion": appVersion,
                 "exportedAt": Self.iso8601String(from: exportedAt),
                 "encoding": "utf-8",

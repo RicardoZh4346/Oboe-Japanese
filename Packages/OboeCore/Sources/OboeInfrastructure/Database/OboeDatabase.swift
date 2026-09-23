@@ -90,7 +90,8 @@ public enum OboeDatabaseSchema {
         "v10_ai_repair_drafts",
         "v11_primary_deck",
         "v12_fill_vocabulary_directions",
-        "v13_note_deck_membership_and_pitch"
+        "v13_note_deck_membership_and_pitch",
+        "v14_attachments"
     ]
 
     public static let tableNames: Set<String> = [
@@ -111,7 +112,8 @@ public enum OboeDatabaseSchema {
         "inbox_processing_contexts",
         "capture_import_receipts",
         "inbox_commit_receipts",
-        "note_decks"
+        "note_decks",
+        "attachments"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -179,6 +181,8 @@ public enum OboeDatabaseSchema {
                 migrator.registerMigration(identifier, migrate: fillVocabularyDirections)
             case "v13_note_deck_membership_and_pitch":
                 migrator.registerMigration(identifier, migrate: createNoteDeckMembershipAndPitch)
+            case "v14_attachments":
+                migrator.registerMigration(identifier, migrate: createAttachmentsTable)
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")
             }
@@ -222,6 +226,29 @@ public enum OboeDatabaseSchema {
         guard inconsistent == 0 else {
             throw DatabaseError(message: "v13 backfill left \(inconsistent) notes without home membership")
         }
+    }
+
+    /// v14（便携备份 v7，设计 §11.1）：附件元数据表。`inbox_items.image_reference`
+    /// 语义上引用 `attachments.id`，但故意不加外键——老数据可能有指向已删除
+    /// 文件的宽松引用，强加 FK 会让既有行变成孤儿并阻塞迁移。资源 id 的字符集
+    /// 契约（[A-Za-z0-9_-]{1,128}）由写入方（InboxImageStore/恢复管线）保证，
+    /// 这里只约束长度下限与不可变字段的基本形态。
+    private static func createAttachmentsTable(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE attachments (
+                id TEXT PRIMARY KEY NOT NULL
+                    CHECK (length(id) > 0 AND length(id) <= 128),
+                relative_path TEXT NOT NULL CHECK (length(relative_path) > 0),
+                mime_type TEXT NOT NULL CHECK (length(mime_type) > 0),
+                byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+                sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+                pixel_width INTEGER CHECK (pixel_width IS NULL OR pixel_width > 0),
+                pixel_height INTEGER CHECK (pixel_height IS NULL OR pixel_height > 0),
+                created_at_ms INTEGER NOT NULL
+            );
+
+            CREATE INDEX attachments_on_sha256 ON attachments(sha256);
+            """)
     }
 
     private static func rebuildNotesForBuiltinJLPT(_ db: Database) throws {

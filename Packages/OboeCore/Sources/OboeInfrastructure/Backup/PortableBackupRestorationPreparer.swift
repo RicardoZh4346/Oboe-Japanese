@@ -67,6 +67,11 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
     public let backup: PortableBackupDataSummary
     public let current: PortableBackupDataSummary
     public let excludedScopes: [String]
+    /// v7 包恢复：已通过全量校验的附件落地目录（与附件存储根目录同构，
+    /// 平铺 `<id>.<ext>`），等待上层做原子 swap。v1–v6 恢复为 nil。
+    public let stagedAttachmentsDirectoryURL: URL?
+    /// v7 包 manifest 声明并通过校验的附件 descriptor；v1–v6 为空。
+    public let attachmentDescriptors: [AttachmentDescriptor]
 
     public init(
         id: UUID,
@@ -78,7 +83,9 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
         exportedAt: Date,
         backup: PortableBackupDataSummary,
         current: PortableBackupDataSummary,
-        excludedScopes: [String] = []
+        excludedScopes: [String] = [],
+        stagedAttachmentsDirectoryURL: URL? = nil,
+        attachmentDescriptors: [AttachmentDescriptor] = []
     ) {
         self.id = id
         self.temporaryDatabaseURL = temporaryDatabaseURL
@@ -90,6 +97,8 @@ public struct PreparedRestoration: Equatable, Sendable, Identifiable {
         self.backup = backup
         self.current = current
         self.excludedScopes = excludedScopes
+        self.stagedAttachmentsDirectoryURL = stagedAttachmentsDirectoryURL
+        self.attachmentDescriptors = attachmentDescriptors
     }
 
     /// Only the v3 contract carries Inbox records — restoring a v1/v2 backup
@@ -187,6 +196,8 @@ public actor PortableBackupRestorationPreparer {
         self.inboxImageResourceExists = inboxImageResourceExists
     }
 
+    /// v1–v6 明文 NDJSON 入口（行为不变）。v7 ZIP 包请走 `preparePackage`，
+    /// 或让 `prepareAutomatically` 按内容魔数自动分流。
     public func prepare(fileURL: URL) async throws -> PreparedRestoration {
         try Task.checkCancellation()
         let size = try Self.fileSize(at: fileURL)
@@ -206,7 +217,105 @@ public actor PortableBackupRestorationPreparer {
         )
         try removeAbandonedPreparationFiles()
 
+        return try await importPreparedBackup(
+            fileURL: fileURL,
+            preparationID: UUID(),
+            sourceFilename: fileURL.lastPathComponent,
+            sourceFormatVersionOverride: nil,
+            excludedScopesOverride: nil,
+            imageResourceExists: inboxImageResourceExists,
+            attachmentDescriptors: [],
+            stagedAttachmentsDirectoryURL: nil
+        )
+    }
+
+    /// 按内容分流：ZIP magic → v7 包路径，其余 → v1–v6 NDJSON 路径。
+    /// 识别只看文件内容不看扩展名（设计 §11.3）。
+    public func prepareAutomatically(
+        fileURL: URL,
+        packageLimits: PortableBackupPackageLimits = PortableBackupPackageLimits()
+    ) async throws -> PreparedRestoration {
+        if PortableBackupPackageReader.isPackage(fileURL: fileURL) {
+            return try await preparePackage(fileURL: fileURL, packageLimits: packageLimits)
+        }
+        return try await prepare(fileURL: fileURL)
+    }
+
+    /// v7 ZIP 包入口。顺序：解压到随机临时目录 → 全量校验（manifest /
+    /// checksums / 逐附件 SHA-256 / MIME 魔数 / 像素）→ 附件目录 staging →
+    /// records.ndjson 走与 v1–v6 完全相同的导入管线。
+    ///
+    /// 任何一步失败都只清理临时产物——线上数据库与线上附件目录在 commit
+    /// （上层原子 swap）之前绝不被触碰。
+    public func preparePackage(
+        fileURL: URL,
+        packageLimits: PortableBackupPackageLimits = PortableBackupPackageLimits()
+    ) async throws -> PreparedRestoration {
+        try Task.checkCancellation()
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: workingDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try removeAbandonedPreparationFiles()
+
         let preparationID = UUID()
+        let extractionURL = workingDirectoryURL.appendingPathComponent(
+            ".extracting-\(preparationID.uuidString.lowercased())",
+            isDirectory: true
+        )
+        let stagedURL = workingDirectoryURL.appendingPathComponent(
+            "staged-attachments-\(preparationID.uuidString.lowercased())",
+            isDirectory: true
+        )
+
+        let reader = PortableBackupPackageReader(limits: packageLimits)
+        do {
+            // 校验全部在 reader 内完成；返回时目录内容已是可信形态。
+            let extracted = try reader.extractAndValidate(
+                fileURL: fileURL,
+                to: extractionURL
+            )
+            try Task.checkCancellation()
+            // 附件目录移出解压目录成为独立 staging 产物，随 PreparedRestoration
+            // 交给上层；manifest/checksums/records 随解压目录在导入后清理。
+            try fileManager.moveItem(
+                at: extracted.attachmentsDirectoryURL,
+                to: stagedURL
+            )
+            let stagedIDs = Set(extracted.attachmentDescriptors.map(\.id))
+            let restoration = try await importPreparedBackup(
+                fileURL: extracted.recordsURL,
+                preparationID: preparationID,
+                sourceFilename: fileURL.lastPathComponent,
+                sourceFormatVersionOverride: extracted.manifest.formatVersion,
+                excludedScopesOverride: extracted.manifest.excludedScopes,
+                imageResourceExists: { stagedIDs.contains($0) },
+                attachmentDescriptors: extracted.attachmentDescriptors,
+                stagedAttachmentsDirectoryURL: stagedURL
+            )
+            try? fileManager.removeItem(at: extractionURL)
+            return restoration
+        } catch {
+            try? fileManager.removeItem(at: extractionURL)
+            try? fileManager.removeItem(at: stagedURL)
+            throw error
+        }
+    }
+
+    /// v1–v6 与 v7 共用的导入主体：临时库 → 校验汇总 → 备份成 prepared 库。
+    /// `sourceFormatVersionOverride`/`excludedScopesOverride` 只影响回报值
+    /// （v7 的 sourceFormatVersion 是包版本 7，内嵌记录流仍是 v6 契约）。
+    private func importPreparedBackup(
+        fileURL: URL,
+        preparationID: UUID,
+        sourceFilename: String,
+        sourceFormatVersionOverride: Int?,
+        excludedScopesOverride: [String]?,
+        imageResourceExists: @escaping @Sendable (String) -> Bool,
+        attachmentDescriptors: [AttachmentDescriptor],
+        stagedAttachmentsDirectoryURL: URL?
+    ) async throws -> PreparedRestoration {
         let pendingURL = workingDirectoryURL.appendingPathComponent(
             ".preparing-\(preparationID.uuidString.lowercased()).sqlite"
         )
@@ -233,8 +342,22 @@ public actor PortableBackupRestorationPreparer {
                 }
                 try Self.finalizeImportedInboxData(
                     in: db,
-                    resourceExists: inboxImageResourceExists
+                    resourceExists: imageResourceExists
                 )
+                // v7：manifest 声明的附件元数据随恢复一并登记。所有 descriptor
+                // 已通过包校验，这里只做幂等插入（临时库为空表，不会冲突）。
+                if !attachmentDescriptors.isEmpty {
+                    let createdAtMilliseconds = Int64(
+                        (manifest.exportedAt.timeIntervalSince1970 * 1_000).rounded()
+                    )
+                    for descriptor in attachmentDescriptors {
+                        try GRDBAttachmentRepository.insert(
+                            descriptor: descriptor,
+                            createdAtMilliseconds: createdAtMilliseconds,
+                            in: db
+                        )
+                    }
+                }
                 try Self.finalizeImportedDraftData(in: db)
                 // v12：旧备份可能只含部分方向卡——恢复的库已越过迁移点，
                 // 这里重跑同一补齐逻辑，保证词汇词条三方向齐全。
@@ -269,14 +392,17 @@ public actor PortableBackupRestorationPreparer {
             return PreparedRestoration(
                 id: preparationID,
                 temporaryDatabaseURL: preparedURL,
-                sourceFilename: fileURL.lastPathComponent,
-                sourceFormatVersion: manifest.sourceFormatVersion,
+                sourceFilename: sourceFilename,
+                sourceFormatVersion: sourceFormatVersionOverride
+                    ?? manifest.sourceFormatVersion,
                 preparedFormatVersion: PortableBackupFormat.currentVersion,
                 sourceAppVersion: manifest.appVersion,
                 exportedAt: manifest.exportedAt,
                 backup: backupSummary,
                 current: currentSummary,
-                excludedScopes: manifest.excludedScopes
+                excludedScopes: excludedScopesOverride ?? manifest.excludedScopes,
+                stagedAttachmentsDirectoryURL: stagedAttachmentsDirectoryURL,
+                attachmentDescriptors: attachmentDescriptors
             )
         } catch {
             try? temporaryDatabase.close()
@@ -293,6 +419,13 @@ public actor PortableBackupRestorationPreparer {
             return
         }
         Self.removeDatabaseFiles(at: preparation.temporaryDatabaseURL)
+        // v7：staging 附件目录与 prepared 库同生命周期，一并清理。
+        if let stagedURL = preparation.stagedAttachmentsDirectoryURL,
+           stagedURL.deletingLastPathComponent().standardizedFileURL
+                == workingDirectoryURL.standardizedFileURL,
+           stagedURL.lastPathComponent.hasPrefix("staged-attachments-") {
+            try? FileManager.default.removeItem(at: stagedURL)
+        }
     }
 
     private func removeAbandonedPreparationFiles() throws {
@@ -302,8 +435,15 @@ public actor PortableBackupRestorationPreparer {
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         )
-        for url in urls where url.lastPathComponent.hasPrefix("prepared-") {
-            Self.removeDatabaseFiles(at: url)
+        for url in urls {
+            let name = url.lastPathComponent
+            if name.hasPrefix("prepared-") {
+                Self.removeDatabaseFiles(at: url)
+            } else if name.hasPrefix("staged-attachments-") {
+                // 失去 prepared 库陪伴的 staging 附件目录是中断恢复留下的
+                // 孤儿——与其对应的 prepared 库在上面已被清理。
+                try? fileManager.removeItem(at: url)
+            }
         }
         // `.skipsHiddenFiles` intentionally omits in-progress files, so scan the
         // names explicitly as well to clean up a preparation interrupted by exit.
@@ -311,8 +451,13 @@ public actor PortableBackupRestorationPreparer {
             at: workingDirectoryURL,
             includingPropertiesForKeys: nil
         )
-        for url in allURLs where url.lastPathComponent.hasPrefix(".preparing-") {
-            Self.removeDatabaseFiles(at: url)
+        for url in allURLs {
+            let name = url.lastPathComponent
+            if name.hasPrefix(".preparing-") {
+                Self.removeDatabaseFiles(at: url)
+            } else if name.hasPrefix(".extracting-") {
+                try? fileManager.removeItem(at: url)
+            }
         }
     }
 }
