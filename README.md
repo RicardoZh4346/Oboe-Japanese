@@ -4,22 +4,21 @@
 [![Release](https://img.shields.io/github/v/release/RicardoZh4346/Oboe-Japanese)](https://github.com/RicardoZh4346/Oboe-Japanese/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料采集、AI 辅助整理、制卡和 FSRS-6 间隔复习放在同一个本地工作流里；没有账号、业务后端或云同步，AI 默认关闭。
+Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它把资料采集、AI 辅助整理、制卡和 FSRS-6 间隔复习放在同一个本地工作流里；没有账号、业务后端或云同步，AI 默认关闭。
 
-当前版本为 **v0.5.5（构建号 48）**，最低支持 iOS 17，仅支持 iPhone。
+当前版本为 **v0.5.8（构建号 49）**，最低支持 iOS / iPadOS 17。
 
 > GitHub Release 提供 arm64 未签名 IPA。安装前需要使用你自己的证书重新签名；项目不包含开发团队、证书、描述文件或 App Store 上传配置。
 
-## v0.5.5 更新
+## v0.5.8 更新
 
-- **三个根 Tab**：导航精简为「今日 / 牌组 / 设置」，独立「添加」入口移除；新建词汇、语法和句子分析统一从牌组详情进入，JLPT 导入需显式选择目标牌组。
-- **今日页重做**：圆形「开始学习」按钮展示学习状态与主牌组名，连续学习天数并入导航标题，下方依次是紧凑任务摘要和「每日统计 / 收集箱」等宽快捷入口；常规字号无需滚动，所有二级及更深页面自动隐藏底部导航。
-- **30 天逐日统计与连续天数**：今日页可进入每日统计，按学习日（04:00 边界）展示最近 30 天新学与复习记录；撤销评分后统计与连续天数同步更新。
-- **主牌组学习范围**：今日学习只覆盖主牌组；无牌组时不能制卡或学习，牌组详情仍可按单个牌组学习。
-- **重复内容复用**：添加已存在的单词或语法时可直接「加入当前牌组」——同一 Note 归属多个牌组共享一份卡片、调度进度与复习日志，不复制数据；仍可选择明确另建义项。
-- **主动回忆默认开启**：新安装的「中文→日文输入」与「听力输入」回忆选项默认开启；已有用户的开关选择保持不变。
-- **AI 服务扩展**：除 DeepSeek 与自定义兼容服务外，新增 Kimi、GLM、ChatGPT / OpenAI API、Claude、Gemini、Qwen 与 Grok 预设；预设服务地址预填官方 URL、可改为代理/网关地址；填入 API Key 后先获取模型列表再选择模型，「保存并测试」成功后才可启用；Claude 使用 Anthropic Messages 协议，Gemini 使用 Google 原生 generateContent 协议。
-- **兼容不变**：数据库仍为 schema v13、备份仍为 v6，v1～v6 备份继续可恢复，旧库升级保留全部设置与牌组归属。
+- **正式支持 iPad**：App、分享扩展与测试目标均支持 iPhone / iPad；布局依据当前窗口宽度自适应，兼容横竖屏、分屏与 Stage Manager，不依赖物理屏幕尺寸。
+- **双形态导航**：iPhone 与窄窗口使用「今日 / 牌组」双 Tab，设置入口移至今日页右上角齿轮并以 sheet 打开；常规宽度 iPad 使用侧边栏，牌组、收集箱和设置提供列表—内容—详情分栏。
+- **宽屏阅读与会话续存**：今日页和复习页采用限宽居中布局；窗口跨越 compact / regular 阈值时，正在进行的复习会话、选择和导航语义继续保留。
+- **便携备份 v7**：`.oboe-backup` 升级为带 manifest、校验和、数据库记录及图片附件的 ZIP 包；恢复采用预检、附件目录暂存、原子交换与 journal 崩溃恢复，并继续兼容 v1～v6 明文备份。
+- **Gemini 生成闭环**：Gemini 已接入原生 `generateContent` 协议，模型发现、连接测试、制卡、句子分析和 AI 修卡共用明确的供应商能力约束。
+- **交互与可靠性修复**：今日页快捷磁贴只响应可见卡片区域；设置入口、弹窗与键盘快捷键按设备形态收敛；启动测试数据在界面进入 ready 前完成，消除首屏状态竞态。
+- **架构与质量门槛**：运行期服务改为原子发布的 Feature 依赖容器，Deck、添加和复习的大型呈现模型已拆分；新增 App 单元测试、iPad smoke 与真实执行断言。数据库 schema 为 v14，备份包格式为 v7。
 
 ## 主要功能
 
@@ -33,6 +32,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 - 可选「中文→日文输入」与「听力输入」回忆（新用户默认开启），作答后与标准答案逐字对比再自评；听力卡问题面不泄题、语音不可用时安全降级；
 - AI 修卡对易错卡给出最小上下文建议，逐字段预览差异、显式确认后原子写入；
 - 设备 `ja-JP` 系统语音朗读，核心学习流程可在飞行模式使用。
+- iPhone / 窄窗口使用双 Tab 与设置齿轮；常规宽度 iPad 使用自适应侧边栏和多栏导航，并支持常用键盘快捷键。
 
 ### 采集与制卡
 
@@ -49,31 +49,31 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 
 - 日文、假名、平/片假名、半角及中文本地搜索；
 - 内置 8,334 个社区 JLPT N5–N1 参考词汇，带可追溯音调与中文例句翻译，可离线浏览、搜索、朗读并幂等导入；
-- 明文 `.oboe-backup` 全量导出、严格预检、完整替换恢复和三份本机滚动快照；
+- `.oboe-backup` v7 全量导出学习数据与图片附件，提供逐文件校验、严格预检、原子恢复和三份本机滚动快照；
 - API Key 仅保存在 iOS Keychain，不写入 SQLite、日志或可携带备份；
 - 跟随系统、浅色和深色外观，支持辅助功能字号和 VoiceOver 语义。
 
 ## 获取与安装
 
-在 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 v0.5.5 对应的 `Oboe-v0.5.5.ipa`。该文件是 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
+在 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 v0.5.8 对应的 `Oboe-v0.5.8.ipa`。该文件是支持 iPhone / iPad 的 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
 
 > iLoader、LocalDevVPN 和 SideStore 均为第三方项目，不属于 Oboe，也不受本项目维护或担保。请只从其官方页面下载，不要向他人发送 Apple Account 验证信息或设备配对文件。
 
 ### 准备工作
 
-- 一台运行 iOS 17 或更高版本、已设置锁屏密码的 iPhone；
+- 一台运行 iOS / iPadOS 17 或更高版本、已设置锁屏密码的 iPhone 或 iPad；
 - 一个 Apple Account；
 - 一台用于首次安装的电脑和一根可传输数据的 USB 线；
-- iPhone 与电脑连接到同一 Wi-Fi；蜂窝网络不能替代此连接；
+- 设备与电脑连接到同一 Wi-Fi；蜂窝网络不能替代此连接；
 - 从 [iLoader 官网](https://iloader.app/) 或 [iLoader GitHub 仓库](https://github.com/nab138/iloader) 下载 iLoader；
-- 按 [SideStore 官方准备指南](https://docs.sidestore.io/docs/installation/prerequisites) 在 iPhone 上安装 LocalDevVPN。
+- 按 [SideStore 官方准备指南](https://docs.sidestore.io/docs/installation/prerequisites) 在设备上安装 LocalDevVPN。
 
 ### 1. 使用 iLoader 安装 SideStore
 
-1. 通过 USB 将 iPhone 连接到电脑，在两端确认“信任此电脑”。
-2. 打开 iLoader，登录 Apple Account，并选择已连接的 iPhone。
+1. 通过 USB 将 iPhone 或 iPad 连接到电脑，在两端确认“信任此电脑”。
+2. 打开 iLoader，登录 Apple Account，并选择已连接的设备。
 3. 选择 **Install SideStore (Stable)**，等待 SideStore 安装完成；iLoader 会同时处理设备配对文件。
-4. 在 iPhone 上打开“设置 → 通用 → VPN 与设备管理”，选择对应的开发者 App 并确认信任。
+4. 在设备上打开“设置 → 通用 → VPN 与设备管理”，选择对应的开发者 App 并确认信任。
 5. 打开“设置 → 隐私与安全性 → 开发者模式”，启用后按提示重启并再次确认。
 6. 打开 LocalDevVPN，点按 **Connect**。
 7. 打开 SideStore，登录与 iLoader 中相同的 Apple Account。
@@ -83,8 +83,8 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 
 ### 2. 使用 SideStore 安装 Oboe
 
-1. 在 iPhone 上从 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 `Oboe-v0.5.5.ipa`，并保存到“文件”App。
-2. 确认 iPhone 已连接 Wi-Fi，且 LocalDevVPN 处于 **Connected** 状态。
+1. 在设备上从 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 `Oboe-v0.5.8.ipa`，并保存到“文件”App。
+2. 确认设备已连接 Wi-Fi，且 LocalDevVPN 处于 **Connected** 状态。
 3. 打开 SideStore，进入 **My Apps**，点按右上角 **+**，选择刚下载的 IPA。
 4. 等待 SideStore 完成签名与安装，然后从主屏幕启动 Oboe。
 5. 免费 Apple Account 签名通常 7 天到期；到期前保持 Wi-Fi 和 LocalDevVPN 已连接，在 SideStore 的 **My Apps** 中刷新 Oboe。
@@ -95,7 +95,7 @@ Oboe 是一款开源、离线优先的 iPhone 日语学习应用。它把资料�
 
 ## 开发
 
-需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator。v0.5.5 验证使用 macOS 26、Xcode 27、Swift 6.4 和 iOS 26.5 Simulator（iPhone SE 第 3 代）。SwiftPM 锁定：
+需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator。v0.5.8 验证覆盖 iPhone 与 iPad Simulator；CI 会运行 Swift Package 全量测试、App 单元测试、iPhone navigation smoke 和 iPad regular-shell smoke。SwiftPM 锁定：
 
 - GRDB 7.11.1；
 - `swift-fsrs` revision `4fbaf20184d62f82a9f44f343337c61a2c5483e9`。
@@ -109,11 +109,16 @@ xcodebuild -project Oboe.xcodeproj -scheme Oboe \
   -destination 'generic/platform=iOS Simulator' clean build
 ```
 
-运行 UI 测试：
+运行 App 单元测试和 UI 测试：
 
 ```sh
 xcodebuild -project Oboe.xcodeproj -scheme Oboe \
-  -destination 'platform=iOS Simulator,name=iPhone SE (3rd generation),OS=latest' test
+  -destination 'platform=iOS Simulator,name=<available iPhone>,OS=latest' \
+  -only-testing:OboeAppTests test
+
+xcodebuild -project Oboe.xcodeproj -scheme Oboe \
+  -destination 'platform=iOS Simulator,name=<available iPhone>,OS=latest' \
+  -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke test
 ```
 
 可运行的模拟器构建不要设置 `CODE_SIGNING_ALLOWED=NO`，否则安装时会缺少 Keychain entitlement。CI 中禁用签名的命令只用于编译检查。
@@ -132,16 +137,16 @@ AI 服务的数据保留、移动端直连限制和地区政策由对应服务�
 
 ## 备份与恢复
 
-`.oboe-backup` v6 是未压缩、未加密的 UTF-8 NDJSON，使用固定记录顺序和 SHA-256 footer。它包含学习数据、设置、`note_decks` 成员关系记录及以下收集箱记录：
+`.oboe-backup` v7 是未加密的 ZIP 容器，包含 `manifest.json`、`records.ndjson`、`checksums.json` 和可选的 `attachments/`。其中 `records.ndjson` 沿用 v6 的固定记录顺序和 SHA-256 footer，保存学习数据、设置、`note_decks` 成员关系记录及以下收集箱记录：
 
 - `inboxItem`；
 - `inboxProcessingContext`；
 - `captureImportReceipt`；
 - `inboxCommitReceipt`。
 
-备份不包含 API Key、AI 连接配置、内置只读词库、搜索派生索引、本机快照、图片附件文件或尚未导入的共享队列文件；易错与趋势属派生数据，恢复后由评分日志重建。跨设备恢复后，收集箱正文会保留，缺失的图片引用会安全降级。
+v7 会把收集箱引用的图片附件及其 MIME、大小、SHA-256 和像素元数据写入包内。备份仍不包含 API Key、AI 连接配置、内置只读词库、搜索派生索引、本机快照或尚未导入的共享队列文件；易错与趋势属派生数据，恢复后由评分日志重建。
 
-恢复前 App 会检查格式版本、UTF-8/LF、记录顺序、数量、SHA-256、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入，替换前会创建回滚快照，失败或进程中断时恢复到已验证的数据库。Oboe 可恢复 v1～v6 备份（更早版本的记录自动补齐新增列与默认值，无 `noteDeck` 记录的备份按 `notes.deck_id` 重建成员关系），并明确拒绝未来格式和未知调度算法。
+恢复前 App 会检查 ZIP 结构、路径穿越、符号链接、压缩与解压限额、CRC、逐文件 SHA-256、附件类型和像素，以及记录格式、数量、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入：数据库与附件先在临时位置准备，附件目录通过 journal 记录的原子交换安装，失败或进程中断时自动回滚或完成收敛。Oboe 可按内容自动识别并恢复 v1～v6 明文 NDJSON 与 v7 附件包；旧备份缺失的新增字段会补默认值，缺失图片安全降级，并明确拒绝未来格式和未知调度算法。
 
 ## 内置 JLPT 词汇库
 
@@ -206,6 +211,7 @@ python3 Scripts/build_jlpt_library.py --validate-existing \
 OboeApp/                   SwiftUI 主应用、功能页面与资源
 OboeShareExtension/        系统分享扩展
 Packages/OboeCore/         Domain、Infrastructure、共享采集协议
+OboeAppTests/              布局、导航状态和恢复接线单元测试
 OboeUITests/               导航、布局与端到端 UI 测试
 Scripts/                   JLPT 词库生成与校验工具
 .github/workflows/ci.yml   持续集成
@@ -214,7 +220,7 @@ Scripts/                   JLPT 词库生成与校验工具
 ## 已知限制
 
 - 没有账号、云同步、嵌套牌组、Anki/CSV 导入、备份合并或备份加密；
-- 不支持相机直接拍摄或云 OCR；图片附件不随可携带备份迁移；
+- 不支持相机直接拍摄或云 OCR；v7 备份可迁移已进入收集箱的图片附件，尚未导入的分享队列文件不包含在备份内；
 - 系统 TTS 不提供标准重音词典、真人录音、语速、音色或重音标注设置；音调来自 UniDic/kanjium 词典标注，202 个无法可靠匹配的词保持未设置，不做 AI 猜测；
 - 音调选择器取值范围由假名读音的 mora 数决定，需先填写读音；
 - 表单输入法自动切换需系统已添加对应键盘；
