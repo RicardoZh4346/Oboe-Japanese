@@ -152,20 +152,19 @@ struct AppBootstrapEnvironment {
 
     /// Image attachments live in the app's own container (not the App Group —
     /// extensions never touch them). UI tests redirect the root via env.
-    static func resolveInboxImageStore(baseURL: URL) -> InboxImageStore {
+    static func inboxImagesDirectoryURL(baseURL: URL) -> URL {
         #if DEBUG
         if let override = ProcessInfo.processInfo.environment["OBOE_UI_TEST_IMAGE_STORE"],
            !override.isEmpty {
-            return InboxImageStore(
-                rootDirectoryURL: URL(fileURLWithPath: override, isDirectory: true)
-            )
+            return URL(fileURLWithPath: override, isDirectory: true)
         }
         #endif
-        return InboxImageStore(
-            rootDirectoryURL: baseURL.appendingPathComponent(
-                "InboxImages",
-                isDirectory: true
-            )
+        return baseURL.appendingPathComponent("InboxImages", isDirectory: true)
+    }
+
+    static func resolveInboxImageStore(baseURL: URL) -> InboxImageStore {
+        InboxImageStore(
+            rootDirectoryURL: inboxImagesDirectoryURL(baseURL: baseURL)
         )
     }
 

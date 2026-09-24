@@ -13,6 +13,6 @@ struct SettingsFeatureDependencies {
     let aiConnectionTestService: AIConnectionTestService
     let aiModelCatalogService: AIModelCatalogService
     let speechService: any SpeechService
-    let exporter: PortableBackupExporter
+    let exporter: PortableBackupPackageExporter
     let restorationPreparer: PortableBackupRestorationPreparer
 }

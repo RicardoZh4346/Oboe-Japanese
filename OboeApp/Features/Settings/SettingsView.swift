@@ -9,7 +9,7 @@ struct SettingsView: View {
     let dependencies: SettingsFeatureDependencies
     let operations: AppRuntimeOperations
     let isDatabaseOperationInProgress: Bool
-    let exporter: PortableBackupExporter
+    let exporter: PortableBackupPackageExporter
     let restorationPreparer: PortableBackupRestorationPreparer
     let studyService: StudySessionService
     let speechPreferencesService: SpeechPreferencesService
@@ -274,7 +274,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-privacy-note")
 
-                    Text("AI 服务连接与凭据不会写入备份；图片附件不随备份迁移，跨设备恢复后正文保留。")
+                    Text("AI 服务连接与凭据不会写入备份；收集箱图片附件随备份一并打包迁移。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-scope-note")
@@ -1350,6 +1350,9 @@ struct SettingsView: View {
             do {
                 let result = try await exporter.export(appVersion: Self.appVersion)
                 exportPresentation = ExportPresentation(url: result.url)
+                if !result.unresolvedAttachmentIDs.isEmpty {
+                    statusMessage = "备份已生成，但有 \(result.unresolvedAttachmentIDs.count) 个图片附件未能解析，未随备份打包。"
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -1368,7 +1371,9 @@ struct SettingsView: View {
                 }
             }
             do {
-                let preparation = try await restorationPreparer.prepare(fileURL: url)
+                let preparation = try await restorationPreparer.prepareAutomatically(
+                    fileURL: url
+                )
                 if Task.isCancelled {
                     try? await restorationPreparer.discard(preparation)
                     throw CancellationError()
@@ -1568,7 +1573,9 @@ private struct RestorationImpactPreviewView: View {
                     LabeledContent("应用版本", value: preparation.sourceAppVersion)
                     LabeledContent(
                         "格式版本",
-                        value: "v\(preparation.sourceFormatVersion) → v\(preparation.preparedFormatVersion)"
+                        value: preparation.attachmentDescriptors.isEmpty
+                            ? "v\(preparation.sourceFormatVersion) → v\(preparation.preparedFormatVersion)"
+                            : "v\(preparation.sourceFormatVersion)（含附件包）"
                     )
                 }
 
@@ -1590,6 +1597,28 @@ private struct RestorationImpactPreviewView: View {
                     )
                 }
 
+                if !preparation.attachmentDescriptors.isEmpty {
+                    Section("图片附件") {
+                        LabeledContent("附件数量", value: "\(preparation.attachmentDescriptors.count)")
+                        LabeledContent("附件大小") {
+                            Text(
+                                ByteCountFormatter.string(
+                                    fromByteCount: Int64(
+                                        preparation.attachmentDescriptors.reduce(0) {
+                                            $0 + $1.byteCount
+                                        }
+                                    ),
+                                    countStyle: .file
+                                )
+                            )
+                        }
+                        .accessibilityIdentifier("portable-backup-preview-attachment-size")
+                        Text("附件已通过逐文件 SHA-256 校验，恢复时随资料库一并安装。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if !preparation.restoresInboxData {
                     Section {
                         Label(
@@ -1602,7 +1631,11 @@ private struct RestorationImpactPreviewView: View {
                 }
 
                 Section {
-                    Text("备份不包含 API 密钥、AI 连接配置、共享中转文件和本地图片附件；条目中的图片引用若无法解析将置空并保留正文。")
+                    Text(
+                        preparation.attachmentDescriptors.isEmpty
+                            ? "备份不包含 API 密钥、AI 连接配置、共享中转文件和本地图片附件；条目中的图片引用若无法解析将置空并保留正文。"
+                            : "备份不包含 API 密钥、AI 连接配置和共享中转文件；图片附件已随备份打包并逐文件校验。"
+                    )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-preview-excluded-scopes")

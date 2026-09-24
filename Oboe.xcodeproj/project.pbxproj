@@ -94,6 +94,7 @@
 		A00100000000000000000067 /* LayoutPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000067 /* LayoutPolicyTests.swift */; };
 		A00100000000000000000068 /* AdaptivePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000068 /* AdaptivePresentationTests.swift */; };
 		A00100000000000000000069 /* SceneNavigationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000069 /* SceneNavigationStateTests.swift */; };
+		A00100000000000000000072 /* AttachmentRestoreWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */; };
 		A00100000000000000000043 /* DeckNameEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000043 /* DeckNameEditor.swift */; };
 		EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD40144146D14359888E78DD /* SecondaryPage.swift */; };
 		167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */; };
@@ -229,6 +230,7 @@
 		A00200000000000000000067 /* LayoutPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPolicyTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000068 /* AdaptivePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptivePresentationTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000069 /* SceneNavigationStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneNavigationStateTests.swift; sourceTree = "<group>"; };
+		A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentRestoreWiringTests.swift; sourceTree = "<group>"; };
 		A0020000000000000000006A /* OboeAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OboeAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00200000000000000000043 /* DeckNameEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckNameEditor.swift; sourceTree = "<group>"; };
 		BD40144146D14359888E78DD /* SecondaryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryPage.swift; sourceTree = "<group>"; };
@@ -416,6 +418,7 @@
 				A00200000000000000000067 /* LayoutPolicyTests.swift */,
 				A00200000000000000000068 /* AdaptivePresentationTests.swift */,
 				A00200000000000000000069 /* SceneNavigationStateTests.swift */,
+				A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */,
 			);
 			path = OboeAppTests;
 			sourceTree = "<group>";
@@ -704,6 +707,7 @@
 				A00100000000000000000067 /* LayoutPolicyTests.swift in Sources */,
 				A00100000000000000000068 /* AdaptivePresentationTests.swift in Sources */,
 				A00100000000000000000069 /* SceneNavigationStateTests.swift in Sources */,
+				A00100000000000000000072 /* AttachmentRestoreWiringTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

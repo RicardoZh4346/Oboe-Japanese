@@ -34,6 +34,12 @@ public struct InboxImageStore: Sendable {
     private let limits: InboxImageLimits
     private let makeID: @Sendable () -> UUID
 
+    /// Attachment files live directly under this directory — the restore
+    /// pipeline needs the location to swap the whole directory atomically.
+    public var directoryURL: URL {
+        rootDirectoryURL
+    }
+
     public init(
         rootDirectoryURL: URL,
         limits: InboxImageLimits = InboxImageLimits(),

@@ -13,6 +13,9 @@ import SwiftUI
 final class AppRuntimeController {
     private let baseURL: URL
     private let databaseLifecycle: OboeDatabaseLifecycle
+    /// v7 附件交换日志：恢复提交窗口期崩溃时据此把 InboxImages 收敛回
+    /// 一致状态（设计 §11.3 阶段 9）。
+    private let attachmentJournalStore: AttachmentRestoreJournalStore
     private let bootstrap = AppBootstrapEnvironment()
     private var didStart = false
 
@@ -102,6 +105,12 @@ final class AppRuntimeController {
             databaseURL: baseURL.appendingPathComponent("oboe.sqlite"),
             snapshotDirectoryURL: baseURL.appendingPathComponent("Snapshots", isDirectory: true)
         )
+        attachmentJournalStore = AttachmentRestoreJournalStore(
+            fileURL: baseURL.appendingPathComponent(
+                "RestoreJournals/attachment-swap.json",
+                isDirectory: false
+            )
+        )
     }
 
     func start() async {
@@ -117,6 +126,7 @@ final class AppRuntimeController {
             // snapshot before launch-time enrichment backfills NULL fields.
             try stageLegacySchemaV12DatabaseIfRequested()
             #endif
+            recoverInterruptedAttachmentSwap()
             let database = try await databaseLifecycle.open()
             publishServices(database: database)
             #if DEBUG
@@ -306,15 +316,32 @@ final class AppRuntimeController {
         isDatabaseOperationInProgress = true
         defer { isDatabaseOperationInProgress = false }
         await suspendBeforeDatabaseReplacement()
+        var installedAttachmentsJournal: AttachmentRestoreJournal?
         do {
+            // v7 提交序列（设计 §11.3）：quiesce → swap 附件 → 换库 → 收尾。
+            // 附件先于库安装，库替换失败时按 journal 回滚目录，保证两侧一致。
+            if let stagedURL = preparation.stagedAttachmentsDirectoryURL {
+                installedAttachmentsJournal = try installStagedAttachments(
+                    from: stagedURL
+                )
+            }
             let database = try await replaceDatabase(with: preparation.temporaryDatabaseURL)
             publishServices(database: database)
             refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
+            if let journal = installedAttachmentsJournal {
+                try? AttachmentDirectorySwap.completeSwap(
+                    journal: journal,
+                    journalStore: attachmentJournalStore
+                )
+            }
             try? await runtimeServices?.aiRepairService.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
             scheduleJLPTEnrichment()
         } catch {
+            if let journal = installedAttachmentsJournal {
+                rollbackAttachmentSwap(journal: journal)
+            }
             if let restoredCurrent = await databaseLifecycle.currentDatabase() {
                 publishServices(database: restoredCurrent)
                 try? await reloadAppearancePreference()
@@ -324,6 +351,77 @@ final class AppRuntimeController {
             throw error
         }
     }
+
+    /// 附件目录原子替换：现有目录移到 aside，staged 目录 rename 就位，
+    /// 每个阶段都写 journal——进程在窗口期被杀由下次启动的
+    /// `recoverInterruptedAttachmentSwap` 收敛。
+    private func installStagedAttachments(
+        from stagedURL: URL
+    ) throws -> AttachmentRestoreJournal {
+        let targetURL = AppBootstrapEnvironment.inboxImagesDirectoryURL(
+            baseURL: baseURL
+        )
+        let asideURL = targetURL.deletingLastPathComponent()
+            .appendingPathComponent(
+                ".rollback-\(targetURL.lastPathComponent)-\(UUID().uuidString.lowercased())",
+                isDirectory: true
+            )
+        return try AttachmentDirectorySwap.installStagedDirectory(
+            stagedURL: stagedURL,
+            at: targetURL,
+            asideURL: asideURL,
+            journalStore: attachmentJournalStore
+        )
+    }
+
+    /// 库替换失败后的同步回滚：新目录挪走、aside 移回原位、清 journal。
+    /// 只能用于"install 已返回但库还没换"的窗口——completeSwap 之后旧目录
+    /// 已删，journal 语义不再可回滚。
+    private func rollbackAttachmentSwap(journal: AttachmentRestoreJournal) {
+        let fileManager = FileManager.default
+        let targetURL = URL(fileURLWithPath: journal.targetPath)
+        let trashURL = targetURL.deletingLastPathComponent()
+            .appendingPathComponent(
+                ".swap-rollback-\(UUID().uuidString.lowercased())",
+                isDirectory: true
+            )
+        if fileManager.fileExists(atPath: targetURL.path) {
+            try? fileManager.moveItem(at: targetURL, to: trashURL)
+        }
+        if !journal.oldPath.isEmpty {
+            let asideURL = URL(fileURLWithPath: journal.oldPath)
+            if fileManager.fileExists(atPath: asideURL.path) {
+                try? fileManager.moveItem(at: asideURL, to: targetURL)
+            }
+        }
+        try? fileManager.removeItem(at: trashURL)
+        try? attachmentJournalStore.clear()
+    }
+
+    /// 启动期恢复：上次恢复若在附件 swap 窗口期被杀，按 journal 把
+    /// InboxImages 收敛到一致状态。必须在打开数据库之前运行——镜像
+    /// 服务一启动就可能读附件目录。
+    private func recoverInterruptedAttachmentSwap() {
+        do {
+            let installed = try AttachmentDirectorySwap.recoverInterruptedSwap(
+                journalStore: attachmentJournalStore
+            )
+            if let installed {
+                Self.swapLogger.notice(
+                    "Recovered interrupted attachment swap: installedStaged=\(installed, privacy: .public)"
+                )
+            }
+        } catch {
+            Self.swapLogger.error(
+                "Attachment swap recovery failed: \(String(describing: type(of: error)), privacy: .public)"
+            )
+        }
+    }
+
+    private static let swapLogger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.oboe.app",
+        category: "AttachmentSwap"
+    )
 
     func localSnapshots() async throws -> [DatabaseSnapshot] {
         try await databaseLifecycle.snapshotService.snapshots()
@@ -551,8 +649,9 @@ final class AppRuntimeController {
             contentCardRepository: GRDBContentCardRepository(database: database),
             adaptiveCardService: adaptiveCardService
         )
-        let portableBackupExporter = PortableBackupExporter(
+        let portableBackupExporter = PortableBackupPackageExporter(
             database: database,
+            imageStore: imageStore,
             workingDirectoryURL: baseURL.appendingPathComponent("Exports", isDirectory: true)
         )
         let portableBackupRestorationPreparer = PortableBackupRestorationPreparer(
