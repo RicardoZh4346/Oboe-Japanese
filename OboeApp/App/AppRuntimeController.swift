@@ -50,6 +50,12 @@ final class AppRuntimeController {
     /// 同批发布，专供替换安全与后台调度使用，不暴露给 Feature。
     private var runtimeServices: RuntimeServices?
 
+    /// DEBUG 种子窗口：已构造完成但尚未发布为 `.ready` 的容器。
+    /// 种子（多为多步写库）必须在首个视图 `load()` 之前跑完，
+    /// 否则视图会对中间态取快照且不刷新。
+    private var stagedContainer: AppFeatureContainer?
+    private var stagedGeneration = 0
+
     private struct RuntimeServices {
         let adaptiveCardService: AdaptiveCardService
         let aiRepairService: AIRepairService
@@ -65,7 +71,7 @@ final class AppRuntimeController {
     /// 与对外容器语义一致——服务要么存在，要么整个容器尚未发布。
     var currentContainer: AppFeatureContainer? {
         if case .ready(let container) = phase { return container }
-        return nil
+        return stagedContainer
     }
 
     var studySessionService: StudySessionService? {
@@ -128,7 +134,16 @@ final class AppRuntimeController {
             #endif
             recoverInterruptedAttachmentSwap()
             let database = try await databaseLifecycle.open()
+            #if DEBUG
+            // 先装配不发布：UI 测试种子（waiting/complete 等多步写库）
+            // 必须跑在首个视图 `load()` 之前，否则视图会快照中间态。
+            guard stageServices(database: database) else {
+                phase = .failed(message: "无法载入内置 JLPT 词库。")
+                return
+            }
+            #else
             publishServices(database: database)
+            #endif
             #if DEBUG
             // UI-test seam: fabricate the post-restore pending-import state so
             // the awaiting-import notice path can be exercised end to end.
@@ -189,6 +204,9 @@ final class AppRuntimeController {
             // =0/off 显式关）。必须在所有数据种子之后——种子可能先物化
             // app_settings 行，覆盖再走真实 service 的 UPDATE。
             await applyAdaptivePreferenceUITestOverrides()
+            // 种子全部落地后才切 ready——首个界面加载看到的就是
+            // 种子终态。
+            commitStagedServices()
             #endif
             try await reloadAppearancePreference()
             #if DEBUG
@@ -512,18 +530,37 @@ final class AppRuntimeController {
         }
     }
 
+    /// 构造并暂存服务但不发布：返回 false 即构建失败（内置 JLPT 词库
+    /// 缺失）。`stagedContainer` 对 DEBUG 种子访问器可见，对视图不可见。
+    @discardableResult
+    private func stageServices(database: OboeDatabase) -> Bool {
+        let generation = databaseGeneration &+ 1
+        guard let built = makeServices(database: database, generation: generation) else {
+            return false
+        }
+        runtimeServices = built.runtime
+        stagedContainer = built.container
+        stagedGeneration = generation
+        return true
+    }
+
+    /// 将暂存容器发布为 `.ready`。仅在 `stageServices` 成功后调用。
+    private func commitStagedServices() {
+        guard let stagedContainer else { return }
+        databaseGeneration = stagedGeneration
+        jlptEnrichmentServiceGeneration = stagedGeneration
+        phase = .ready(stagedContainer)
+        self.stagedContainer = nil
+    }
+
     /// 服务全部构造成功后一次性发布容器。世代先取号再发布：构建失败
     /// 进入 `.failed`，世代保持原值（suspend 阶段已递增过，旧树已死）。
     private func publishServices(database: OboeDatabase) {
-        let generation = databaseGeneration &+ 1
-        guard let built = makeServices(database: database, generation: generation) else {
+        guard stageServices(database: database) else {
             phase = .failed(message: "无法载入内置 JLPT 词库。")
             return
         }
-        runtimeServices = built.runtime
-        databaseGeneration = generation
-        jlptEnrichmentServiceGeneration = generation
-        phase = .ready(built.container)
+        commitStagedServices()
     }
 
     private struct BuiltServices {

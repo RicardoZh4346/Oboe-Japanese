@@ -21,8 +21,9 @@ final class OboeNavigationUITests: XCTestCase {
         app.launch()
 
         if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
-            // compact 壳层：三 tab 顺序切换，导航标题前缀匹配。
-            let expectedTabs = ["今日", "牌组", "设置"]
+            // compact 壳层：两 tab 顺序切换（v0.5.8 起设置收进今日页
+            // 齿轮），导航标题前缀匹配。
+            let expectedTabs = ["今日", "牌组"]
             for tabName in expectedTabs {
                 let tab = app.tabBars.buttons[tabName]
                 XCTAssertTrue(tab.waitForExistence(timeout: 2), "缺少 \(tabName) 入口")
@@ -35,6 +36,13 @@ final class OboeNavigationUITests: XCTestCase {
                     "切换到 \(tabName) 后未显示对应页面"
                 )
             }
+            // 设置：今日页齿轮 → sheet，完成后回到 tab 页。
+            app.openSettingsFromTodayGear()
+            app.dismissSettingsSheet()
+            XCTAssertTrue(
+                app.tabBars.buttons["牌组"].waitForExistence(timeout: 3),
+                "关闭设置 sheet 后 Tab Bar 未恢复"
+            )
         } else {
             // regular 壳层：sidebar 入口 + 分栏页面断言。竖屏下 iPad
             // 把 sidebar 当浮层、选中即收起（平台标准行为）——切横屏
@@ -403,9 +411,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let about = app.buttons["about-navigation-link"]
         reveal(about, in: app)
@@ -428,9 +434,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let exportButton = app.buttons["portable-backup-export-button"]
         reveal(exportButton, in: app)
@@ -454,9 +458,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let prepareButton = app.buttons["portable-backup-prepare-button"]
         reveal(prepareButton, in: app)
@@ -481,6 +483,9 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(confirmRestore.waitForExistence(timeout: 2))
         confirmRestore.tap()
 
+        // 设置以 sheet 呈现——先关闭再切回 Tab。
+        app.dismissSettingsSheet()
+
         let decksTab = app.tabBars.buttons["牌组"]
         XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
         decksTab.tap()
@@ -489,7 +494,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         let todayTab = app.tabBars.buttons["今日"]
         todayTab.tap()
-        XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.todayNavigationBar.waitForExistence(timeout: 5))
         XCTAssertFalse(app.alerts["刷新失败"].waitForExistence(timeout: 2))
     }
 
@@ -499,9 +504,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let wordToggle = app.switches["speech-auto-play-word-toggle"]
         let exampleToggle = app.switches["speech-auto-play-example-toggle"]
@@ -526,8 +529,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
         reveal(wordToggle, in: app)
         XCTAssertTrue(wordToggle.exists)
         waitUntilEnabled(wordToggle)
@@ -541,9 +543,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let dailyLimit = app.descendants(matching: .any)["learning-daily-new-limit-stepper"]
         XCTAssertTrue(dailyLimit.waitForExistence(timeout: 5))
@@ -575,8 +575,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
         let restoredVersion = app.descendants(matching: .any)["learning-configuration-version"]
         XCTAssertTrue(restoredVersion.waitForExistence(timeout: 5))
         XCTAssertTrue(restoredVersion.label.contains("r95"))
@@ -588,9 +587,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let appearance = app.descendants(matching: .any)["appearance-picker"]
         XCTAssertTrue(appearance.waitForExistence(timeout: 5))
@@ -606,8 +603,7 @@ final class OboeNavigationUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
         XCTAssertTrue(appearance.waitForExistence(timeout: 5))
         XCTAssertTrue(
             appearance.label.contains("深色") || String(describing: appearance.value).contains("深色")
@@ -692,9 +688,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let aiToggle = app.switches["ai-enabled-toggle"]
         reveal(aiToggle, in: app)
@@ -741,9 +735,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let capability = app.descendants(matching: .any)["ai-response-format-fixed"]
         reveal(capability, in: app)
@@ -1681,7 +1673,7 @@ final class OboeNavigationUITests: XCTestCase {
         XCTAssertTrue(todayRow.label.contains("回答 1"), todayRow.label)
         XCTAssertTrue(todayRow.label.contains("简单 1"), todayRow.label)
         app.navigationBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.todayNavigationBar.waitForExistence(timeout: 5))
 
         decksTab.tap()
         let deckTodayCounts = app.descendants(matching: .any).matching(
@@ -1928,9 +1920,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_VOCABULARY_DIRECTIONS"] = "japaneseToChinese"
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
         let appearance = app.descendants(matching: .any)["appearance-picker"]
         XCTAssertTrue(appearance.waitForExistence(timeout: 5))
         appearance.tap()
@@ -2170,9 +2160,7 @@ final class OboeNavigationUITests: XCTestCase {
         app.launch()
 
         if autoSpeech {
-            let settings = app.tabBars.buttons["设置"]
-            XCTAssertTrue(settings.waitForExistence(timeout: 5))
-            settings.tap()
+            app.openSettingsFromTodayGear()
             for identifier in ["speech-auto-play-word-toggle", "speech-auto-play-example-toggle"] {
                 let toggle = app.switches[identifier]
                 reveal(toggle, in: app)
@@ -2180,6 +2168,7 @@ final class OboeNavigationUITests: XCTestCase {
                 waitUntilEnabled(toggle)
                 setSwitch(toggle, enabled: true)
             }
+            app.dismissSettingsSheet()
         }
 
         let decksTab = app.tabBars.buttons["牌组"]
@@ -2431,6 +2420,9 @@ final class OboeNavigationUITests: XCTestCase {
         let confirmRestore = app.buttons["完整替换并恢复"]
         XCTAssertTrue(confirmRestore.waitForExistence(timeout: 2))
         confirmRestore.tap()
+
+        // 设置以 sheet 呈现——先关闭再切回 Tab。
+        app.dismissSettingsSheet()
 
         let decksTab = app.tabBars.buttons["牌组"]
         XCTAssertTrue(decksTab.waitForExistence(timeout: 8))
@@ -2724,8 +2716,19 @@ final class OboeNavigationUITests: XCTestCase {
     }
 
     /// v0.5.5 起二级页隐藏 Tab Bar：切 tab 前先逐层返回到主页面。
+    /// v0.5.8：设置不在 Tab Bar——经今日页齿轮以 sheet 打开；若 sheet
+    /// 已开着先关闭再切其它 tab。
     @MainActor
     private func selectTab(_ name: String, in app: XCUIApplication) {
+        if name == "设置" {
+            if app.navigationBars["设置"].exists { return }
+            popToPrimaryPageIfNeeded(in: app)
+            app.openSettingsFromTodayGear()
+            return
+        }
+        if app.buttons["settings-done-button"].exists {
+            app.dismissSettingsSheet()
+        }
         popToPrimaryPageIfNeeded(in: app)
         let tab = app.tabBars.buttons[name]
         XCTAssertTrue(tab.waitForExistence(timeout: 5))

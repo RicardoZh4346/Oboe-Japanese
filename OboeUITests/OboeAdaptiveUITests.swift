@@ -66,10 +66,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_SUBMIT_FAILURES"] = "1"
         app.launch()
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let toggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
+        app.dismissSettingsSheet()
         app.tabBars.buttons["今日"].tap()
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
@@ -131,10 +132,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_SEED"] = "1"
         app.launch()
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let toggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
+        app.dismissSettingsSheet()
         app.tabBars.buttons["今日"].tap()
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
@@ -238,10 +240,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_SEED"] = "1"
         app.launchEnvironment["OBOE_UI_TEST_APPEARANCE_DARK"] = "1"
         app.launch()
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let toggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
+        app.dismissSettingsSheet()
         app.tabBars.buttons["今日"].tap()
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
@@ -354,7 +357,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_TYPED_RECALL_PREF"] = "0"
         app.launch()
 
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let toggle = app.switches["adaptive-typed-answer-listening-toggle"]
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
@@ -806,7 +809,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let zhToggle = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(zhToggle, in: app)
         XCTAssertTrue(zhToggle.waitForExistence(timeout: 5))
@@ -821,7 +824,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         app.terminate()
         app.launch()
-        app.tabBars.buttons["设置"].tap()
+        app.openSettingsFromTodayGear()
         let restored = app.switches["adaptive-typed-answer-zh-ja-toggle"]
         reveal(restored, in: app)
         XCTAssertTrue(restored.waitForExistence(timeout: 5))
@@ -846,7 +849,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.todayNavigationBar.waitForExistence(timeout: 5))
         XCTAssertFalse(
             app.descendants(matching: .any)["today-adaptive-entry"].exists,
             "0 张易错卡时首页不得显示“需要关注”入口"
@@ -1034,9 +1037,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_ADAPTIVE_SEED"] = "1"
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
         let toggle = app.switches["adaptive-leech-reminders-toggle"]
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
@@ -1046,7 +1047,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         // 重启后偏好已持久化：入口隐藏、答案面不再出现提示。
         app.terminate()
         app.launch()
-        XCTAssertTrue(app.navigationBars["今日"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.todayNavigationBar.waitForExistence(timeout: 5))
         XCTAssertFalse(
             app.descendants(matching: .any)["today-adaptive-entry"].exists,
             "关闭提醒后首页入口必须隐藏"

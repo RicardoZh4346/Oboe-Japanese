@@ -500,7 +500,10 @@ struct RegularShell: View {
                     Task { await operations.clearPendingContinueItem() }
                 },
                 sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
-                importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures
+                importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
+                // regular 下设置是一级 sidebar section——今日页齿轮等价于
+                // 选中该 section，与 compact 的 sheet 入口同一触发点。
+                openSettings: { navigation.selectTab(.settings) }
             )
         case .settings, .inbox, .decks:
             // 不可达：这三个区走三栏分支。

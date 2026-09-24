@@ -21,17 +21,22 @@ struct SettingsView: View {
     /// regular detail 列的分类过滤：nil 渲染全部 section（compact 单
     /// List 行为不变）；非 nil 只渲染该分类。
     let categoryFilter: SettingsRoute?
+    /// modal 呈现（compact sheet）时的关闭回调；nil 表示常驻页面，
+    /// 不显示「完成」按钮。
+    let dismissAction: (() -> Void)?
 
     init(
         dependencies: SettingsFeatureDependencies,
         operations: AppRuntimeOperations,
         isDatabaseOperationInProgress: Bool,
-        categoryFilter: SettingsRoute? = nil
+        categoryFilter: SettingsRoute? = nil,
+        dismissAction: (() -> Void)? = nil
     ) {
         self.dependencies = dependencies
         self.operations = operations
         self.isDatabaseOperationInProgress = isDatabaseOperationInProgress
         self.categoryFilter = categoryFilter
+        self.dismissAction = dismissAction
         exporter = dependencies.exporter
         restorationPreparer = dependencies.restorationPreparer
         studyService = dependencies.studyService
@@ -374,6 +379,14 @@ struct SettingsView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(categoryFilter?.title ?? "设置")
+            .toolbar {
+                if let dismissAction {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { dismissAction() }
+                            .accessibilityIdentifier("settings-done-button")
+                    }
+                }
+            }
             .sheet(item: $exportPresentation) { presentation in
                 PortableBackupDocumentPicker(fileURL: presentation.url) { didExport in
                     exportPresentation = nil

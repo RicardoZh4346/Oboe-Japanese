@@ -473,9 +473,7 @@ final class OboeSettingsAIUITests: XCTestCase {
 
     @MainActor
     private func openSettings(in app: XCUIApplication) {
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
     }
 
     @MainActor

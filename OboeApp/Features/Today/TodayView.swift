@@ -21,6 +21,10 @@ struct TodayView: View {
     let clearPendingContinueItem: @Sendable () -> Void
     let sharedCapturesAwaitingImport: Int?
     let importAwaitingSharedCaptures: @Sendable () async -> Void
+    /// 设置入口（v0.5.8）：非 nil 时右上角显示齿轮。compact 壳层给
+    /// sheet 呈现闭包，regular 壳层给 sidebar section 切换闭包——
+    /// 呈现策略仍归壳层，页面不感知壳层形态。
+    let openSettings: (() -> Void)?
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -46,7 +50,8 @@ struct TodayView: View {
         pendingContinueItemID: UUID? = nil,
         clearPendingContinueItem: @escaping @Sendable () -> Void = {},
         sharedCapturesAwaitingImport: Int? = nil,
-        importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {}
+        importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
+        openSettings: (() -> Void)? = nil
     ) {
         self.studyService = studyService
         self.historyService = historyService
@@ -65,6 +70,7 @@ struct TodayView: View {
         self.clearPendingContinueItem = clearPendingContinueItem
         self.sharedCapturesAwaitingImport = sharedCapturesAwaitingImport
         self.importAwaitingSharedCaptures = importAwaitingSharedCaptures
+        self.openSettings = openSettings
         _model = State(
             initialValue: TodayViewModel(
                 studyService: studyService,
@@ -98,11 +104,20 @@ struct TodayView: View {
             .navigationTitle(streakTitle)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("刷新", systemImage: "arrow.clockwise") {
-                        Task { await model.load() }
+                    if let openSettings {
+                        // v0.5.8：设置入口从底部 Tab 收进今日页齿轮；
+                        // 手动刷新已由前台/路径回退自动触发覆盖。
+                        Button("设置", systemImage: "gearshape") {
+                            openSettings()
+                        }
+                        .accessibilityIdentifier("today-settings-button")
+                    } else {
+                        Button("刷新", systemImage: "arrow.clockwise") {
+                            Task { await model.load() }
+                        }
+                        .disabled(model.isLoading)
+                        .accessibilityIdentifier("today-refresh-button")
                     }
-                    .disabled(model.isLoading)
-                    .accessibilityIdentifier("today-refresh-button")
                 }
             }
             .navigationDestination(for: StudyScope.self) { scope in
@@ -893,10 +908,11 @@ private struct HomeShortcutTile: View {
         }
         .padding(.horizontal, OboeTheme.Spacing.sm)
         .padding(.vertical, OboeTheme.Spacing.sm)
+        // 高度随内容——maxHeight:.infinity 会让磁贴吃掉 ViewThatFits
+        // 列的全部余量，触发区域远超可见卡片（v0.5.8 收敛为卡片自身）。
         .frame(
             maxWidth: .infinity,
             minHeight: 72,
-            maxHeight: .infinity,
             alignment: .topLeading
         )
         .background(

@@ -5,11 +5,11 @@ import SwiftUI
 private enum PrimaryTab: Hashable {
     case today
     case decks
-    case settings
 }
 
-/// compact 壳层：既定的三 Tab `TabView` 实现。只在 `.ready` 分支出现——
-/// 服务依赖从 `AppFeatureContainer` 整体取到，不再有逐个 Optional 展开。
+/// compact 壳层：两 Tab `TabView`（今日 + 牌组）。v0.5.8 起设置收进
+/// 今日页右上角齿轮，以 sheet 呈现。只在 `.ready` 分支出现——服务依赖
+/// 从 `AppFeatureContainer` 整体取到，不再有逐个 Optional 展开。
 struct CompactShell: View {
     let container: AppFeatureContainer
     let operations: AppRuntimeOperations
@@ -19,6 +19,7 @@ struct CompactShell: View {
     let isDatabaseOperationInProgress: Bool
 
     @State private var selectedTab = PrimaryTab.today
+    @State private var isSettingsPresented = false
 
     var body: some View {
         // `.tabBarOnly` 需要 iOS 18；iOS 17 下回退为系统默认样式
@@ -54,7 +55,8 @@ struct CompactShell: View {
                     Task { await operations.clearPendingContinueItem() }
                 },
                 sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
-                importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures
+                importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
+                openSettings: { isSettingsPresented = true }
             )
                 .id(container.generation)
                 .tabItem {
@@ -90,17 +92,15 @@ struct CompactShell: View {
                     Label("牌组", systemImage: "rectangle.stack")
                 }
                 .tag(PrimaryTab.decks)
-
+        }
+        .sheet(isPresented: $isSettingsPresented) {
             SettingsView(
                 dependencies: container.settings,
                 operations: operations,
-                isDatabaseOperationInProgress: isDatabaseOperationInProgress
+                isDatabaseOperationInProgress: isDatabaseOperationInProgress,
+                dismissAction: { isSettingsPresented = false }
             )
-                .id(container.generation)
-                .tabItem {
-                    Label("设置", systemImage: "gearshape")
-                }
-                .tag(PrimaryTab.settings)
+            .id(container.generation)
         }
     }
 }

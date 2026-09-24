@@ -585,9 +585,7 @@ final class OboeInboxUITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_AWAITING_IMPORT"] = "1"
         app.launch()
 
-        let settingsTab = app.tabBars.buttons["设置"]
-        XCTAssertTrue(settingsTab.waitForExistence(timeout: 5))
-        settingsTab.tap()
+        app.openSettingsFromTodayGear()
 
         let note = app.staticTexts["portable-backup-pending-share-note"]
         reveal(note, in: app)
