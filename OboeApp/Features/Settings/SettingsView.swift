@@ -18,15 +18,20 @@ struct SettingsView: View {
     let aiConnectionTestService: AIConnectionTestService
     let aiModelCatalogService: AIModelCatalogService
     let speechService: any SpeechService
+    /// regular detail 列的分类过滤：nil 渲染全部 section（compact 单
+    /// List 行为不变）；非 nil 只渲染该分类。
+    let categoryFilter: SettingsRoute?
 
     init(
         dependencies: SettingsFeatureDependencies,
         operations: AppRuntimeOperations,
-        isDatabaseOperationInProgress: Bool
+        isDatabaseOperationInProgress: Bool,
+        categoryFilter: SettingsRoute? = nil
     ) {
         self.dependencies = dependencies
         self.operations = operations
         self.isDatabaseOperationInProgress = isDatabaseOperationInProgress
+        self.categoryFilter = categoryFilter
         exporter = dependencies.exporter
         restorationPreparer = dependencies.restorationPreparer
         studyService = dependencies.studyService
@@ -91,9 +96,16 @@ struct SettingsView: View {
     /// database, so the export scope note must say they are not included.
     @State private var pendingSharedCaptureCount: Int?
 
+    /// regular detail 列的 section 门控：filter 为 nil（compact）时
+    /// 全部渲染，否则只渲染目标分类。
+    private func shows(_ category: SettingsRoute) -> Bool {
+        categoryFilter == nil || categoryFilter == category
+    }
+
     var body: some View {
         NavigationStack {
             List {
+                if shows(.appearance) {
                 Section("外观") {
                     Picker("显示模式", selection: $appearancePreference) {
                         ForEach(AppAppearance.allCases, id: \.self) { appearance in
@@ -114,9 +126,13 @@ struct SettingsView: View {
                             .accessibilityIdentifier("appearance-status")
                     }
                 }
+                }
 
+                if shows(.learning) {
                 learningSettingsSection
+                }
 
+                if shows(.speech) {
                 Section("发音") {
                     Toggle(
                         "自动播放单词",
@@ -172,7 +188,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("speech-offline-note")
                 }
+                }
 
+                if shows(.adaptive) {
                 Section("主动回忆") {
                     Toggle(
                         "中文→日文输入",
@@ -221,9 +239,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("adaptive-leech-reminders-note")
                 }
+                }
 
+                if shows(.ai) {
                 aiSettingsSection
+                }
 
+                if shows(.backup) {
                 Section("数据管理") {
                     Button {
                         prepareExport()
@@ -336,7 +358,9 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("local-snapshot-scope-note")
                 }
+                }
 
+                if shows(.about) {
                 Section("关于") {
                     NavigationLink {
                         AboutOboeView()
@@ -345,10 +369,11 @@ struct SettingsView: View {
                     }
                     .accessibilityIdentifier("about-navigation-link")
                 }
+                }
 
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("设置")
+            .navigationTitle(categoryFilter?.title ?? "设置")
             .sheet(item: $exportPresentation) { presentation in
                 PortableBackupDocumentPicker(fileURL: presentation.url) { didExport in
                     exportPresentation = nil

@@ -78,6 +78,7 @@
 		A00100000000000000000048 /* AppRuntimeController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000048 /* AppRuntimeController.swift */; };
 		A00100000000000000000049 /* AppSceneRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000049 /* AppSceneRoot.swift */; };
 		A00100000000000000000070 /* RegularShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000070 /* RegularShell.swift */; };
+		A00100000000000000000071 /* SettingsCategoryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000071 /* SettingsCategoryListView.swift */; };
 		A0010000000000000000004A /* AppFeatureContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004A /* AppFeatureContainer.swift */; };
 		A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004B /* TodayFeatureDependencies.swift */; };
 		A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004C /* DeckFeatureDependencies.swift */; };
@@ -212,6 +213,7 @@
 		A00200000000000000000048 /* AppRuntimeController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeController.swift; sourceTree = "<group>"; };
 		A00200000000000000000049 /* AppSceneRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSceneRoot.swift; sourceTree = "<group>"; };
 		A00200000000000000000070 /* RegularShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegularShell.swift; sourceTree = "<group>"; };
+		A00200000000000000000071 /* SettingsCategoryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCategoryListView.swift; sourceTree = "<group>"; };
 		A0020000000000000000004A /* AppFeatureContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeatureContainer.swift; sourceTree = "<group>"; };
 		A0020000000000000000004B /* TodayFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayFeatureDependencies.swift; sourceTree = "<group>"; };
 		A0020000000000000000004C /* DeckFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckFeatureDependencies.swift; sourceTree = "<group>"; };
@@ -421,7 +423,7 @@
 		A0050000000000000000000D /* Products */ = {isa = PBXGroup; children = (A0020000000000000000000A /* Oboe.app */, A0020000000000000000000B /* OboeUITests.xctest */, A0020000000000000000006A /* OboeAppTests.xctest */, A0020000000000000000002D /* OboeShareExtension.appex */,); name = Products; sourceTree = "<group>"; };
 		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (); path = Search; sourceTree = "<group>"; };
 		A00500000000000000000011 /* Inbox */ = {isa = PBXGroup; children = (A0020000000000000000001C /* InboxView.swift */, A0020000000000000000001D /* InboxItemDetailView.swift */, A0020000000000000000001E /* InboxCaptureView.swift */, A00200000000000000000027 /* InboxProcessingView.swift */,); path = Inbox; sourceTree = "<group>"; };
-		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */, EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */,); path = Settings; sourceTree = "<group>"; };
+		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */, A00200000000000000000071 /* SettingsCategoryListView.swift */, EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */,); path = Settings; sourceTree = "<group>"; };
 		A00500000000000000000014 /* ImageCapture */ = {isa = PBXGroup; children = (A0020000000000000000002E /* ImageCaptureView.swift */,); path = ImageCapture; sourceTree = "<group>"; };
 		A00500000000000000000010 /* JLPTLibrary */ = {isa = PBXGroup; children = (A0020000000000000000000E /* JLPTLibraryView.swift */, B02400000000000000000002 /* JLPTDashboardView.swift */,); path = JLPTLibrary; sourceTree = "<group>"; };
 		A00500000000000000000015 /* Adaptive */ = {isa = PBXGroup; children = (A00200000000000000000030 /* AdaptivePresentation.swift */, A00200000000000000000031 /* AdaptiveCenterViewModel.swift */, A00200000000000000000032 /* AdaptiveCenterView.swift */, A00200000000000000000033 /* AdaptiveCardDetailView.swift */, A00200000000000000000039 /* AdaptiveTrendView.swift */,); path = Adaptive; sourceTree = "<group>"; };
@@ -588,6 +590,7 @@
 				A00100000000000000000040 /* DeckMembershipPicker.swift in Sources */,
 				A00100000000000000000005 /* AddView.swift in Sources */,
 				A00100000000000000000006 /* SettingsView.swift in Sources */,
+				A00100000000000000000071 /* SettingsCategoryListView.swift in Sources */,
 				A0010000000000000000000D /* JLPTLibraryView.swift in Sources */,
                 B02400000000000000000001 /* JLPTDashboardView.swift in Sources */,
 				A0010000000000000000000F /* StudyScope.swift in Sources */,

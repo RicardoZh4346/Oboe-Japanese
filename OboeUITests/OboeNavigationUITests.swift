@@ -43,9 +43,11 @@ final class OboeNavigationUITests: XCTestCase {
             // sidebar 行内 Image/StaticText 共享同一 identifier，Image
             // 不可点击——用 staticTexts 查询锁定文本元素。
             let todayItem = app.staticTexts["sidebar-today"]
+            let inboxItem = app.staticTexts["sidebar-inbox"]
             let settingsItem = app.staticTexts["sidebar-settings"]
             let libraryItem = app.staticTexts["sidebar-jlpt-library"]
             XCTAssertTrue(todayItem.waitForExistence(timeout: 5), "缺少 sidebar 今日入口")
+            XCTAssertTrue(inboxItem.exists, "缺少 sidebar 收集箱入口")
             XCTAssertTrue(settingsItem.exists, "缺少 sidebar 设置入口")
             XCTAssertTrue(libraryItem.exists, "缺少 sidebar 词库入口")
 
@@ -74,12 +76,34 @@ final class OboeNavigationUITests: XCTestCase {
                 "decks 无选中条目时 detail 列应显示空态"
             )
 
+            // Inbox：提升为 sidebar 一级项，content 列表 + detail 空态。
+            inboxItem.tap()
+            XCTAssertTrue(
+                app.descendants(matching: .any)["inbox-list"].firstMatch
+                    .waitForExistence(timeout: 5)
+                    || app.descendants(matching: .any)["inbox-empty-state"].firstMatch
+                        .waitForExistence(timeout: 2),
+                "sidebar 收集箱选中后 content 列未显示列表或空态"
+            )
+            XCTAssertTrue(
+                app.descendants(matching: .any)["inbox-detail-empty"].firstMatch.exists,
+                "inbox 无选中条目时 detail 列应显示空态"
+            )
+
+            // Settings：三栏——content 分类列表 + detail 分类表单。
             settingsItem.tap()
             XCTAssertTrue(
-                app.navigationBars.matching(
-                    NSPredicate(format: "identifier BEGINSWITH %@", "设置")
-                ).firstMatch.waitForExistence(timeout: 5),
-                "sidebar 设置选中后未显示设置页"
+                app.descendants(matching: .any)["settings-category-list"].firstMatch
+                    .waitForExistence(timeout: 5),
+                "sidebar 设置选中后 content 列未显示分类列表"
+            )
+            let appearanceCategory = app.staticTexts["settings-category-appearance"]
+            XCTAssertTrue(appearanceCategory.waitForExistence(timeout: 3), "缺少外观分类")
+            appearanceCategory.tap()
+            XCTAssertTrue(
+                app.descendants(matching: .any)["appearance-picker"].firstMatch
+                    .waitForExistence(timeout: 5),
+                "选中外观分类后 detail 列未显示外观表单"
             )
         }
     }

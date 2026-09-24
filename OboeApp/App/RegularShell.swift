@@ -5,10 +5,13 @@ import SwiftUI
 /// regular 壳层：NavigationSplitView 分栏导航。
 ///
 /// - Decks 区：三栏（sidebar 选择 → content 列表 → detail 条目详情）。
-/// - 今日/设置：两栏（sidebar + detail 整页）——这两区没有独立的
-///   中间列表列，强行占一列只会留下空列。
+/// - Inbox 区：三栏（sidebar → content 条目列表 → detail 条目详情，
+///   宽屏下 OCR 原图与文本并排）。
+/// - Settings 区：三栏（sidebar → content 分类列表 → detail 分类表单）。
+/// - 今日：两栏（sidebar + detail 整页）——没有独立的中间列表列，
+///   强行占一列只会留下空列。
 ///
-/// sidebar 在两个分支间共享同一份内容（顶层 section + Decks 区
+/// sidebar 在各分支间共享同一份内容（顶层 section + Decks 区
 /// 条目）；壳层只组合既有页面，不复制页面实现；compact 行为由
 /// `CompactShell` 完整保留。
 struct RegularShell: View {
@@ -23,13 +26,19 @@ struct RegularShell: View {
 
     /// Decks 区 sidebar 列表数据：与 compact `DecksView` 同一个 model。
     @State private var deckModel: DeckListModel
+    /// Inbox 区 content 列共享的 model——detail 列编辑/删除后驱动列表
+    /// 重取，也负责把选中条目对象喂给 detail 列。
+    @State private var inboxModel: InboxViewModel
     /// detail 列保存后递增，驱动 content 列 `DeckDetailView` 重取。
     @State private var deckContentRevision = 0
     @State private var isPresentingCreateDeck = false
+    /// ⌘N 在 Inbox 上下文触发「手动添加」的壳层侧 binding。
+    @State private var isInboxCapturePresented = false
 
     /// sidebar 单 selection 词表：顶层 section 与 decks 内选择合并。
     private enum SidebarItem: Hashable {
         case today
+        case inbox
         case settings
         case decks(DeckSidebarSelection)
     }
@@ -56,23 +65,15 @@ struct RegularShell: View {
                 historyService: decks.historyService
             )
         )
+        _inboxModel = State(
+            initialValue: InboxViewModel(service: container.today.inboxService)
+        )
     }
 
     var body: some View {
         @Bindable var navigation = navigation
         Group {
-            if navigation.section == .decks {
-                NavigationSplitView(
-                    columnVisibility: $navigation.splitVisibility,
-                    preferredCompactColumn: $navigation.preferredCompactColumn
-                ) {
-                    sidebar
-                } content: {
-                    decksContent
-                } detail: {
-                    decksDetail
-                }
-            } else {
+            if navigation.section == .today {
                 NavigationSplitView(
                     columnVisibility: $navigation.splitVisibility,
                     preferredCompactColumn: $navigation.preferredCompactColumn
@@ -80,6 +81,17 @@ struct RegularShell: View {
                     sidebar
                 } detail: {
                     featureDetail
+                }
+            } else {
+                NavigationSplitView(
+                    columnVisibility: $navigation.splitVisibility,
+                    preferredCompactColumn: $navigation.preferredCompactColumn
+                ) {
+                    sidebar
+                } content: {
+                    middleColumn
+                } detail: {
+                    regularDetail
                 }
             }
         }
@@ -95,10 +107,44 @@ struct RegularShell: View {
         .onChange(of: navigation.section) { _, section in
             updateColumnVisibility(for: section)
         }
-        .sheet(isPresented: $isPresentingCreateDeck) {
+        .adaptivePresentation(
+            role: .editor,
+            isPresented: $isPresentingCreateDeck
+        ) {
             DeckNameEditor(title: "新建牌组", initialName: "") { name in
                 await deckModel.createDeck(named: name)
             }
+        }
+        // 硬件键盘快捷键（iPad）：⌘1-4 切 section、⌘F 跳搜索、
+        // ⌘N 在当前上下文新建。隐藏按钮承载 shortcut，不进可访问性树。
+        .background {
+            Group {
+                Button("") { navigation.selectTab(.today) }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("") { navigation.selectTab(.decks) }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("") { navigation.selectTab(.inbox) }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("") { navigation.selectTab(.settings) }
+                    .keyboardShortcut("4", modifiers: .command)
+                Button("") { navigation.selectDeckSidebar(.search) }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("") {
+                    switch navigation.section {
+                    case .decks:
+                        isPresentingCreateDeck = true
+                    case .inbox:
+                        isInboxCapturePresented = true
+                    case .today, .settings:
+                        break
+                    }
+                }
+                .keyboardShortcut("n", modifiers: .command)
+            }
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
     }
 
@@ -110,6 +156,8 @@ struct RegularShell: View {
                 switch navigation.section {
                 case .today:
                     return .today
+                case .inbox:
+                    return .inbox
                 case .settings:
                     return .settings
                 case .decks:
@@ -122,6 +170,8 @@ struct RegularShell: View {
                 switch item {
                 case .today:
                     navigation.selectTab(.today)
+                case .inbox:
+                    navigation.selectTab(.inbox)
                 case .settings:
                     navigation.selectTab(.settings)
                 case .decks(let selection):
@@ -137,6 +187,9 @@ struct RegularShell: View {
                 Label("今日", systemImage: "sun.max")
                     .tag(SidebarItem.today)
                     .accessibilityIdentifier("sidebar-today")
+                Label("收集箱", systemImage: "tray")
+                    .tag(SidebarItem.inbox)
+                    .accessibilityIdentifier("sidebar-inbox")
                 Label("设置", systemImage: "gearshape")
                     .tag(SidebarItem.settings)
                     .accessibilityIdentifier("sidebar-settings")
@@ -176,6 +229,48 @@ struct RegularShell: View {
                 }
                 .accessibilityIdentifier("sidebar-deck-create-button")
             }
+        }
+    }
+
+    // MARK: - 三栏 split 的 content / detail 分发
+
+    /// 三栏 split 的 content 列：decks→牌组内容，inbox→收集箱列表，
+    /// settings→分类列表。
+    @ViewBuilder
+    private var middleColumn: some View {
+        switch navigation.section {
+        case .decks:
+            decksContent
+        case .inbox:
+            inboxContent
+        case .settings:
+            SettingsCategoryListView(
+                selection: Binding(
+                    get: { navigation.selectedSettingsRoute },
+                    set: { route in
+                        if let route { navigation.selectedSettingsRoute = route }
+                    }
+                )
+            )
+        case .today:
+            // 不可达：today 走两栏分支。
+            EmptyView()
+        }
+    }
+
+    /// 三栏 split 的 detail 列：decks→条目详情，inbox→收集条目详情，
+    /// settings→分类表单。
+    @ViewBuilder
+    private var regularDetail: some View {
+        switch navigation.section {
+        case .decks:
+            decksDetail
+        case .inbox:
+            inboxDetail
+        case .settings:
+            settingsDetail
+        case .today:
+            EmptyView()
         }
     }
 
@@ -303,7 +398,83 @@ struct RegularShell: View {
         }
     }
 
-    // MARK: - 今日 / 设置 detail
+    // MARK: - Inbox 区 content / detail
+
+    @ViewBuilder
+    private var inboxContent: some View {
+        let today = container.today
+        NavigationStack {
+            InboxView(
+                service: today.inboxService,
+                processingServices: today.processingServices,
+                inboxImageStore: container.shared.inboxImageStore,
+                ocrService: container.shared.ocrService,
+                drainSharedCaptures: operations.drainSharedCaptures,
+                sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
+                importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
+                model: inboxModel,
+                onSelectItem: { item in
+                    navigation.selectInboxItem(id: item.id)
+                },
+                externalCapturePresentation: $isInboxCapturePresented
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var inboxDetail: some View {
+        if let itemID = navigation.selectedInboxItemID,
+           let item = inboxModel.items.first(where: { $0.id == itemID }) {
+            NavigationStack {
+                InboxItemDetailView(
+                    item: item,
+                    service: container.today.inboxService,
+                    processingServices: container.today.processingServices,
+                    inboxImageStore: container.shared.inboxImageStore,
+                    onChanged: {
+                        Task { await inboxModel.reload() }
+                    },
+                    onDeleted: {
+                        navigation.selectedInboxItemID = nil
+                    }
+                )
+                // selection 驱动重建时重置详情内部 @State。
+                .id(item.id)
+            }
+        } else {
+            ContentUnavailableView(
+                "选择一条收集内容",
+                systemImage: "tray",
+                description: Text("在中间列选择一条收集内容查看详情。")
+            )
+            .accessibilityIdentifier("inbox-detail-empty")
+        }
+    }
+
+    // MARK: - Settings 区 detail
+
+    @ViewBuilder
+    private var settingsDetail: some View {
+        if let route = navigation.selectedSettingsRoute {
+            SettingsView(
+                dependencies: container.settings,
+                operations: operations,
+                isDatabaseOperationInProgress: isDatabaseOperationInProgress,
+                categoryFilter: route
+            )
+            // 分类切换时重建，重置分类视图内部 @State。
+            .id(route)
+        } else {
+            ContentUnavailableView(
+                "选择一个设置分类",
+                systemImage: "gearshape",
+                description: Text("在中间列选择一个分类查看设置。")
+            )
+            .accessibilityIdentifier("settings-detail-empty")
+        }
+    }
+
+    // MARK: - 今日 detail（两栏 split）
 
     @ViewBuilder
     private var featureDetail: some View {
@@ -331,14 +502,8 @@ struct RegularShell: View {
                 sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
                 importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures
             )
-        case .settings:
-            SettingsView(
-                dependencies: container.settings,
-                operations: operations,
-                isDatabaseOperationInProgress: isDatabaseOperationInProgress
-            )
-        case .decks:
-            // 不可达：decks 走三栏分支。
+        case .settings, .inbox, .decks:
+            // 不可达：这三个区走三栏分支。
             EmptyView()
         }
     }
@@ -378,10 +543,10 @@ struct RegularShell: View {
         }
     }
 
-    /// decks 三栏全显（`.all`）；两栏 split 下 `.doubleColumn` 即
-    /// sidebar+detail 同显。section 切换时归一化，避免把 decks 的
-    /// 折叠态带进两栏 split。
+    /// 三栏区（decks/inbox/settings）全显 `.all`；两栏 today 用
+    /// `.doubleColumn`。reducer 已同批归一化，这里兜底——三栏语义下
+    /// `.doubleColumn` 折叠的是 sidebar 而非 content。
     private func updateColumnVisibility(for section: AppSection) {
-        navigation.splitVisibility = section == .decks ? .all : .doubleColumn
+        navigation.splitVisibility = section == .today ? .doubleColumn : .all
     }
 }

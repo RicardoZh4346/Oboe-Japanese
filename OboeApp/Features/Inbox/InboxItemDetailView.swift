@@ -8,6 +8,9 @@ struct InboxItemDetailView: View {
     private let processingServices: InboxProcessingServices?
     private let inboxImageStore: InboxImageStore?
     private let onChanged: () -> Void
+    /// regular 壳层 detail 列下非 nil：删除成功后由壳层清选择（detail
+    /// 列没有 push 可 pop）；compact 下为 nil，照旧 dismiss 返回。
+    private let onDeleted: (() -> Void)?
 
     @State private var item: InboxItem
     @State private var imagePreviewData: Data?
@@ -16,33 +19,38 @@ struct InboxItemDetailView: View {
     @State private var isConfirmingDelete = false
     @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.layoutPolicy) private var layoutPolicy
 
     init(
         item: InboxItem,
         service: InboxService,
         processingServices: InboxProcessingServices? = nil,
         inboxImageStore: InboxImageStore? = nil,
-        onChanged: @escaping () -> Void
+        onChanged: @escaping () -> Void,
+        onDeleted: (() -> Void)? = nil
     ) {
         self.service = service
         self.processingServices = processingServices
         self.inboxImageStore = inboxImageStore
         self.onChanged = onChanged
+        self.onDeleted = onDeleted
         _item = State(initialValue: item)
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: OboeTheme.Spacing.lg) {
-                OboeCardSurface(padding: OboeTheme.Spacing.cardPaddingCompact) {
-                    Text(item.text)
-                        .font(.body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("inbox-detail-text")
+                // 宽屏：OCR 原图与文本并排（充分利用 detail 列宽度）；
+                // compact 维持纵向堆叠。
+                if layoutPolicy.mode != .compact, item.imageReference != nil {
+                    HStack(alignment: .top, spacing: OboeTheme.Spacing.lg) {
+                        textCard
+                        attachmentSection
+                    }
+                } else {
+                    textCard
+                    attachmentSection
                 }
-
-                attachmentSection
 
                 metadata
 
@@ -55,7 +63,7 @@ struct InboxItemDetailView: View {
         .background(OboeTheme.Colors.pageBackground)
         .navigationTitle("收集条目")
         .secondaryPage()
-        .sheet(isPresented: $isEditorPresented) {
+        .adaptivePresentation(role: .editor, isPresented: $isEditorPresented) {
             NavigationStack {
                 InboxItemEditView(item: item, service: service) { updated in
                     item = updated
@@ -92,6 +100,16 @@ struct InboxItemDetailView: View {
         }
         .task {
             await loadImagePreview()
+        }
+    }
+
+    private var textCard: some View {
+        OboeCardSurface(padding: OboeTheme.Spacing.cardPaddingCompact) {
+            Text(item.text)
+                .font(.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("inbox-detail-text")
         }
     }
 
@@ -311,6 +329,7 @@ struct InboxItemDetailView: View {
         do {
             try await service.delete(id: item.id)
             onChanged()
+            onDeleted?()
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

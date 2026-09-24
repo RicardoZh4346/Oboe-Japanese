@@ -8,15 +8,41 @@ enum DeckSidebarSelection: Hashable {
     case deck(UUID)
 }
 
-/// Settings 区二级路由：regular 壳层下作为 detail 列选择，
-/// compact 壳层下继续由现有 NavigationLink push 承载。
-enum SettingsRoute: Hashable {
+/// Settings 区二级路由：regular 壳层下 content 列为分类列表、detail
+/// 列渲染对应表单；compact 壳层下 `SettingsView` 仍以单 List 承载全部
+/// 分类（filter=nil）。
+enum SettingsRoute: Hashable, CaseIterable {
     case appearance
+    case learning
     case speech
     case adaptive
     case ai
     case backup
     case about
+
+    var title: String {
+        switch self {
+        case .appearance: "外观"
+        case .learning: "学习计划"
+        case .speech: "发音与回忆"
+        case .adaptive: "主动回忆与易错卡"
+        case .ai: "AI 服务"
+        case .backup: "数据与快照"
+        case .about: "关于"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .appearance: "paintbrush"
+        case .learning: "calendar.day.timeline.left"
+        case .speech: "speaker.wave.2"
+        case .adaptive: "brain.head.profile"
+        case .ai: "sparkles"
+        case .backup: "externaldrive"
+        case .about: "info.circle"
+        }
+    }
 }
 
 /// typed route 词汇表：逐步替换闭包型 NavigationLink，使 push 状态可恢复。

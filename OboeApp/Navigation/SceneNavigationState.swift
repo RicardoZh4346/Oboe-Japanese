@@ -51,6 +51,7 @@ final class SceneNavigationState {
         selectedNoteID = nil
         selectedNoteKind = nil
         selectedInboxItemID = nil
+        selectedSettingsRoute = nil
         todayPath = NavigationPath()
         decksPath = NavigationPath()
         settingsPath = NavigationPath()
@@ -70,13 +71,26 @@ final class SceneNavigationState {
     /// compact 壳层的 Tab 选择与 section 的映射。regular 下 also
     /// 归一化列可见性——与 section 变更同批写入，新 split 初始化时
     /// 读到的就是正确值（事后 onChange 会晚一拍，列已按旧值布局）。
+    /// today 是两栏 split（sidebar+detail）；decks/inbox/settings 是
+    /// 三栏 split，必须 `.all`——三栏语义下 `.doubleColumn` 折叠的是
+    /// sidebar 而非 content。
     func selectTab(_ section: AppSection) {
         self.section = section
-        // 两栏 split：sidebar+detail 同显。
-        splitVisibility = .doubleColumn
-        // 两栏 split 没有 content 列——preferredCompactColumn 只能取
-        // sidebar/detail，压扁时直接给 detail（功能页本身）。
-        preferredCompactColumn = .detail
+        switch section {
+        case .today:
+            splitVisibility = .doubleColumn
+            // 两栏 split 没有 content 列——preferredCompactColumn 只能取
+            // sidebar/detail，压扁时直接给 detail（功能页本身）。
+            preferredCompactColumn = .detail
+        case .decks, .inbox, .settings:
+            splitVisibility = .all
+            preferredCompactColumn = .sidebar
+        }
+    }
+
+    /// regular inbox 区 detail 列选择：选中一条收集内容。
+    func selectInboxItem(id: UUID) {
+        selectedInboxItemID = id
     }
 
     /// regular sidebar 选中 Decks 区条目：切到 decks section 并清空

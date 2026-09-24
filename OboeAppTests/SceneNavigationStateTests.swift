@@ -146,4 +146,49 @@ final class SceneNavigationStateTests: XCTestCase {
 
         XCTAssertFalse(before === after)
     }
+
+    /// PR 8：today 是两栏 split；decks/inbox/settings 是三栏 split——
+    /// 三栏下 `.doubleColumn` 会折叠 sidebar，必须 `.all`。
+    func testSelectTabNormalizesVisibilityPerSection() {
+        let state = SceneNavigationState()
+
+        state.selectTab(.inbox)
+        XCTAssertEqual(state.splitVisibility, .all)
+        XCTAssertEqual(state.preferredCompactColumn, .sidebar)
+
+        state.selectTab(.settings)
+        XCTAssertEqual(state.splitVisibility, .all)
+
+        state.selectTab(.today)
+        XCTAssertEqual(state.splitVisibility, .doubleColumn)
+        XCTAssertEqual(state.preferredCompactColumn, .detail)
+
+        state.selectTab(.decks)
+        XCTAssertEqual(state.splitVisibility, .all)
+    }
+
+    /// PR 8：regular 下 Inbox 提升为一级 section，行选择写 detail 列。
+    func testSelectInboxItemRecordsSelection() {
+        let state = SceneNavigationState()
+        let itemID = UUID()
+        state.selectTab(.inbox)
+
+        state.selectInboxItem(id: itemID)
+
+        XCTAssertEqual(state.section, .inbox)
+        XCTAssertEqual(state.selectedInboxItemID, itemID)
+    }
+
+    /// 世代变更清空 inbox 选择与设置路由——它们绑定旧实体/旧容器。
+    func testGenerationChangeClearsInboxAndSettingsSelection() {
+        let state = SceneNavigationState()
+        state.selectTab(.inbox)
+        state.selectInboxItem(id: UUID())
+        state.selectedSettingsRoute = .backup
+
+        state.databaseGenerationDidChange(to: 1)
+
+        XCTAssertNil(state.selectedInboxItemID)
+        XCTAssertNil(state.selectedSettingsRoute)
+    }
 }

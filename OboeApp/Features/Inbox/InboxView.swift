@@ -19,7 +19,14 @@ struct InboxView: View {
     private let drainSharedCaptures: @Sendable () async -> Void
     private let sharedCapturesAwaitingImport: Int?
     private let importAwaitingSharedCaptures: @Sendable () async -> Void
-
+    /// regular 壳层下非 nil：行点击写 detail 选择而非 NavigationLink
+    /// push；compact 下为 nil，行为不变。
+    private let onSelectItem: ((InboxItem) -> Void)?
+    /// 壳层持有的捕获呈现 binding（⌘N 等外部触发用）；nil 时用内部
+    /// @State。
+    private let externalCapturePresentation: Binding<Bool>?
+    /// regular 壳层共享的 model——detail 列修改后驱动列表重取；
+    /// compact 传 nil，视图自持有。
     init(
         service: InboxService,
         processingServices: InboxProcessingServices? = nil,
@@ -27,7 +34,10 @@ struct InboxView: View {
         ocrService: (any OCRRecognizing)? = nil,
         drainSharedCaptures: @escaping @Sendable () async -> Void = {},
         sharedCapturesAwaitingImport: Int? = nil,
-        importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {}
+        importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
+        model: InboxViewModel? = nil,
+        onSelectItem: ((InboxItem) -> Void)? = nil,
+        externalCapturePresentation: Binding<Bool>? = nil
     ) {
         self.service = service
         self.processingServices = processingServices
@@ -36,7 +46,14 @@ struct InboxView: View {
         self.drainSharedCaptures = drainSharedCaptures
         self.sharedCapturesAwaitingImport = sharedCapturesAwaitingImport
         self.importAwaitingSharedCaptures = importAwaitingSharedCaptures
-        _model = State(initialValue: InboxViewModel(service: service))
+        self.onSelectItem = onSelectItem
+        self.externalCapturePresentation = externalCapturePresentation
+        _model = State(initialValue: model ?? InboxViewModel(service: service))
+    }
+
+    /// 捕获呈现的统一入口：外部 binding 优先，否则内部 @State。
+    private var capturePresentation: Binding<Bool> {
+        externalCapturePresentation ?? $isCapturePresented
     }
 
     var body: some View {
@@ -94,7 +111,10 @@ struct InboxView: View {
                                 Label("图片收集", systemImage: "photo.badge.plus")
                             }
                             .accessibilityIdentifier("inbox-image-capture-entry")
-                            .sheet(isPresented: $isImageCapturePresented) {
+                            .adaptivePresentation(
+                                role: .focusedWorkflow,
+                                isPresented: $isImageCapturePresented
+                            ) {
                                 ImageCaptureView(
                                     imageStore: inboxImageStore,
                                     ocrService: ocrService,
@@ -104,7 +124,7 @@ struct InboxView: View {
                             }
                         }
                         Button {
-                            isCapturePresented = true
+                            capturePresentation.wrappedValue = true
                         } label: {
                             Label("手动添加", systemImage: "plus")
                         }
@@ -132,7 +152,7 @@ struct InboxView: View {
                 selection.removeAll()
             }
         }
-        .sheet(isPresented: $isCapturePresented) {
+        .adaptivePresentation(role: .editor, isPresented: capturePresentation) {
             NavigationStack {
                 InboxCaptureView(service: service) {
                     Task { await model.reload() }
@@ -244,7 +264,7 @@ struct InboxView: View {
                     title: "收集箱是空的",
                     message: "通过手动添加、粘贴或分享，把日语文本先收进来。",
                     actionTitle: "手动添加",
-                    action: { isCapturePresented = true },
+                    action: { capturePresentation.wrappedValue = true },
                     actionIdentifier: "inbox-empty-add-button",
                     stateIdentifier: "inbox-empty-state"
                 )
@@ -342,6 +362,15 @@ struct InboxView: View {
                     .accessibilityHidden(true)
                     InboxRow(item: item)
                 }
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("inbox-row-\(item.id.uuidString)")
+        } else if let onSelectItem {
+            // regular 壳层：点击写 detail 列选择，不在 content 列 push。
+            Button {
+                onSelectItem(item)
+            } label: {
+                InboxRow(item: item)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("inbox-row-\(item.id.uuidString)")
