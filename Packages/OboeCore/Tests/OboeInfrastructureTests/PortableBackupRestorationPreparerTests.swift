@@ -105,7 +105,7 @@ final class PortableBackupRestorationPreparerTests: XCTestCase {
         let (current, backupURL) = try await makeValidBackup(in: fixture)
         var futureText = try String(contentsOf: backupURL, encoding: .utf8)
         futureText = futureText.replacingOccurrences(
-            of: #""formatVersion":6"#,
+            of: "\"formatVersion\":\(PortableBackupFormat.currentVersion)",
             with: #""formatVersion":99"#
         )
         let futureURL = fixture.rootURL.appendingPathComponent("future.oboe-backup")

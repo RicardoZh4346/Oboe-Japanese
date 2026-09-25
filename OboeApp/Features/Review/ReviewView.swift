@@ -1,5 +1,7 @@
 import OboeDomain
+import OboeInfrastructure
 import SwiftUI
+import UIKit
 
 struct ReviewView: View {
     let service: StudySessionService
@@ -14,6 +16,12 @@ struct ReviewView: View {
     /// T07: the repair sheet's manual-edit fallback, keyed by note id + kind.
     let repairNoteEditor: ((UUID, KnowledgePointKind, @escaping () async -> Void) -> AnyView)?
     let speechService: any SpeechService
+    /// S07：背面来源区依赖——nil 时 StudyCardView 不渲染来源块。
+    let sourceContextRepository: (any SourceContextRepository)?
+    let inboxImageStore: InboxImageStore?
+    /// S09：专项学习驱动——normal scope 可为 nil。
+    let customStudyRepository: (any CustomStudyRepository)?
+    let customStudyService: CustomStudyService?
     let scope: StudyScope
 
     @Environment(\.scenePhase) private var scenePhase
@@ -27,6 +35,8 @@ struct ReviewView: View {
     /// belongs to the card that spawned it.
     @State private var aiRepairCardID: UUID?
     @State private var recallInputController = RecallInputController()
+    /// 「收起键盘」只在键盘可见时显示——跟随 willShow/willHide。
+    @State private var isKeyboardVisible = false
 
     init(
         service: StudySessionService,
@@ -38,6 +48,10 @@ struct ReviewView: View {
         deckService: DeckManagementService? = nil,
         repairNoteEditor: ((UUID, KnowledgePointKind, @escaping () async -> Void) -> AnyView)? = nil,
         speechService: any SpeechService,
+        sourceContextRepository: (any SourceContextRepository)? = nil,
+        inboxImageStore: InboxImageStore? = nil,
+        customStudyRepository: (any CustomStudyRepository)? = nil,
+        customStudyService: CustomStudyService? = nil,
         scope: StudyScope
     ) {
         self.service = service
@@ -49,6 +63,10 @@ struct ReviewView: View {
         self.deckService = deckService
         self.repairNoteEditor = repairNoteEditor
         self.speechService = speechService
+        self.sourceContextRepository = sourceContextRepository
+        self.inboxImageStore = inboxImageStore
+        self.customStudyRepository = customStudyRepository
+        self.customStudyService = customStudyService
         self.scope = scope
     }
 
@@ -61,6 +79,8 @@ struct ReviewView: View {
                 adaptiveCardService: adaptiveCardService,
                 adaptivePreferencesService: adaptivePreferencesService,
                 speechService: speechService,
+                customStudyRepository: customStudyRepository,
+                customStudyService: customStudyService,
                 scope: scope
             )
         }
@@ -68,12 +88,16 @@ struct ReviewView: View {
 
     var body: some View {
         Group {
-            if model.isLoading, model.plan == nil {
+            if model.isLoading, model.plan == nil, !model.isCustomSession {
                 ProgressView("正在载入下一张…")
             } else if let card = model.card {
                 // 聚焦工作流限宽居中——iPad 大屏不出现全宽卡片。
                 ReadableContentContainer(role: .review) {
                     reviewContent(card)
+                }
+            } else if model.isCustomSession {
+                ReadableContentContainer(role: .review) {
+                    customStudyState
                 }
             } else if let plan = model.plan {
                 ReadableContentContainer(role: .review) {
@@ -121,7 +145,20 @@ struct ReviewView: View {
             recallInputController.closeKeyboard()
             model.stopSpeech()
             model.stopWaitingRefresh()
+            // 离开即结束本次会话呈现：否则 scene 缓存的 model 下次进入
+            // 会先闪出上一会话的旧卡。
+            model.resetPresentedSession()
         }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillShowNotification
+            )
+        ) { _ in isKeyboardVisible = true }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification
+            )
+        ) { _ in isKeyboardVisible = false }
         .alert(
             "载入失败",
             isPresented: Binding(
@@ -162,6 +199,8 @@ struct ReviewView: View {
         VStack(spacing: 0) {
             if let plan = model.plan {
                 progressHeader(plan: plan)
+            } else if model.isCustomSession {
+                customProgressHeader
             }
 
             VStack(spacing: 0) {
@@ -179,7 +218,9 @@ struct ReviewView: View {
                         typedAnswerComparison: model.recallAttempt?.comparison,
                         onAIRepair: aiRepairService == nil ? nil : {
                             aiRepairCardID = card.content.cardID
-                        }
+                        },
+                        sourceContextRepository: sourceContextRepository,
+                        inboxImageStore: inboxImageStore
                     )
                     .padding(.horizontal, OboeTheme.pageHorizontalPadding)
                     .padding(.vertical, OboeTheme.Spacing.md)
@@ -299,6 +340,7 @@ struct ReviewView: View {
                         choices: card.choices,
                         isSubmitting: model.isSubmitting,
                         submittingRating: model.submittingRating,
+                        showsIntervals: model.showsIntervals,
                         onRate: { rating in
                             Task { await model.submit(rating) }
                         }
@@ -315,9 +357,11 @@ struct ReviewView: View {
                     .buttonStyle(.oboePrimary)
                     .disabled(!model.canConfirmRecall || model.mustPlayListeningPromptFirst)
                     .accessibilityIdentifier("review-confirm-input-button")
-                Button("收起键盘") { recallInputController.closeKeyboard() }
-                    .font(.footnote)
-                    .accessibilityIdentifier("review-dismiss-keyboard-button")
+                if isKeyboardVisible {
+                    Button("收起键盘") { recallInputController.closeKeyboard() }
+                        .font(.footnote)
+                        .accessibilityIdentifier("review-dismiss-keyboard-button")
+                }
             } else {
                 Button("显示答案") {
                     model.revealAnswer()
@@ -413,12 +457,12 @@ struct ReviewView: View {
             OboeEmptyState(
                 systemImage: "clock",
                 title: "当前已完成",
-                message: "\(StudyTimeText.until(nextDue))后还有 \(laterCount) 张，可先退出或等待自动刷新。",
-                actionTitle: "刷新",
-                action: { Task { await model.refresh() } },
-                actionIdentifier: "review-wait-refresh-button",
+                message: "\(StudyTimeText.until(nextDue))后还有 \(laterCount) 张，到期会自动开始；也可先退出。",
                 stateIdentifier: "review-waiting-state"
             )
+            Button("完成") { dismiss() }
+                .buttonStyle(.oboePrimary)
+                .accessibilityIdentifier("review-waiting-dismiss-button")
             Spacer()
         }
         .background(OboeTheme.Colors.pageBackground)
@@ -453,6 +497,92 @@ struct ReviewView: View {
             }
         }
         .background(OboeTheme.Colors.pageBackground)
+    }
+
+    /// S09 专项进度头：冻结队列上的位置 + 模式标签（practice 不暗示
+    /// FSRS 影响；scheduled 明示计入正式调度）。
+    private var customProgressHeader: some View {
+        VStack(spacing: OboeTheme.Spacing.xs) {
+            HStack {
+                Text(
+                    "已呈现 \(model.customPresentedCount) · 剩余 \(model.customRemainingCount)"
+                )
+                .accessibilityIdentifier("review-custom-progress")
+                Spacer()
+                Text(
+                    scope.customMode == .practiceOnly
+                        ? "练习·不影响排期" : "专项·计入调度"
+                )
+                .accessibilityIdentifier("review-custom-mode")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let session = model.customSession,
+               !session.queue.cardIDs.isEmpty {
+                let total = Double(session.queue.cardIDs.count)
+                ProgressView(
+                    value: Double(model.customPresentedCount) / total
+                )
+                .tint(OboeTheme.Colors.accent)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+    }
+
+    /// S09 专项完成/空态：空队列、删除卡耗尽、会话结束统一落这里；
+    /// 「再来一轮」按同 filter 新开会话（队列重新冻结）。
+    @ViewBuilder
+    private var customStudyState: some View {
+        if model.isLoading {
+            ProgressView("正在载入下一张…")
+        } else {
+            VStack(spacing: 0) {
+                if model.customSession != nil {
+                    customProgressHeader
+                }
+                Spacer()
+                VStack(spacing: OboeTheme.Spacing.lg) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 52))
+                        .foregroundStyle(OboeTheme.Colors.accent)
+                        .accessibilityHidden(true)
+                    Text(
+                        model.customSession == nil
+                            ? "专项学习已结束" : "本次专项学习完成"
+                    )
+                    .font(.title2.weight(.semibold))
+                    .accessibilityIdentifier("review-custom-complete-state")
+                    if scope.customMode == .practiceOnly {
+                        Text(
+                            "练习 \(model.customPresentedCount) 张 · 重来 \(model.customAgainCount) 次 · 不影响排期"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("review-custom-summary")
+                    } else {
+                        Text("正式提交 \(model.customPresentedCount) 次评分")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("review-custom-summary")
+                    }
+                    if model.customSession != nil {
+                        Button("再来一轮") {
+                            Task { await model.restartCustomSession() }
+                        }
+                        .buttonStyle(.oboePrimary)
+                        .accessibilityIdentifier("review-custom-restart-button")
+                    }
+                    Button("完成") { dismiss() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("review-finish-button")
+                }
+                .padding(.horizontal, OboeTheme.pageHorizontalPadding)
+                Spacer()
+            }
+            .background(OboeTheme.Colors.pageBackground)
+        }
     }
 
     @ViewBuilder

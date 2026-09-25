@@ -15,6 +15,11 @@ struct TodayView: View {
     let inboxService: InboxService
     let processingServices: InboxProcessingServices
     let inboxImageStore: InboxImageStore?
+    /// S07：复习背面「来源」区——nil 时不渲染（与旧行为一致）。
+    let sourceContextRepository: (any SourceContextRepository)?
+    /// S09：专项学习驱动（今日复习入口的 ReviewView 透传）。
+    let customStudyRepository: (any CustomStudyRepository)?
+    let customStudyService: CustomStudyService?
     let ocrService: (any OCRRecognizing)?
     let drainSharedCaptures: @Sendable () async -> Void
     let pendingContinueItemID: UUID?
@@ -45,6 +50,9 @@ struct TodayView: View {
         inboxService: InboxService,
         processingServices: InboxProcessingServices,
         inboxImageStore: InboxImageStore? = nil,
+        sourceContextRepository: (any SourceContextRepository)? = nil,
+        customStudyRepository: (any CustomStudyRepository)? = nil,
+        customStudyService: CustomStudyService? = nil,
         ocrService: (any OCRRecognizing)? = nil,
         drainSharedCaptures: @escaping @Sendable () async -> Void = {},
         pendingContinueItemID: UUID? = nil,
@@ -64,6 +72,9 @@ struct TodayView: View {
         self.inboxService = inboxService
         self.processingServices = processingServices
         self.inboxImageStore = inboxImageStore
+        self.sourceContextRepository = sourceContextRepository
+        self.customStudyRepository = customStudyRepository
+        self.customStudyService = customStudyService
         self.ocrService = ocrService
         self.drainSharedCaptures = drainSharedCaptures
         self.pendingContinueItemID = pendingContinueItemID
@@ -102,6 +113,10 @@ struct TodayView: View {
                 }
             }
             .navigationTitle(streakTitle)
+            // 二级页（收集箱/每日统计等）经 secondaryPage() 隐藏 Tab
+            // Bar；这里显式钉住一级页的可见性，pop 返回时 Tab Bar 跟随
+            // 转场同步恢复，消除「bar 晚到 → 内容整体上移」的跳动。
+            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     if let openSettings {
@@ -139,6 +154,10 @@ struct TodayView: View {
                         )
                     },
                     speechService: speechService,
+                    sourceContextRepository: sourceContextRepository,
+                    inboxImageStore: inboxImageStore,
+                    customStudyRepository: customStudyRepository,
+                    customStudyService: customStudyService,
                     scope: scope
                 )
             }

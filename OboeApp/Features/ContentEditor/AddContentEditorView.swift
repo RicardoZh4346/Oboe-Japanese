@@ -32,8 +32,13 @@ struct AddContentEditorView: View {
     @State private var isConfirmingDuplicateCommit = false
     @State private var isVocabularyAdditionalFieldsExpanded = false
     @State private var isGrammarAdditionalFieldsExpanded = false
+    @State private var isDictionaryLookupPresented = false
     @FocusState private var isSentenceAnalysisInputFocused: Bool
 
+    /// S07：词汇表单「查词典」入口——nil 时按钮不渲染。
+    private let dictionaryQueryService: DictionaryQueryService?
+    /// S07：已有 Note 加牌组的来源落库；nil 时跳过。
+    private let sourceContextRepository: (any SourceContextRepository)?
     private let title: String
 
     init(
@@ -56,6 +61,10 @@ struct AddContentEditorView: View {
         importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
         captureSession: CaptureEditorSession? = nil,
         requiredDeckID: UUID? = nil,
+        vocabularyPrefill: VocabularyFormData? = nil,
+        sourceContextDraft: SourceContextDraft? = nil,
+        dictionaryQueryService: DictionaryQueryService? = nil,
+        sourceContextRepository: (any SourceContextRepository)? = nil,
         title: String = "添加"
     ) {
         self.deckService = deckService
@@ -75,6 +84,8 @@ struct AddContentEditorView: View {
         self.drainSharedCaptures = drainSharedCaptures
         self.sharedCapturesAwaitingImport = sharedCapturesAwaitingImport
         self.importAwaitingSharedCaptures = importAwaitingSharedCaptures
+        self.dictionaryQueryService = dictionaryQueryService
+        self.sourceContextRepository = sourceContextRepository
         self.title = title
         _model = State(
             initialValue: AddContentViewModel(
@@ -88,7 +99,10 @@ struct AddContentEditorView: View {
                 sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                 studyService: studyService,
                 requiredDeckID: requiredDeckID,
-                capture: captureSession
+                capture: captureSession,
+                vocabularyPrefill: vocabularyPrefill,
+                sourceContextDraft: sourceContextDraft,
+                sourceContextRepository: sourceContextRepository
             )
         )
     }
@@ -151,6 +165,16 @@ struct AddContentEditorView: View {
                 duplicateWarningSection
 
                 if model.kind == .vocabulary {
+                    if dictionaryQueryService != nil {
+                        Section {
+                            Button {
+                                isDictionaryLookupPresented = true
+                            } label: {
+                                Label("查词典", systemImage: "character.book.closed")
+                            }
+                            .accessibilityIdentifier("vocabulary-dictionary-lookup-button")
+                        }
+                    }
                     VocabularyRequiredSection(form: $model.vocabularyForm)
                     VocabularyAdditionalFieldsSection(
                         form: $model.vocabularyForm,
@@ -318,6 +342,28 @@ struct AddContentEditorView: View {
                 await model.createDeck(named: name)
             }
         }
+        .sheet(isPresented: $isDictionaryLookupPresented) {
+            if let dictionaryQueryService {
+                NavigationStack {
+                    DictionarySearchView(
+                        queryService: dictionaryQueryService,
+                        initialQuery: model.vocabularyForm.headword,
+                        onCreateCard: { entry in
+                            isDictionaryLookupPresented = false
+                            Task {
+                                let version = try? await dictionaryQueryService
+                                    .metadata().datasetVersion
+                                model.applyDictionaryPrefill(
+                                    entry,
+                                    datasetVersion: version
+                                )
+                            }
+                        },
+                        cardActionTitle: "填入表单"
+                    )
+                }
+            }
+        }
         .task(id: model.duplicateQuery) {
             await model.checkDuplicates()
         }
@@ -366,7 +412,9 @@ struct AddContentEditorView: View {
             sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
             historyService: historyService,
             speechService: speechService,
-            studyService: studyService
+            studyService: studyService,
+            dictionaryQueryService: dictionaryQueryService,
+            sourceContextRepository: sourceContextRepository
         )
     }
 

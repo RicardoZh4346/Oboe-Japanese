@@ -71,21 +71,32 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             ) == true else {
                 throw SubmitReviewError.studyDayNotActive
             }
-            guard try Bool.fetchOne(
-                db,
-                sql: """
-                    SELECT EXISTS(
-                        SELECT 1 FROM daily_tasks
-                        WHERE study_day_id = ? AND card_id = ?
-                          AND cancelled_at_ms IS NULL
-                    )
-                    """,
-                arguments: [
-                    DatabaseValueCodec.encode(mutation.request.studyDay.id),
-                    DatabaseValueCodec.encode(mutation.request.cardID)
-                ]
-            ) == true else {
-                throw SubmitReviewError.cardNotInStudyPlan
+            switch mutation.request.policy {
+            case .normal:
+                guard try Bool.fetchOne(
+                    db,
+                    sql: """
+                        SELECT EXISTS(
+                            SELECT 1 FROM daily_tasks
+                            WHERE study_day_id = ? AND card_id = ?
+                              AND cancelled_at_ms IS NULL
+                        )
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(mutation.request.studyDay.id),
+                        DatabaseValueCodec.encode(mutation.request.cardID)
+                    ]
+                ) == true else {
+                    throw SubmitReviewError.cardNotInStudyPlan
+                }
+            case .customScheduled(let sessionID):
+                // 专项提前评分（§7.3）：不查 daily_tasks，验证 session
+                // 资格与冻结队列成员。
+                try GRDBCustomStudyRepository.requireScheduledSubmissionTarget(
+                    sessionID: sessionID,
+                    cardID: mutation.request.cardID,
+                    in: db
+                )
             }
 
             let persistedPreviousState = ReviewSchedulingSnapshot(
@@ -137,6 +148,16 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
                 algorithmVersion: mutation.nextState.algorithmVersion
             )
             try Self.insert(log, in: db)
+            if case .customScheduled(let sessionID) = mutation.request.policy {
+                // §7.3：review_log 与来源登记同事务——一半都不能少。
+                try GRDBCustomStudyRepository.insertScheduledOrigin(
+                    ScheduledReviewOrigin(
+                        eventID: mutation.request.eventID,
+                        sessionID: sessionID
+                    ),
+                    in: db
+                )
+            }
             return log
         }
     }
@@ -179,18 +200,24 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             guard context.card.isEnabled else {
                 throw UndoReviewError.cardDisabled
             }
-            guard try Bool.fetchOne(
-                db,
-                sql: """
-                    SELECT EXISTS(
-                        SELECT 1 FROM daily_tasks
-                        WHERE study_day_id = ? AND card_id = ?
-                          AND cancelled_at_ms IS NULL
-                    )
-                    """,
-                arguments: [studyDayID, DatabaseValueCodec.encode(cardID)]
-            ) == true else {
-                throw UndoReviewError.cardNotInStudyPlan
+            // 专项来源的正式评分撤销不查 daily_tasks（§7.3：它从不在
+            // 计划队列里）；其余守卫不变。
+            let hasCustomOrigin = try GRDBCustomStudyRepository
+                .fetchScheduledOriginRow(eventID: request.eventID, in: db) != nil
+            if !hasCustomOrigin {
+                guard try Bool.fetchOne(
+                    db,
+                    sql: """
+                        SELECT EXISTS(
+                            SELECT 1 FROM daily_tasks
+                            WHERE study_day_id = ? AND card_id = ?
+                              AND cancelled_at_ms IS NULL
+                        )
+                        """,
+                    arguments: [studyDayID, DatabaseValueCodec.encode(cardID)]
+                ) == true else {
+                    throw UndoReviewError.cardNotInStudyPlan
+                }
             }
             guard try Bool.fetchOne(
                 db,

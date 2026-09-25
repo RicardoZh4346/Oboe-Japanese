@@ -15,6 +15,11 @@ struct OboeApp: App {
                 .task {
                     await runtime.start()
                 }
+                .onOpenURL { url in
+                    // S11：AirDrop/Files 打开 .oboe-backup——统一走
+                    // BackupImportCoordinator（串行校验 + preview）。
+                    runtime.backupImport.submit(url)
+                }
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:

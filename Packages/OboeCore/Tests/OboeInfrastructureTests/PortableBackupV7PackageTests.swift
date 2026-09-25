@@ -37,7 +37,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         XCTAssertEqual(manifest["format"] as? String, "oboe-portable-backup")
         XCTAssertEqual(manifest["formatVersion"] as? Int, 7)
         XCTAssertEqual(manifest["container"] as? String, "zip")
-        XCTAssertEqual(manifest["recordFormatVersion"] as? Int, 6)
+        XCTAssertEqual(manifest["recordFormatVersion"] as? Int, 7)
         let declaredAttachments = try XCTUnwrap(
             manifest["attachments"] as? [Any]
         )
@@ -46,14 +46,14 @@ final class PortableBackupV7PackageTests: XCTestCase {
         XCTAssertFalse(scopes.contains("imageAttachments"))
         XCTAssertTrue(scopes.contains("credentials"))
 
-        // records.ndjson 就是一个完整可读的 v6 备份流。
+        // records.ndjson 就是一个完整可读的 v7 记录流（外层包版本恒 7）。
         let records = try XCTUnwrap(files["records.ndjson"])
         let lines = records.split(separator: 0x0A)
         let first = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(lines[0])) as? [String: Any]
         )
         XCTAssertEqual(first["recordType"] as? String, "manifest")
-        XCTAssertEqual(first["formatVersion"] as? Int, 6)
+        XCTAssertEqual(first["formatVersion"] as? Int, 7)
         let last = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(lines.last!)) as? [String: Any]
         )
@@ -566,7 +566,7 @@ try fixture.unzip(package.url).keys
         let prepared = try await preparer.preparePackage(fileURL: package.url)
 
         XCTAssertEqual(prepared.sourceFormatVersion, 7)
-        XCTAssertEqual(prepared.preparedFormatVersion, 6)
+        XCTAssertEqual(prepared.preparedFormatVersion, 7)
         XCTAssertTrue(prepared.restoresInboxData)
         XCTAssertEqual(prepared.attachmentDescriptors.count, 2)
         XCTAssertEqual(
@@ -742,7 +742,7 @@ try fixture.unzip(package.url).keys
         try await preparer.discard(fromPackage)
 
         let fromNDJSON = try await preparer.prepareAutomatically(fileURL: ndjson.url)
-        XCTAssertEqual(fromNDJSON.sourceFormatVersion, 6)
+        XCTAssertEqual(fromNDJSON.sourceFormatVersion, 7)
         XCTAssertNil(fromNDJSON.stagedAttachmentsDirectoryURL)
         try await preparer.discard(fromNDJSON)
 

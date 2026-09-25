@@ -38,8 +38,8 @@ final class PortableBackupV6RestorationTests: XCTestCase {
 
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         let prepared = try await preparer(current: current, fixture: fixture).prepare(fileURL: backup.url)
-        XCTAssertEqual(prepared.sourceFormatVersion, 6)
-        XCTAssertEqual(prepared.preparedFormatVersion, 6)
+        XCTAssertEqual(prepared.sourceFormatVersion, PortableBackupFormat.currentVersion)
+        XCTAssertEqual(prepared.preparedFormatVersion, PortableBackupFormat.currentVersion)
 
         let queue = try DatabaseQueue(path: prepared.temporaryDatabaseURL.path)
         defer { try? queue.close() }
@@ -257,8 +257,11 @@ final class PortableBackupV6RestorationTests: XCTestCase {
             _ = try await preparer(current: current, fixture: fixture).prepare(fileURL: futureURL)
             XCTFail("future format version must be rejected")
         } catch let error as PortableBackupPreparationError {
-            guard case .futureFormatVersion(7) = error else {
-                return XCTFail("expected futureFormatVersion(7), got \(error)")
+            let expectedVersion = PortableBackupFormat.currentVersion + 1
+            guard case .futureFormatVersion(expectedVersion) = error else {
+                return XCTFail(
+                    "expected futureFormatVersion(\(expectedVersion)), got \(error)"
+                )
             }
         }
     }

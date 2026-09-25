@@ -26,6 +26,7 @@ enum CaptureCommitDigest {
         fields.append(
             contentsOf: commit.cards.map(\.templateKind.rawValue).sorted()
         )
+        fields.append(contentsOf: sourceContextFields(commit.sourceContext))
         return digest(fields)
     }
 
@@ -46,6 +47,7 @@ enum CaptureCommitDigest {
             commit.sourceText
         ]
         fields.append(contentsOf: commit.tags.map(\.normalizedName).sorted())
+        fields.append(contentsOf: sourceContextFields(commit.sourceContext))
         return digest(fields)
     }
 
@@ -60,6 +62,28 @@ enum CaptureCommitDigest {
             }
         )
         return digest(fields)
+    }
+
+    /// 来源记录只折逻辑内容字段——id/noteID/createdAt 每次 commit 都
+    /// 不同，不属于「用户确认的同一内容」。重试同 operationID 得同一
+    /// hash；改了来源文本/词典条目的重试判冲突（设计 §6.2）。
+    private static func sourceContextFields(_ context: SourceContext?) -> [String?] {
+        guard let context else { return [] }
+        return [
+            "source_context",
+            context.sourceType.rawValue,
+            context.originalSentence,
+            context.surroundingText,
+            context.sourceTitle,
+            context.sourceURL,
+            context.sourceApp,
+            context.imageReference,
+            context.dictionaryEntryID.map(String.init),
+            context.dictionaryVersion,
+            context.dictionarySenseKey,
+            context.selectedGlossLanguage,
+            context.isPrimary ? "1" : "0"
+        ]
     }
 
     private static func digest(_ fields: [String?]) -> String {

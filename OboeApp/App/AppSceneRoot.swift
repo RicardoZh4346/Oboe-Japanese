@@ -74,6 +74,48 @@ struct AppSceneRoot: View {
             .environment(\.layoutPolicy, policy)
         }
         .disabled(runtime.isDatabaseOperationInProgress)
+        // S11 统一备份导入：全量校验通过的包在这里呈现 preview；
+        // 取消释放 staging，确认走 controller 的安全替换序列。
+        .sheet(
+            item: Binding(
+                get: { runtime.backupImport.prepared },
+                set: { shown in
+                    if shown == nil { runtime.backupImport.discardPrepared() }
+                }
+            )
+        ) { preparation in
+            RestorationImpactPreviewView(preparation: preparation) {
+                try await runtime.backupImport.confirmPrepared()
+            }
+        }
+        .overlay {
+            if runtime.backupImport.isVerifying {
+                ZStack {
+                    Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView("正在验证备份…")
+                        Button("取消") { runtime.backupImport.cancelPending() }
+                            .accessibilityIdentifier("backup-import-cancel-button")
+                    }
+                    .padding()
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+                .accessibilityIdentifier("backup-import-verifying")
+            }
+        }
+        .alert(
+            "备份导入",
+            isPresented: Binding(
+                get: { runtime.backupImport.errorMessage != nil },
+                set: { shown in
+                    if !shown { runtime.backupImport.errorMessage = nil }
+                }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(runtime.backupImport.errorMessage ?? "未知错误")
+        }
         .overlay {
             if runtime.isDatabaseOperationInProgress {
                 ZStack {

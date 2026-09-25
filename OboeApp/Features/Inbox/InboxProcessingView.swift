@@ -16,6 +16,10 @@ struct InboxProcessingServices {
     let speechService: any SpeechService
     /// 读取主牌组设置，用于多牌组选择的默认归属。可选：缺省时回退首个牌组。
     let studyService: StudySessionService?
+    /// S07：编辑器内「查词典」入口；nil 时按钮不渲染。
+    let dictionaryQueryService: DictionaryQueryService?
+    /// S07：已有 Note 加牌组的来源落库；nil 时跳过。
+    let sourceContextRepository: (any SourceContextRepository)?
 }
 
 /// Pushed from the inbox detail view. Ensures a processing context exists,
@@ -59,6 +63,8 @@ struct InboxProcessingView: View {
                     speechService: services.speechService,
                     studyService: services.studyService,
                     captureSession: session,
+                    dictionaryQueryService: services.dictionaryQueryService,
+                    sourceContextRepository: services.sourceContextRepository,
                     title: "处理收集"
                 )
             } else if let errorMessage {
@@ -117,7 +123,8 @@ struct InboxProcessingView: View {
                 inboxItemID: itemID,
                 context: resolved.context,
                 payload: resolved.resumablePayload,
-                isAnalysisStale: resolved.isAnalysisStale
+                isAnalysisStale: resolved.isAnalysisStale,
+                item: resolved.item
             )
         } catch {
             errorMessage = error.localizedDescription
@@ -147,7 +154,8 @@ struct InboxProcessingView: View {
                 inboxItemID: itemID,
                 context: resolved.context,
                 payload: resolved.resumablePayload,
-                isAnalysisStale: resolved.isAnalysisStale
+                isAnalysisStale: resolved.isAnalysisStale,
+                item: resolved.item
             )
         } catch {
             errorMessage = error.localizedDescription

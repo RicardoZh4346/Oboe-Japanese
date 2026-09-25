@@ -34,6 +34,12 @@ struct RegularShell: View {
     @State private var isPresentingCreateDeck = false
     /// ⌘N 在 Inbox 上下文触发「手动添加」的壳层侧 binding。
     @State private var isInboxCapturePresented = false
+    /// S07：词典词条制卡——非 nil 时以该预填打开编辑器。
+    /// 元组同时携带表单与来源草稿（词条快照 + dataset 版本）。
+    @State private var dictionaryCardPrefill: (
+        form: VocabularyFormData,
+        source: SourceContextDraft
+    )?
 
     /// sidebar 单 selection 词表：顶层 section 与 decks 内选择合并。
     private enum SidebarItem: Hashable {
@@ -113,6 +119,35 @@ struct RegularShell: View {
         ) {
             DeckNameEditor(title: "新建牌组", initialName: "") { name in
                 await deckModel.createDeck(named: name)
+            }
+        }
+        .adaptivePresentation(
+            role: .editor,
+            isPresented: Binding(
+                get: { dictionaryCardPrefill != nil },
+                set: { if !$0 { dictionaryCardPrefill = nil } }
+            )
+        ) {
+            let decks = container.decks
+            NavigationStack {
+                AddContentEditorView(
+                    deckService: decks.deckService,
+                    vocabularyService: decks.vocabularyService,
+                    grammarService: decks.grammarService,
+                    knowledgePointService: decks.knowledgePointService,
+                    contentCardService: decks.contentCardService,
+                    aiCardGenerationService: decks.aiCardGenerationService,
+                    sentenceAnalysisService: decks.sentenceAnalysisService,
+                    sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService,
+                    historyService: decks.historyService,
+                    speechService: container.shared.speechService,
+                    studyService: decks.studyService,
+                    vocabularyPrefill: dictionaryCardPrefill?.form,
+                    sourceContextDraft: dictionaryCardPrefill?.source,
+                    dictionaryQueryService: container.dictionary.queryService,
+                    sourceContextRepository: container.shared.sourceContextRepository,
+                    title: "词典制卡"
+                )
             }
         }
         // 硬件键盘快捷键（iPad）：⌘1-4 切 section、⌘F 跳搜索、
@@ -301,6 +336,11 @@ struct RegularShell: View {
                     aiCardGenerationService: decks.aiCardGenerationService,
                     sentenceAnalysisService: decks.sentenceAnalysisService,
                     sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService,
+                    sourceContextRepository: container.shared.sourceContextRepository,
+                    inboxImageStore: container.shared.inboxImageStore,
+                    dictionaryQueryService: container.dictionary.queryService,
+                    customStudyRepository: container.shared.customStudyRepository,
+                    customStudyService: container.shared.customStudyService,
                     onSelectNote: { item in
                         navigation.selectNote(id: item.id, kind: item.kind)
                     },
@@ -356,7 +396,7 @@ struct RegularShell: View {
             }
         case .search:
             NavigationStack {
-                KnowledgeSearchView(
+                GlobalSearchView(
                     searchService: decks.searchService,
                     deckService: decks.deckService,
                     knowledgeService: decks.knowledgePointService,
@@ -364,7 +404,23 @@ struct RegularShell: View {
                     grammarService: decks.grammarService,
                     contentCardService: decks.contentCardService,
                     historyService: decks.historyService,
-                    speechService: container.shared.speechService
+                    speechService: container.shared.speechService,
+                    dictionaryQueryService: container.dictionary.queryService,
+                    onCreateCard: { entry in
+                        Task {
+                            let version = try? await container.dictionary
+                                .queryService.metadata().datasetVersion
+                            dictionaryCardPrefill = (
+                                form: DictionaryCardPrefill
+                                    .vocabularyForm(from: entry),
+                                source: DictionaryCardPrefill
+                                    .sourceContextDraft(
+                                        from: entry,
+                                        datasetVersion: version
+                                    )
+                            )
+                        }
+                    }
                 )
             }
         case nil:
@@ -493,6 +549,9 @@ struct RegularShell: View {
                 inboxService: today.inboxService,
                 processingServices: today.processingServices,
                 inboxImageStore: container.shared.inboxImageStore,
+                sourceContextRepository: container.shared.sourceContextRepository,
+                customStudyRepository: container.shared.customStudyRepository,
+                customStudyService: container.shared.customStudyService,
                 ocrService: container.shared.ocrService,
                 drainSharedCaptures: operations.drainSharedCaptures,
                 pendingContinueItemID: pendingContinueItemID,

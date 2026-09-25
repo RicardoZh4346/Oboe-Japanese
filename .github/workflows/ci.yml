@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +15,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Show toolchain
         run: |
@@ -61,6 +64,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Run OboeAppTests
         run: |
@@ -85,6 +90,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Build and run iPad navigation smoke
         run: |
@@ -100,5 +107,35 @@ jobs:
             test 2>&1 | tee ipad-smoke.log
           grep -q "testPrimaryNavigationSmoke.*passed" ipad-smoke.log || {
             echo "::error::iPad navigation smoke test case was not executed or did not pass"
+            exit 1
+          }
+
+  ui-tests-full:
+    # 重型层：仅 main 推送/手动触发跑全量 UI 测试；PR 保持快速层。
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Run full OboeUITests on iPhone Simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:OboeUITests \
+            CODE_SIGNING_ALLOWED=NO \
+            test 2>&1 | tee uitests.log
+          grep -q "OboeUITests.xctest.*passed" uitests.log || {
+            echo "::error::OboeUITests bundle was not executed or did not pass"
             exit 1
           }

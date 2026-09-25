@@ -41,13 +41,32 @@ func rewriteBackup(
 }
 
 /// Reshapes a current export into a restorable older format for fixture
-/// tests. v5 loses `pitch_accent`/`noteDeck`; v4 additionally loses
+/// tests. v6 loses `sourceContext` 与三张 Custom Study 记录；v5 再丢
+/// `pitch_accent`/`noteDeck`；v4 additionally loses
 /// `primary_deck_id`; v3 loses the four Adaptive settings keys; v1/v2
 /// additionally lose the Inbox records, `excludedScopes`, and (for v1) the
 /// note `source_ref` column.
 func downgradeBackupToLegacyFormat(_ objects: inout [[String: Any]], version: Int) {
-    precondition((1...5).contains(version), "downgrade only produces v1–v5 files")
+    precondition((1...6).contains(version), "downgrade only produces v1–v6 files")
     objects[0]["formatVersion"] = version
+
+    // v7 → v1…v6: 无 sourceContext 与 Custom Study 记录。
+    let v7Types = [
+        "sourceContext", "customStudySession",
+        "practiceAttempt", "scheduledReviewOrigin"
+    ]
+    for index in objects.indices where objects[index]["recordType"] as? String == "manifest" {
+        if var recordOrder = objects[index]["recordOrder"] as? [String] {
+            recordOrder.removeAll { v7Types.contains($0) }
+            objects[index]["recordOrder"] = recordOrder
+        }
+        if var counts = objects[index]["counts"] as? [String: Any] {
+            for key in v7Types { counts.removeValue(forKey: key) }
+            objects[index]["counts"] = counts
+        }
+    }
+    objects.removeAll { v7Types.contains($0["recordType"] as? String ?? "") }
+    if version == 6 { return }
 
     // v6 → v1…v5: notes lack `pitch_accent`; `noteDeck` records do not exist.
     for index in objects.indices where objects[index]["recordType"] as? String == "note" {

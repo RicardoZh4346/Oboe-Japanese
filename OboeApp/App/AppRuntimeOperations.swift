@@ -16,4 +16,7 @@ struct AppRuntimeOperations: Sendable {
     let pendingSharedCaptureCount: @Sendable @MainActor () -> Int?
     let setAppearancePreference: @Sendable (AppAppearance) async throws -> Void
     let currentAppearancePreference: @Sendable @MainActor () -> AppAppearance
+    /// S11：Settings「检查备份」与 onOpenURL/AirDrop 同一入口——
+    /// 投递外部备份文件到统一导入协调器（串行校验+preview）。
+    let submitBackupFile: @Sendable (URL) -> Void
 }

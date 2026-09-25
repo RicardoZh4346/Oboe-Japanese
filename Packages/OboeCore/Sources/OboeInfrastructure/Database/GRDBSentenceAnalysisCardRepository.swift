@@ -183,6 +183,13 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
                 in: db
             )
         }
+        // 批量制卡每个 Note 的来源与 Note/Card 同事务（设计 §6.2）。
+        if let sourceContext = commit.sourceContext {
+            guard sourceContext.noteID == commit.noteID else {
+                throw ContentCardError.sourceContextNoteMismatch
+            }
+            try GRDBSourceContextRepository.insert(sourceContext, in: db)
+        }
     }
 
     static func insertGrammar(
@@ -244,6 +251,12 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
             timestamp: timestamp,
             in: db
         )
+        if let sourceContext = commit.sourceContext {
+            guard sourceContext.noteID == commit.noteID else {
+                throw ContentCardError.sourceContextNoteMismatch
+            }
+            try GRDBSourceContextRepository.insert(sourceContext, in: db)
+        }
     }
 
     static func requireDeck(_ deckID: UUID, in db: Database) throws {

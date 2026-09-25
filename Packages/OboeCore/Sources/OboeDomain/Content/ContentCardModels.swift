@@ -49,6 +49,9 @@ public enum ContentCardError: Error, Equatable, Sendable {
     case knowledgePointNotFound
     case cardNotFound
     case invalidTemplateForKnowledgePoint
+    /// 提交的来源记录 noteID 与本次 commit 的 noteID 不一致——
+    /// 静默错挂到其它 Note 比失败更糟，事务层直接拒绝（设计 §6.2）。
+    case sourceContextNoteMismatch
 }
 
 public struct VocabularyContentCommit: Equatable, Sendable {
@@ -69,6 +72,10 @@ public struct VocabularyContentCommit: Equatable, Sendable {
     /// The exact text the user processed (capture commits only). Persisted to
     /// notes.source_text; never occupies source_ref.
     public let sourceText: String?
+    /// 装配好的来源记录（v15）：由 service 以 noteID/createdAt 装配，
+    /// repository 在 Note/Card 同事务内插入——重试不生成第二来源，
+    /// 内容变动后的重试经 digest 判冲突（设计 §6.2）。
+    public let sourceContext: SourceContext?
 
     public init(
         noteID: UUID,
@@ -83,7 +90,8 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         origin: ContentOrigin = .manual,
         sourceRef: String? = nil,
         sourceText: String? = nil,
-        deckIDs: Set<UUID>? = nil
+        deckIDs: Set<UUID>? = nil,
+        sourceContext: SourceContext? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
@@ -98,6 +106,7 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         self.origin = origin
         self.sourceRef = sourceRef
         self.sourceText = sourceText
+        self.sourceContext = sourceContext
     }
 }
 
@@ -116,6 +125,8 @@ public struct GrammarContentCommit: Equatable, Sendable {
     public let createdAt: Date
     public let origin: ContentOrigin
     public let sourceText: String?
+    /// 同 `VocabularyContentCommit.sourceContext`。
+    public let sourceContext: SourceContext?
 
     public init(
         noteID: UUID,
@@ -129,7 +140,8 @@ public struct GrammarContentCommit: Equatable, Sendable {
         createdAt: Date,
         origin: ContentOrigin = .manual,
         sourceText: String? = nil,
-        deckIDs: Set<UUID>? = nil
+        deckIDs: Set<UUID>? = nil,
+        sourceContext: SourceContext? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
@@ -143,6 +155,7 @@ public struct GrammarContentCommit: Equatable, Sendable {
         self.createdAt = createdAt
         self.origin = origin
         self.sourceText = sourceText
+        self.sourceContext = sourceContext
     }
 }
 
@@ -198,6 +211,7 @@ public protocol ContentCardRepository: Sendable {
 
 public struct ContentCardService: Sendable {
     private let repository: any ContentCardRepository
+    private let sourceContextService = SourceContextService()
     private let now: @Sendable () -> Date
     private let makeID: @Sendable () -> UUID
 
@@ -221,7 +235,8 @@ public struct ContentCardService: Sendable {
         origin: ContentOrigin = .manual,
         sourceRef: String? = nil,
         capture: CaptureCommitContext? = nil,
-        deckIDs: Set<UUID>? = nil
+        deckIDs: Set<UUID>? = nil,
+        sourceContext: SourceContextDraft? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -236,6 +251,7 @@ public struct ContentCardService: Sendable {
             .map(\.templateKind)
             .sorted { $0.rawValue < $1.rawValue }
             .map { NewCardSeed(id: makeID(), templateKind: $0) }
+        let createdAt = now()
         let commit = VocabularyContentCommit(
             noteID: request.noteID,
             exampleID: makeID(),
@@ -245,11 +261,21 @@ public struct ContentCardService: Sendable {
             tags: try makeTags(rawTagNames),
             cards: cards,
             schedulerProfileID: makeID(),
-            createdAt: now(),
+            createdAt: createdAt,
             origin: origin,
             sourceRef: sourceRef,
             sourceText: capture?.sourceText,
-            deckIDs: deckIDs
+            deckIDs: deckIDs,
+            sourceContext: sourceContext.map {
+                // 新 Note 尚无既有来源——resolvePrimary 恒为原样；
+                // 追加来源的路径走 SourceContextRepository，不经这里。
+                sourceContextService.makeContext(
+                    from: $0,
+                    noteID: request.noteID,
+                    now: createdAt,
+                    makeID: makeID
+                )
+            }
         )
         return try await repository.commitVocabulary(commit, capture: capture)
     }
@@ -263,7 +289,8 @@ public struct ContentCardService: Sendable {
         rawTagNames: [String] = [],
         origin: ContentOrigin = .manual,
         capture: CaptureCommitContext? = nil,
-        deckIDs: Set<UUID>? = nil
+        deckIDs: Set<UUID>? = nil,
+        sourceContext: SourceContextDraft? = nil
     ) async throws -> ContentCommitResult {
         guard let deckID else {
             throw ContentCardError.deckRequired
@@ -271,8 +298,10 @@ public struct ContentCardService: Sendable {
         guard includesDirection else {
             throw ContentCardError.cardDirectionRequired
         }
+        let noteID = makeID()
+        let createdAt = now()
         let commit = GrammarContentCommit(
-            noteID: makeID(),
+            noteID: noteID,
             exampleID: makeID(),
             draftID: draftID,
             deckID: deckID,
@@ -280,10 +309,18 @@ public struct ContentCardService: Sendable {
             tags: try makeTags(rawTagNames),
             card: NewCardSeed(id: makeID(), templateKind: .grammarFormToExplanation),
             schedulerProfileID: makeID(),
-            createdAt: now(),
+            createdAt: createdAt,
             origin: origin,
             sourceText: capture?.sourceText,
-            deckIDs: deckIDs
+            deckIDs: deckIDs,
+            sourceContext: sourceContext.map {
+                sourceContextService.makeContext(
+                    from: $0,
+                    noteID: noteID,
+                    now: createdAt,
+                    makeID: makeID
+                )
+            }
         )
         return try await repository.commitGrammar(commit, capture: capture)
     }

@@ -102,6 +102,14 @@ public struct CaptureProcessingSession: Equatable, Sendable {
         sanitized.selectedAnalysisItemIDs = []
         sanitized.editedCardDrafts = []
         sanitized.analysisContentRevision = nil
+        // 来源草稿里的句子字段派生自旧文本——改版后保留 app/url/
+        // 图片等来源事实，但清掉不再可靠的文本快照。
+        sanitized.sourceDraft = sanitized.sourceDraft.map {
+            var draft = $0
+            draft.originalSentence = nil
+            draft.surroundingText = nil
+            return draft
+        }
         return sanitized
     }
 }

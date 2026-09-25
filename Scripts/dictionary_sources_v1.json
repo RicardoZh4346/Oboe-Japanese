@@ -1,0 +1,45 @@
+{
+  "manifestVersion": 1,
+  "schemaVersion": 1,
+  "datasetVersion": "2026.09.24-1",
+  "sources": {
+    "jmdict_e": {
+      "version": "2026-09-24-daily",
+      "license": "CC-BY-SA-4.0",
+      "licenseURL": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+      "attribution": "JMdict Japanese-Multilingual Dictionary, Electronic Dictionary Research and Development Group (EDRDG)",
+      "sourceURL": "https://www.edrdg.org/jmdict/j_jmdict.html",
+      "retrievedAt": "2026-09-24",
+      "consumedTables": ["entry"],
+      "modifications": "Parsed the pinned JMdict XML snapshot; mapped ent_seq/k_ele/r_ele/sense structure into read-only SQLite schema v1; entity-expanded JMdict tag values are stored as their original tag codes; search columns normalized with oboe-search-normalizer/1 (NFKC + casefold + katakana to hiragana); priority markers folded into a derived common_rank. No upstream content was rewritten.",
+      "files": {
+        "JMdict_e": {
+          "bytes": 63130780,
+          "sha256": "d760f21a3e27fc49ad215c69bdafb5e73e11751afc1681d4126d8c46ab5447a4",
+          "downloadURL": "https://ftp.edrdg.org/pub/Nihongo/JMdict_e.gz",
+          "archiveBytes": 10576514,
+          "archiveSHA256": "b64fa2c4abbfd3ce77331c189b75dfcd091f4f98fdc7982f54f4ce676adbc9d3"
+        }
+      }
+    },
+    "tomoshi": {
+      "version": "v2026-09-02",
+      "license": "CC-BY-SA-4.0",
+      "licenseURL": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+      "attribution": "Tomoshi Dictionary Open Data by Y1Z; only zh_defs (zh-CN) rows plus table_licenses/meta metadata are consumed",
+      "sourceURL": "https://github.com/tomoshi-app/tomoshi-dict-data/releases/tag/v2026-09-02",
+      "retrievedAt": "2026-09-13",
+      "consumedTables": ["zh_defs", "table_licenses", "meta"],
+      "modifications": "Sense-aligned zh-CN glosses overlaid onto JMdict senses after per-sense fingerprint checks; misaligned rows quarantined to the QA report; zh_defs examples and all other Tomoshi tables are not imported; the zh-CN layer is machine-assisted and flagged is_machine_generated=1.",
+      "files": {
+        "tomoshi-dict-open.db": {
+          "bytes": 649523200,
+          "sha256": "8b19c7d65a7d7d6df9afc58832b17b22fd349724e5d06d2acf3bb9a6c4b0ed9d",
+          "downloadURL": "https://github.com/tomoshi-app/tomoshi-dict-data/releases/download/v2026-09-02/tomoshi-dict-open.db.zst",
+          "archiveBytes": 85966850,
+          "archiveSHA256": "7153dfd7a8e42e2d920308370eac90cf9f2e4b4cfe67fb9a86e9aa1c89494073"
+        }
+      }
+    }
+  }
+}

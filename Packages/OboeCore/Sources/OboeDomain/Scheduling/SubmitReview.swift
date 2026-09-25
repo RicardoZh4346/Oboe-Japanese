@@ -18,6 +18,9 @@ public struct SubmitReviewRequest: Equatable, Sendable {
     /// 发起本次复习的牌组 scope；为 nil（全部今日任务）时归因到 home
     /// 牌组。非成员牌组不生效，回退 home（设计 §4.7）。
     public let scopeDeckID: UUID?
+    /// 提交策略（设计 §7.3）：`.normal` 走 due + daily_tasks 检查；
+    /// `.customScheduled` 走专项 session 校验，事务层验证。
+    public let policy: ReviewSubmissionPolicy
 
     public init(
         eventID: UUID,
@@ -26,7 +29,8 @@ public struct SubmitReviewRequest: Equatable, Sendable {
         rating: ReviewRating,
         durationMilliseconds: Int,
         studyDay: StudyDayContext,
-        scopeDeckID: UUID? = nil
+        scopeDeckID: UUID? = nil,
+        policy: ReviewSubmissionPolicy = .normal
     ) {
         self.eventID = eventID
         self.cardID = cardID
@@ -35,6 +39,7 @@ public struct SubmitReviewRequest: Equatable, Sendable {
         self.durationMilliseconds = durationMilliseconds
         self.studyDay = studyDay
         self.scopeDeckID = scopeDeckID
+        self.policy = policy
     }
 }
 
@@ -244,7 +249,10 @@ public struct SubmitReview: Sendable {
                 attemptedAt: reviewedAt
             )
         }
-        if context.card.scheduling.state != .new,
+        // §7.3：专项 scheduled 提交允许提前评分——due 检查只对
+        // .normal 生效；session/队列资格在 commitReview 事务内校验。
+        if request.policy == .normal,
+           context.card.scheduling.state != .new,
            context.card.scheduling.dueAt > reviewedAt {
             throw SubmitReviewError.cardNotDue(until: context.card.scheduling.dueAt)
         }

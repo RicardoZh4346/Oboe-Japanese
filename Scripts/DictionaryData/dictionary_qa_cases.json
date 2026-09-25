@@ -1,0 +1,45 @@
+{
+  "qaVersion": 1,
+  "snapshot": "JMdict 2026-09-24-daily / Tomoshi v2026-09-02",
+  "categories": {
+    "high_frequency": "common daily vocabulary; must resolve with eng+zh glosses",
+    "multi_sense": "entries with many senses; checks sense_order stability",
+    "grammaticalized": "particles/auxiliaries/expressions; checks POS codes",
+    "rare": "low/no priority markers or archaic forms; regression canaries"
+  },
+  "cases": [
+    {"entryId": 1358280, "headword": "食べる", "reading": "たべる", "pos": ["v1", "vt"], "category": "high_frequency", "reviewStatus": "approved", "note": "core verb"},
+    {"entryId": 1578850, "headword": "行く", "reading": "いく", "pos": ["v5k-s", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": "12-sense entry, Iku/Yuku special class"},
+    {"entryId": 1157170, "headword": "為る", "reading": "する", "pos": ["vs-i", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": "する entry, 17 senses"},
+    {"entryId": 1259290, "headword": "見る", "reading": "みる", "pos": ["v1", "vt"], "category": "high_frequency", "reviewStatus": "approved", "note": ""},
+    {"entryId": 1606560, "headword": "分かる", "reading": "わかる", "pos": ["v5r", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": "5 orthographic variants"},
+    {"entryId": 1289590, "headword": "困る", "reading": "こまる", "pos": ["v5r", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": ""},
+    {"entryId": 2820690, "headword": null, "reading": "いい", "pos": ["adj-ix"], "category": "high_frequency", "reviewStatus": "approved", "note": "kana-only yoi/ii class"},
+    {"entryId": 1588760, "headword": "得る", "reading": "える", "pos": ["v1", "vt"], "category": "high_frequency", "reviewStatus": "approved", "note": ""},
+    {"entryId": 1185200, "headword": "下手", "reading": "へた", "pos": ["adj-na", "n"], "category": "high_frequency", "reviewStatus": "approved", "note": "homograph family: したて/しもて entries exist"},
+    {"entryId": 1547720, "headword": "来る", "reading": "くる", "pos": ["vk", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": "Kuru special class"},
+    {"entryId": 1259140, "headword": "見える", "reading": "みえる", "pos": ["v1", "vi"], "category": "high_frequency", "reviewStatus": "approved", "note": ""},
+    {"entryId": 1259210, "headword": "見せる", "reading": "みせる", "pos": ["v1", "vt"], "category": "high_frequency", "reviewStatus": "approved", "note": ""},
+
+    {"entryId": 2028990, "headword": null, "reading": "に", "pos": ["prt", "conj"], "category": "multi_sense", "reviewStatus": "approved", "note": "25 senses, deepest sense_order chain"},
+    {"entryId": 1313580, "headword": "事", "reading": "こと", "pos": ["n", "n-suf"], "category": "multi_sense", "reviewStatus": "approved", "note": "10 senses"},
+    {"entryId": 1502390, "headword": "物", "reading": "もの", "pos": ["n", "n-suf"], "category": "multi_sense", "reviewStatus": "approved", "note": "10 senses + prefix reading"},
+
+    {"entryId": 1469800, "headword": "乃", "reading": "の", "pos": ["prt"], "category": "grammaticalized", "reviewStatus": "approved", "note": "genitive particle"},
+    {"entryId": 2028920, "headword": null, "reading": "は", "pos": ["prt"], "category": "grammaticalized", "reviewStatus": "approved", "note": "topic particle, kana-only"},
+    {"entryId": 2028930, "headword": null, "reading": "が", "pos": ["prt", "conj"], "category": "grammaticalized", "reviewStatus": "approved", "note": "subject particle + conjunction"},
+    {"entryId": 2028940, "headword": null, "reading": "も", "pos": ["prt", "adv"], "category": "grammaticalized", "reviewStatus": "approved", "note": ""},
+    {"entryId": 2029010, "headword": null, "reading": "を", "pos": ["prt"], "category": "grammaticalized", "reviewStatus": "approved", "note": "object particle"},
+    {"entryId": 1922760, "headword": "と言う", "reading": "という", "pos": ["exp"], "category": "grammaticalized", "reviewStatus": "approved", "note": "expression entry"},
+    {"entryId": 2257550, "headword": null, "reading": "ない", "pos": ["aux-adj", "suf"], "category": "grammaticalized", "reviewStatus": "approved", "note": "auxiliary negation"},
+    {"entryId": 2006560, "headword": "宛", "reading": "ずつ", "pos": ["suf"], "category": "grammaticalized", "reviewStatus": "approved", "note": "distributive suffix"},
+    {"entryId": 2780660, "headword": null, "reading": "もの", "pos": ["prt"], "category": "grammaticalized", "reviewStatus": "approved", "note": "particle もの, distinct from 物 1502390"},
+
+    {"entryId": 1562640, "headword": "鰐", "reading": "わに", "pos": ["n"], "category": "rare", "reviewStatus": "approved", "note": "no priority markers"},
+    {"entryId": 1574875, "headword": "鯱", "reading": "しゃちほこ", "pos": ["n"], "category": "rare", "reviewStatus": "approved", "note": "no priority markers"},
+    {"entryId": 2189830, "headword": "杜鵑草", "reading": "ほととぎすそう", "pos": ["n"], "category": "rare", "reviewStatus": "approved", "note": "tricyrtis, no priority"},
+    {"entryId": 5718277, "headword": "和邇", "reading": "わに", "pos": ["n"], "category": "rare", "reviewStatus": "approved", "note": "archaic orthography"},
+    {"entryId": 1444570, "headword": "時鳥", "reading": "ホトトギス", "pos": ["n"], "category": "rare", "reviewStatus": "approved", "note": "multi-variant kanji forms"},
+    {"entryId": 1454500, "headword": "得る", "reading": "うる", "pos": ["v2a-s", "suf"], "category": "rare", "reviewStatus": "approved", "note": "Nidan archaic verb"}
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "datasetVersion": "2026.01.01-1",
+  "manifestVersion": 1,
+  "schemaVersion": 1,
+  "sources": {
+    "jmdict_e": {
+      "attribution": "JMdict Japanese-Multilingual Dictionary, Electronic Dictionary Research and Development Group (EDRDG)",
+      "consumedTables": [
+        "entry"
+      ],
+      "files": {
+        "JMdict_e": {
+          "bytes": 3789,
+          "downloadURL": "https://example.invalid/fixtures/JMdict_e",
+          "sha256": "76fdc413e6106e3151831f3c539800048bf10eaf010ff491c1dc0bb33c08f7ca"
+        }
+      },
+      "license": "CC-BY-SA-4.0",
+      "licenseURL": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+      "modifications": "Fixture manifest mirroring dictionary_sources_v1.json for tests.",
+      "retrievedAt": "2026-01-01",
+      "sourceURL": "https://www.edrdg.org/jmdict/j_jmdict.html",
+      "version": "2026-01-01-daily"
+    },
+    "tomoshi": {
+      "attribution": "Tomoshi Dictionary Open Data fixture; only zh_defs (zh-CN) plus table_licenses/meta metadata are consumed",
+      "consumedTables": [
+        "zh_defs",
+        "table_licenses",
+        "meta"
+      ],
+      "files": {
+        "tomoshi-dict-open.db": {
+          "bytes": 36864,
+          "downloadURL": "https://example.invalid/fixtures/tomoshi-dict-open.db",
+          "sha256": "2382dcb476b8e1998013e4bed718b1007287bab134182de67eed15edb07ccd98"
+        }
+      },
+      "license": "CC-BY-SA-4.0",
+      "licenseURL": "https://creativecommons.org/licenses/by-sa/4.0/legalcode",
+      "modifications": "Fixture overlay manifest for tests.",
+      "retrievedAt": "2026-01-01",
+      "sourceURL": "https://example.invalid/fixtures/tomoshi",
+      "version": "v2026-01-01"
+    }
+  }
+}

@@ -40,24 +40,15 @@ final class RecallInputController: NSObject, UITextFieldDelegate {
 }
 
 private final class RecallTextField: UITextField {
-    private var needsInitialFocus = true
-
     /// Recall answers are Japanese: prefer a Japanese keyboard when one is
     /// enabled on the device. Falls back to the user's keyboard when absent.
+    ///
+    /// 不自动聚焦：进入卡片时弹键盘会在页面转场中触发布局重排造成
+    /// 明显卡顿；用户点输入框时再弹。
     override var textInputMode: UITextInputMode? {
         UITextInputMode.activeInputModes.first(where: {
             $0.primaryLanguage?.hasPrefix("ja") == true
         }) ?? super.textInputMode
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        guard window != nil, needsInitialFocus else { return }
-        needsInitialFocus = false
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.window != nil, self.isEnabled else { return }
-            self.becomeFirstResponder()
-        }
     }
 }
 

@@ -136,7 +136,8 @@ extension AddContentViewModel {
             editedCardDrafts: sentenceCardDrafts,
             analysisContentRevision: sentenceAnalysisResult == nil
                 ? nil : captureSession?.context.contentRevision,
-            pendingOperationID: pendingOperationID
+            pendingOperationID: pendingOperationID,
+            sourceDraft: sourceContextDraft
         )
     }
 
@@ -251,6 +252,14 @@ extension AddContentViewModel {
                 deckIDs: payload.targetDeckIDs
             )
         }
+        // S07：续编载荷里的来源草稿优先；没有则从条目事实现造
+        // （句子字段取选择片段或整段输入——选词制卡时原句即捕获文本）。
+        sourceContextDraft = session.payload?.sourceDraft
+            ?? Self.captureSourceDraft(
+                item: session.item,
+                fragment: captureFragmentText(from: session)
+                    ?? context.inputText
+            )
         normalizeMemberships()
 
         if session.isAnalysisStale {
@@ -267,6 +276,27 @@ extension AddContentViewModel {
             return
         }
         prefillCaptureFragment(captureFragmentText(from: session) ?? context.inputText)
+    }
+
+    /// S07：从收集条目事实构建来源草稿。`paste` 映射为 `manual`（设计
+    /// §6.1 口径）；无 item（旧测试会话）返回 nil，不编造来源。
+    nonisolated static func captureSourceDraft(
+        item: InboxItem?,
+        fragment: String?
+    ) -> SourceContextDraft? {
+        guard let item else { return nil }
+        let type: SourceContextType = switch item.sourceType {
+        case .share: .share
+        case .ocr: .ocr
+        case .manual, .paste: .manual
+        }
+        return SourceContextDraft(
+            sourceType: type,
+            originalSentence: fragment,
+            sourceURL: item.sourceURL,
+            sourceApp: item.sourceApp,
+            imageReference: item.imageReference
+        )
     }
 
     /// 恢复续编载荷中的牌组选择：已删除的牌组被剔除，home 不在成员中时

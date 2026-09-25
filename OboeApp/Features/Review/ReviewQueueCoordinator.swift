@@ -37,12 +37,60 @@ final class ReviewQueueCoordinator {
 }
 
 extension ReviewViewModel {
+    /// 视图 pop 离开时重置已展示会话的呈现态：scene 缓存的 model 在
+    /// 下一次「开始学习」复用，若不清理，新会话异步建队期间会先渲染
+    /// 上一会话遗留的旧卡一帧（闪卡）。会话内逐卡推进走
+    /// `loadNextCard`/`customLoadNextCard`，不经此路径。
+    func resetPresentedSession() {
+        plan = nil
+        card = nil
+        currentItem = nil
+        scopeSummary = nil
+        completionStatistics = nil
+        statisticsErrorMessage = nil
+        loadErrorMessage = nil
+        isLoading = true
+        dueRefreshTask?.cancel()
+        dueRefreshTask = nil
+
+        recallAttempt = nil
+        pendingSubmission = nil
+        submissionErrorMessage = nil
+        hasCommittedCurrentCard = false
+        lastSubmission = nil
+        presentationID = UUID()
+        answerRevealedAt = nil
+        listeningPromptRequestID = nil
+        listeningPromptStatus = .idle
+        listeningPromptCompleted = false
+        listeningSkipNotice = nil
+        leechReminderStatus = nil
+
+        lastPresentedNoteID = nil
+        lastPresentedNoteIDBeforeCurrent = nil
+        siblingDeferredCardID = nil
+        undoPreferredCardID = nil
+        skippedListeningIDs.removeAll()
+
+        // 专项会话的完成/计数态同属一个会话周期。
+        customIsFinished = false
+        customPresentedCount = 0
+    }
+
     func refresh(preservingCurrentCard: Bool = false) async {
         guard !isMutating else { return }
+        if isCustomSession {
+            await customLoadNextCard(preservingCurrentCard: preservingCurrentCard)
+            return
+        }
         await loadNextCard(preservingCurrentCard: preservingCurrentCard)
     }
 
     func loadNextCard(preservingCurrentCard: Bool = false) async {
+        if isCustomSession {
+            await customLoadNextCard(preservingCurrentCard: preservingCurrentCard)
+            return
+        }
         guard !isRefreshing else { return }
         isRefreshing = true
         isLoading = true

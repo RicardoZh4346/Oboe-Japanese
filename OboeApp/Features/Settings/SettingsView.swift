@@ -10,7 +10,7 @@ struct SettingsView: View {
     let operations: AppRuntimeOperations
     let isDatabaseOperationInProgress: Bool
     let exporter: PortableBackupPackageExporter
-    let restorationPreparer: PortableBackupRestorationPreparer
+    /// S11：preparer 仍由容器注入（统一协调器经工厂配置使用同一实例）。
     let studyService: StudySessionService
     let speechPreferencesService: SpeechPreferencesService
     let adaptivePreferencesService: AdaptivePreferencesService
@@ -18,6 +18,7 @@ struct SettingsView: View {
     let aiConnectionTestService: AIConnectionTestService
     let aiModelCatalogService: AIModelCatalogService
     let speechService: any SpeechService
+    let dictionaryQueryService: DictionaryQueryService
     /// regular detail 列的分类过滤：nil 渲染全部 section（compact 单
     /// List 行为不变）；非 nil 只渲染该分类。
     let categoryFilter: SettingsRoute?
@@ -38,7 +39,6 @@ struct SettingsView: View {
         self.categoryFilter = categoryFilter
         self.dismissAction = dismissAction
         exporter = dependencies.exporter
-        restorationPreparer = dependencies.restorationPreparer
         studyService = dependencies.studyService
         speechPreferencesService = dependencies.speechPreferencesService
         adaptivePreferencesService = dependencies.adaptivePreferencesService
@@ -46,6 +46,7 @@ struct SettingsView: View {
         aiConnectionTestService = dependencies.aiConnectionTestService
         aiModelCatalogService = dependencies.aiModelCatalogService
         speechService = dependencies.speechService
+        dictionaryQueryService = dependencies.dictionaryQueryService
     }
 
     @Environment(\.scenePhase) private var scenePhase
@@ -54,11 +55,9 @@ struct SettingsView: View {
     private var lastSuccessfulExportAtMilliseconds = 0.0
     @State private var isPreparingExport = false
     @State private var exportPresentation: ExportPresentation?
+    /// S11：校验/预览/恢复改由 BackupImportCoordinator 统一驱动——
+    /// 本页只投递文件；进行中状态读 operations 传入的 coordinator。
     @State private var isSelectingBackup = false
-    @State private var isPreparingRestoration = false
-    @State private var preparationTask: Task<Void, Never>?
-    @State private var preparedRestoration: PreparedRestoration?
-    @State private var preparationForCleanup: PreparedRestoration?
     @State private var localSnapshots: [DatabaseSnapshot] = []
     @State private var snapshotToRestore: DatabaseSnapshot?
     @State private var isLoadingSnapshots = false
@@ -299,18 +298,7 @@ struct SettingsView: View {
                     .disabled(isBusy)
                     .accessibilityIdentifier("portable-backup-prepare-button")
 
-                    if isPreparingRestoration {
-                        HStack {
-                            ProgressView()
-                            Text("正在校验并导入临时区…")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("取消检查", role: .cancel) {
-                                preparationTask?.cancel()
-                            }
-                            .accessibilityIdentifier("portable-backup-prepare-cancel-button")
-                        }
-                    }
+
 
                     Text("选择文件会先在临时区校验并预览；只有再次明确确认后才会完整替换当前资料库。")
                         .font(.footnote)
@@ -368,7 +356,7 @@ struct SettingsView: View {
                 if shows(.about) {
                 Section("关于") {
                     NavigationLink {
-                        AboutOboeView()
+                        AboutOboeView(dictionaryQueryService: dictionaryQueryService)
                     } label: {
                         Label("关于 Oboe", systemImage: "info.circle")
                     }
@@ -388,7 +376,9 @@ struct SettingsView: View {
                 }
             }
             .sheet(item: $exportPresentation) { presentation in
-                PortableBackupDocumentPicker(fileURL: presentation.url) { didExport in
+                // S11：导出交系统 Share Sheet（含 AirDrop）；sheet
+                // 关闭回调即导出 lease 释放点，存活期间不删文件。
+                ShareSheet(activityItems: [presentation.url]) { didExport in
                     exportPresentation = nil
                     if didExport {
                         lastSuccessfulExportAtMilliseconds = Date().timeIntervalSince1970 * 1_000
@@ -399,14 +389,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .sheet(
-                item: $preparedRestoration,
-                onDismiss: discardPreparedRestoration
-            ) { preparation in
-                RestorationImpactPreviewView(preparation: preparation) {
-                    try await applyPreparedRestoration(preparation)
-                }
-            }
             .fileImporter(
                 isPresented: $isSelectingBackup,
                 allowedContentTypes: [.data],
@@ -415,7 +397,8 @@ struct SettingsView: View {
                 switch result {
                 case let .success(urls):
                     if let url = urls.first {
-                        prepareRestoration(from: url)
+                        // S11：与 AirDrop/外部 URL 同一安全链路。
+                        operations.submitBackupFile(url)
                     }
                 case let .failure(error):
                     if !(error is CancellationError) {
@@ -473,6 +456,13 @@ struct SettingsView: View {
                     return
                 }
                 refreshPendingSharedCaptures()
+            }
+            .onChange(of: isDatabaseOperationInProgress) { _, busy in
+                // S11：统一导入协调器完成安全替换（或本页快照恢复）后
+                // 刷新本页收尾状态。
+                if !busy {
+                    Task { await finishRestorationCleanup() }
+                }
             }
             .alert("启用 AI 功能？", isPresented: $showAIEnablePrivacyConfirmation) {
                 Button("取消", role: .cancel) {}
@@ -866,8 +856,6 @@ struct SettingsView: View {
         isPreparingExport
             || exportPresentation != nil
             || isSelectingBackup
-            || isPreparingRestoration
-            || preparedRestoration != nil
             || isDatabaseOperationInProgress
     }
 
@@ -1373,50 +1361,9 @@ struct SettingsView: View {
         }
     }
 
-    private func prepareRestoration(from url: URL) {
-        isPreparingRestoration = true
-        errorMessage = nil
-        preparationTask = Task {
-            let hasSecurityScope = url.startAccessingSecurityScopedResource()
-            defer {
-                if hasSecurityScope {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-            do {
-                let preparation = try await restorationPreparer.prepareAutomatically(
-                    fileURL: url
-                )
-                if Task.isCancelled {
-                    try? await restorationPreparer.discard(preparation)
-                    throw CancellationError()
-                }
-                preparationForCleanup = preparation
-                preparedRestoration = preparation
-            } catch is CancellationError {
-                // User cancellation is an expected, silent outcome.
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isPreparingRestoration = false
-            preparationTask = nil
-        }
-    }
-
-    private func discardPreparedRestoration() {
-        guard let preparationForCleanup else {
-            return
-        }
-        self.preparationForCleanup = nil
-        Task {
-            try? await restorationPreparer.discard(preparationForCleanup)
-        }
-    }
-
-    private func applyPreparedRestoration(_ preparation: PreparedRestoration) async throws {
-        try await operations.applyPreparedRestoration(preparation)
-        self.preparationForCleanup = nil
-        try? await restorationPreparer.discard(preparation)
+    /// S11：恢复成功后的本页收尾（快照列表刷新 + 状态文案）——
+    /// apply 已由 BackupImportCoordinator 完成。
+    private func finishRestorationCleanup() async {
         await loadLocalSnapshots()
         statusMessage = "完整替换恢复已完成，今日任务已按有效记录重新校正。"
     }
@@ -1476,6 +1423,10 @@ struct SettingsView: View {
 }
 
 private struct AboutOboeView: View {
+    /// S06：词典来源与许可入口（事实由 DictionaryQueryService.sources()
+    /// 从打包产物读出，不再硬编码第二份 license 文本）。
+    let dictionaryQueryService: DictionaryQueryService
+
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
             ?? "unknown"
@@ -1536,6 +1487,16 @@ private struct AboutOboeView: View {
                 .accessibilityIdentifier("about-jlpt-data-notice")
             }
 
+            Section("内置词典来源") {
+                Text("离线日语词典，支持活用形还原；不联网、不进入可携带备份。")
+                NavigationLink {
+                    DictionarySourcesView(queryService: dictionaryQueryService)
+                } label: {
+                    Label("数据来源与许可", systemImage: "doc.text.magnifyingglass")
+                }
+                .accessibilityIdentifier("about-dictionary-sources-link")
+            }
+
             Section("隐私") {
                 Text("学习数据默认只保存在本机。AI 默认关闭；只有你主动请求时，当前输入才会发送到所配置的服务。可携带备份为未加密文件。")
                     .accessibilityIdentifier("about-privacy-summary")
@@ -1566,205 +1527,8 @@ private extension AppAppearance {
     }
 }
 
-private struct RestorationImpactPreviewView: View {
-    let preparation: PreparedRestoration
-    let apply: @MainActor @Sendable () async throws -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var isConfirming = false
-    @State private var isApplying = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("备份信息") {
-                    LabeledContent("文件", value: preparation.sourceFilename)
-                    LabeledContent("导出时间") {
-                        Text(preparation.exportedAt.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    LabeledContent("应用版本", value: preparation.sourceAppVersion)
-                    LabeledContent(
-                        "格式版本",
-                        value: preparation.attachmentDescriptors.isEmpty
-                            ? "v\(preparation.sourceFormatVersion) → v\(preparation.preparedFormatVersion)"
-                            : "v\(preparation.sourceFormatVersion)（含附件包）"
-                    )
-                }
-
-                Section("完整替换影响") {
-                    impactRow("牌组", current: preparation.current.deckCount, backup: preparation.backup.deckCount)
-                    impactRow("知识点", current: preparation.current.noteCount, backup: preparation.backup.noteCount)
-                    impactRow("卡片", current: preparation.current.cardCount, backup: preparation.backup.cardCount)
-                    impactRow("评分历史", current: preparation.current.reviewCount, backup: preparation.backup.reviewCount)
-                    impactRow("草稿", current: preparation.current.draftCount, backup: preparation.backup.draftCount)
-                    impactRow(
-                        "收集箱",
-                        current: preparation.current.inboxItemCount,
-                        backup: preparation.backup.inboxItemCount
-                    )
-                    impactRow(
-                        "处理中",
-                        current: preparation.current.processingInboxItemCount,
-                        backup: preparation.backup.processingInboxItemCount
-                    )
-                }
-
-                if !preparation.attachmentDescriptors.isEmpty {
-                    Section("图片附件") {
-                        LabeledContent("附件数量", value: "\(preparation.attachmentDescriptors.count)")
-                        LabeledContent("附件大小") {
-                            Text(
-                                ByteCountFormatter.string(
-                                    fromByteCount: Int64(
-                                        preparation.attachmentDescriptors.reduce(0) {
-                                            $0 + $1.byteCount
-                                        }
-                                    ),
-                                    countStyle: .file
-                                )
-                            )
-                        }
-                        .accessibilityIdentifier("portable-backup-preview-attachment-size")
-                        Text("附件已通过逐文件 SHA-256 校验，恢复时随资料库一并安装。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                if !preparation.restoresInboxData {
-                    Section {
-                        Label(
-                            "此备份早于收集箱格式，恢复后收集箱将为空。",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .foregroundStyle(.orange)
-                        .accessibilityIdentifier("portable-backup-preview-inbox-empty-warning")
-                    }
-                }
-
-                Section {
-                    Text(
-                        preparation.attachmentDescriptors.isEmpty
-                            ? "备份不包含 API 密钥、AI 连接配置、共享中转文件和本地图片附件；条目中的图片引用若无法解析将置空并保留正文。"
-                            : "备份不包含 API 密钥、AI 连接配置和共享中转文件；图片附件已随备份打包并逐文件校验。"
-                    )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("portable-backup-preview-excluded-scopes")
-                }
-
-                Section {
-                    Label("文件已在临时区通过格式、校验值、数量、外键和调度状态检查。", systemImage: "checkmark.shield")
-                        .foregroundStyle(.green)
-                        .accessibilityIdentifier("portable-backup-preview-valid")
-                    Text("当前资料库尚未改变。选择完整替换后仍需再次确认。")
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("portable-backup-preview-requires-confirmation")
-                }
-            }
-            .navigationTitle("恢复影响预览")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完整替换恢复", role: .destructive) { isConfirming = true }
-                        .disabled(isApplying)
-                        .accessibilityIdentifier("portable-backup-apply-button")
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                        .disabled(isApplying)
-                }
-            }
-            .interactiveDismissDisabled(isApplying)
-            .overlay {
-                if isApplying {
-                    ZStack {
-                        Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
-                        ProgressView("正在安全替换资料库…")
-                    }
-                }
-            }
-            .alert("确认完整替换？", isPresented: $isConfirming) {
-                Button("替换当前资料库", role: .destructive) {
-                    isApplying = true
-                    Task {
-                        do {
-                            try await apply()
-                            dismiss()
-                        } catch {
-                            errorMessage = error.localizedDescription
-                            isApplying = false
-                        }
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("当前资料库会先创建回滚快照；替换完成后将重建搜索数据并校正今日额度。")
-            }
-            .alert(
-                "恢复失败",
-                isPresented: Binding(
-                    get: { errorMessage != nil },
-                    set: { shown in if !shown { errorMessage = nil } }
-                )
-            ) {
-                Button("好", role: .cancel) {}
-            } message: {
-                Text(errorMessage ?? "未知错误")
-            }
-        }
-    }
-
-    private func impactRow(_ title: String, current: Int, backup: Int) -> some View {
-        LabeledContent(title) {
-            Text("当前 \(current) → 备份 \(backup)")
-                .monospacedDigit()
-        }
-    }
-}
 
 private struct ExportPresentation: Identifiable {
     let id = UUID()
     let url: URL
-}
-
-private struct PortableBackupDocumentPicker: UIViewControllerRepresentable {
-    let fileURL: URL
-    let completion: (Bool) -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(completion: completion)
-    }
-
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forExporting: [fileURL], asCopy: true)
-        picker.delegate = context.coordinator
-        picker.shouldShowFileExtensions = true
-        return picker
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIDocumentPickerViewController,
-        context: Context
-    ) {}
-
-    final class Coordinator: NSObject, UIDocumentPickerDelegate {
-        private let completion: (Bool) -> Void
-
-        init(completion: @escaping (Bool) -> Void) {
-            self.completion = completion
-        }
-
-        func documentPicker(
-            _ controller: UIDocumentPickerViewController,
-            didPickDocumentsAt urls: [URL]
-        ) {
-            completion(!urls.isEmpty)
-        }
-
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            completion(false)
-        }
-    }
 }

@@ -106,6 +106,16 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                     in: db
                 )
             }
+            // 来源记录与 Note/Card 同事务（设计 §6.2）：事务回滚则
+            // 来源、Note、capture receipt 一起消失，无半截来源。
+            // builtin_jlpt 去重提前返回的路径不补来源——既有 Note 的
+            // 来源追加走 SourceContextRepository，不经 commit。
+            if let sourceContext = commit.sourceContext {
+                guard sourceContext.noteID == commit.noteID else {
+                    throw ContentCardError.sourceContextNoteMismatch
+                }
+                try GRDBSourceContextRepository.insert(sourceContext, in: db)
+            }
             if let draftID = commit.draftID {
                 try Self.deleteDraft(id: draftID, kind: "vocabulary", in: db)
             }
@@ -202,6 +212,12 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
                 dueAtMilliseconds: timestamp,
                 in: db
             )
+            if let sourceContext = commit.sourceContext {
+                guard sourceContext.noteID == commit.noteID else {
+                    throw ContentCardError.sourceContextNoteMismatch
+                }
+                try GRDBSourceContextRepository.insert(sourceContext, in: db)
+            }
             if let draftID = commit.draftID {
                 try Self.deleteDraft(id: draftID, kind: "grammar", in: db)
             }

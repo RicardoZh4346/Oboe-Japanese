@@ -1,0 +1,10 @@
+{
+  "qaVersion": 1,
+  "snapshot": "fixture",
+  "categories": {"fixture": "hand-crafted fixture cases"},
+  "cases": [
+    {"entryId": 1001, "headword": "食べる", "reading": "たべる", "pos": ["v1", "vt", "exp"], "category": "fixture", "reviewStatus": "approved", "note": "multi-form, restrictions, tags, pos inheritance"},
+    {"entryId": 1002, "headword": null, "reading": "あっと", "pos": ["int"], "category": "fixture", "reviewStatus": "approved", "note": "kana-only"},
+    {"entryId": 1003, "headword": "行く", "reading": "いく", "pos": ["v5k-s", "vi"], "category": "fixture", "reviewStatus": "approved", "note": "zh partial coverage"}
+  ]
+}

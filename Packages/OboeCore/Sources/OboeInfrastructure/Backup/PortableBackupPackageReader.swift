@@ -44,11 +44,15 @@ public struct ExtractedBackupPackage: Equatable, Sendable {
     }
 }
 
-/// 便携备份 v7 包的读取与校验器（设计 §11.2/§11.3 的 Prepare 阶段）。
+/// 便携备份 v7 包的读取与校验器（设计 §11.2/§11.3 的 Prepare 阶段；
+/// v0.6.0 §8.3 流式化：不再 `Data(contentsOf:)` 读全包）。
 ///
-/// 信任顺序：ZIP magic → 中央目录（限额/路径/加密/符号链接）→ manifest
-/// （格式契约 + descriptor 字段级校验）→ checksums → 逐字节 SHA-256、
-/// 大小、MIME 魔数（ImageIO UTI）、像素尺寸。任何一步失败立即抛错。
+/// 信任顺序：ZIP magic → 文件尾窗口定位 EOCD → 受限中央目录
+/// （限额/路径/加密/符号链接/ZIP64/多卷）→ 本地头一致性 + 数据区重叠 →
+/// manifest（格式契约 + descriptor 字段级校验）→ 白名单 → checksums →
+/// 逐条目流式解压到 staging 文件（边解压边累计字节、SHA-256、CRC32，
+/// 超限立即中断）→ MIME 魔数（ImageIO UTI，文件 URL 后端不解码整像素）、
+/// 像素尺寸。任何一步失败立即抛错。
 public struct PortableBackupPackageReader: Sendable {
     public let limits: PortableBackupPackageLimits
 
@@ -72,17 +76,20 @@ public struct PortableBackupPackageReader: Sendable {
 
     /// 只解 manifest.json——供恢复预览在不解压附件的情况下读取摘要。
     public func readManifest(fileURL: URL) throws -> PortableBackupPackageManifest {
-        try loadAndIndexArchive(fileURL: fileURL).manifest
+        let indexed = try loadAndIndexArchive(fileURL: fileURL)
+        defer { indexed.close() }
+        return indexed.manifest
     }
 
     /// 解压 + 全量校验到 destinationURL。目录不存在则创建。
-    /// 校验顺序保证：读入字节 → 结构 → manifest → checksums → 逐条附件。
+    /// 校验顺序保证：结构 → manifest → checksums → 逐条附件。
     @discardableResult
     public func extractAndValidate(
         fileURL: URL,
         to destinationURL: URL
     ) throws -> ExtractedBackupPackage {
         let indexed = try loadAndIndexArchive(fileURL: fileURL)
+        defer { indexed.close() }
         let manifest = indexed.manifest
         let exportedAt = try Self.manifestExportedAt(manifest)
         let descriptors = manifest.attachments
@@ -114,48 +121,52 @@ public struct PortableBackupPackageReader: Sendable {
             }
         }
 
-        // records.ndjson：大小上限 → SHA-256 → 落盘。记录级校验交给
-        // 现有 NDJSON 导入管线（与 v1–v6 同一套契约检查）。
-        let recordsData = try indexed.extract(
-            named: PortableBackupPackageFormat.recordsEntryName
+        // records.ndjson：流式解压落盘（≤200 MiB，边解压边算 SHA-256）→
+        // 与 checksums 比对。记录级校验交给现有 NDJSON 导入管线。
+        let recordsURL = destinationURL.appendingPathComponent(
+            PortableBackupPackageFormat.recordsEntryName
         )
-        guard Int64(recordsData.count) <= limits.maximumRecordsBytes else {
-            throw PortableBackupPackageError.entryTooLarge(
-                name: PortableBackupPackageFormat.recordsEntryName,
-                actual: Int64(recordsData.count),
-                limit: limits.maximumRecordsBytes
-            )
-        }
-        guard Self.sha256Hex(of: recordsData)
+        let recordsResult = try indexed.extractToFile(
+            named: PortableBackupPackageFormat.recordsEntryName,
+            to: recordsURL,
+            byteLimit: limits.maximumRecordsBytes
+        )
+        guard recordsResult.sha256
                 == checksums.files[PortableBackupPackageFormat.recordsEntryName] else {
             throw PortableBackupPackageError.checksumMismatch(
                 file: PortableBackupPackageFormat.recordsEntryName
             )
         }
-        let recordsURL = destinationURL.appendingPathComponent(
-            PortableBackupPackageFormat.recordsEntryName
-        )
-        try recordsData.write(to: recordsURL, options: .atomic)
 
         // 附件：manifest 声明的每个 descriptor 都必须有对应条目，
-        // 字节数/SHA-256/MIME 魔数/像素全部一致才落盘。
+        // 字节数/SHA-256/MIME 魔数/像素全部一致才算通过。
         for descriptor in descriptors {
-            let entryData = try indexed.extract(named: descriptor.relativePath)
-            guard entryData.count == descriptor.byteCount else {
+            let fileName = String(descriptor.relativePath.dropFirst(
+                PortableBackupPackageFormat.attachmentsDirectoryName.count + 1
+            ))
+            let destination = attachmentsURL.appendingPathComponent(fileName)
+            let result = try indexed.extractToFile(
+                named: descriptor.relativePath,
+                to: destination,
+                byteLimit: limits.maximumEntryBytes
+            )
+            guard result.byteCount == Int64(descriptor.byteCount) else {
                 throw PortableBackupPackageError.attachmentSizeMismatch(
                     id: descriptor.id,
                     expected: Int64(descriptor.byteCount),
-                    actual: Int64(entryData.count)
+                    actual: result.byteCount
                 )
             }
-            let digest = Self.sha256Hex(of: entryData)
-            guard digest == descriptor.sha256,
-                  digest == checksums.files[descriptor.relativePath] else {
+            guard result.sha256 == descriptor.sha256,
+                  result.sha256 == checksums.files[descriptor.relativePath] else {
                 throw PortableBackupPackageError.attachmentChecksumMismatch(
                     id: descriptor.id
                 )
             }
-            guard let inspection = AttachmentContentSniffer.inspect(entryData) else {
+            // 文件 URL 嗅探：CGImageSource 文件后端只读 metadata，不解码整像素。
+            guard let inspection = AttachmentContentSniffer.inspect(
+                fileURL: destination
+            ) else {
                 throw PortableBackupPackageError.attachmentTypeMismatch(
                     id: descriptor.id,
                     declared: descriptor.mimeType,
@@ -178,13 +189,6 @@ public struct PortableBackupPackageReader: Sendable {
                     )
                 }
             }
-            let fileName = String(descriptor.relativePath.dropFirst(
-                PortableBackupPackageFormat.attachmentsDirectoryName.count + 1
-            ))
-            try entryData.write(
-                to: attachmentsURL.appendingPathComponent(fileName),
-                options: .atomic
-            )
         }
 
         // manifest/checksums 原文一并落盘，便于审计与上游排障。
@@ -194,8 +198,7 @@ public struct PortableBackupPackageReader: Sendable {
         let checksumsURL = destinationURL.appendingPathComponent(
             PortableBackupPackageFormat.checksumsEntryName
         )
-        try indexed.extract(named: PortableBackupPackageFormat.manifestEntryName)
-            .write(to: manifestURL, options: .atomic)
+        try indexed.rawManifestData.write(to: manifestURL, options: .atomic)
         try indexed.rawChecksumsData.write(to: checksumsURL, options: .atomic)
 
         return ExtractedBackupPackage(
@@ -213,17 +216,72 @@ public struct PortableBackupPackageReader: Sendable {
     // MARK: - 归档装载与条目级校验
 
     /// ZIP 已解析、条目级安全检查已通过的中间形态。
-    private struct IndexedArchive {
-        let reader: ZipArchive.Reader
-        let entriesByName: [String: ZipArchive.ReadEntry]
-        let manifest: PortableBackupPackageManifest
-        let rawChecksumsData: Data
+    /// 持有打开的文件句柄，用完必须 close。
+    private final class IndexedArchive {
+        let reader: StreamingZipReader
+        let entriesByName: [String: StreamingZipReader.Entry]
+        var manifest: PortableBackupPackageManifest
+        var rawManifestData: Data
+        var rawChecksumsData: Data
 
-        func extract(named name: String) throws -> Data {
+        init(
+            reader: StreamingZipReader,
+            entriesByName: [String: StreamingZipReader.Entry],
+            manifest: PortableBackupPackageManifest,
+            rawManifestData: Data,
+            rawChecksumsData: Data
+        ) {
+            self.reader = reader
+            self.entriesByName = entriesByName
+            self.manifest = manifest
+            self.rawManifestData = rawManifestData
+            self.rawChecksumsData = rawChecksumsData
+        }
+
+        func entry(named name: String) throws -> StreamingZipReader.Entry {
             guard let entry = entriesByName[name] else {
                 throw PortableBackupPackageError.missingEntry(name)
             }
-            return try reader.extract(entry)
+            return entry
+        }
+
+        func extractToData(named name: String, byteLimit: Int64) throws -> Data {
+            try reader.extractToData(entry(named: name), byteLimit: byteLimit)
+        }
+
+        func extractToFile(
+            named name: String,
+            to destinationURL: URL,
+            byteLimit: Int64
+        ) throws -> StreamingZipReader.FileResult {
+            try reader.extractToFile(
+                entry(named: name),
+                to: destinationURL,
+                byteLimit: byteLimit
+            )
+        }
+
+        func close() {
+            reader.close()
+        }
+    }
+
+    /// 单条目解压上限按条目类型分派（§8.3）：manifest/checksums →
+    /// maximumManifestBytes，records → maximumRecordsBytes，
+    /// 附件及其它 → maximumEntryBytes。修复旧版通用 128 MiB 把
+    /// records 卡死的问题；白名单外条目仍按附件档受限。
+    static func uncompressedByteLimit(
+        forEntryName name: String,
+        limits: PortableBackupPackageLimits
+    ) -> Int64 {
+        switch name {
+        case PortableBackupPackageFormat.manifestEntryName,
+             PortableBackupPackageFormat.checksumsEntryName:
+            return Int64(limits.maximumManifestBytes)
+        case PortableBackupPackageFormat.recordsEntryName:
+            return limits.maximumRecordsBytes
+        default:
+            return limits.maximumEntryBytes
         }
     }
 
@@ -239,11 +297,21 @@ public struct PortableBackupPackageReader: Sendable {
         guard size > 0 else {
             throw PortableBackupPackageError.notAPackage
         }
-        let data = try Data(contentsOf: fileURL)
         guard Self.isPackage(fileURL: fileURL) else {
             throw PortableBackupPackageError.notAPackage
         }
-        let reader = try ZipArchive.Reader(data: data)
+        let reader = try StreamingZipReader(fileURL: fileURL)
+        do {
+            return try indexValidatedArchive(reader)
+        } catch {
+            reader.close()
+            throw error
+        }
+    }
+
+    private func indexValidatedArchive(
+        _ reader: StreamingZipReader
+    ) throws -> IndexedArchive {
         guard reader.entries.count <= limits.maximumEntryCount else {
             throw PortableBackupPackageError.tooManyEntries(
                 actual: reader.entries.count,
@@ -251,9 +319,9 @@ public struct PortableBackupPackageReader: Sendable {
             )
         }
 
-        // 条目级检查：路径、非常规文件、单条目与解压总量上限。
+        // 条目级检查：路径、非常规文件、按类型分派的单条目上限、解压总量。
         var totalUncompressed: Int64 = 0
-        var entriesByName: [String: ZipArchive.ReadEntry] = [:]
+        var entriesByName: [String: StreamingZipReader.Entry] = [:]
         for entry in reader.entries {
             try Self.validateEntryPath(entry.name)
             entriesByName[entry.name] = entry
@@ -263,15 +331,19 @@ public struct PortableBackupPackageReader: Sendable {
             guard !entry.isNonRegularFile else {
                 throw PortableBackupPackageError.nonRegularFileEntry(entry.name)
             }
-            guard Int64(entry.uncompressedSize) <= limits.maximumEntryBytes else {
+            let entryLimit = Self.uncompressedByteLimit(
+                forEntryName: entry.name,
+                limits: limits
+            )
+            guard entry.uncompressedSize <= entryLimit else {
                 throw PortableBackupPackageError.entryTooLarge(
                     name: entry.name,
-                    actual: Int64(entry.uncompressedSize),
-                    limit: limits.maximumEntryBytes
+                    actual: entry.uncompressedSize,
+                    limit: entryLimit
                 )
             }
             let (sum, overflow) = totalUncompressed.addingReportingOverflow(
-                Int64(entry.uncompressedSize)
+                entry.uncompressedSize
             )
             guard !overflow else {
                 throw PortableBackupPackageError.totalUncompressedTooLarge(
@@ -288,6 +360,14 @@ public struct PortableBackupPackageReader: Sendable {
             )
         }
 
+        // 本地头一致性（名称/flags/method/CRC/sizes）+ 数据区重叠，
+        // 在解出任何内容前完成全部结构性核对。
+        try reader.validateLocalHeaders()
+        // 校验后的条目带 dataStart——按名索引重建一次。
+        entriesByName = Dictionary(
+            uniqueKeysWithValues: reader.entries.map { ($0.name, $0) }
+        )
+
         let indexed = IndexedArchive(
             reader: reader,
             entriesByName: entriesByName,
@@ -297,11 +377,13 @@ public struct PortableBackupPackageReader: Sendable {
                 checksumAlgorithm: "", recordFormatVersion: 0,
                 recordOrder: [], counts: [:], excludedScopes: [], attachments: []
             ),
+            rawManifestData: Data(),
             rawChecksumsData: Data()
         )
         // manifest.json 先解出来（带自己的体积上限），才有完整白名单。
-        let manifestEntry = try indexed.extract(
-            named: PortableBackupPackageFormat.manifestEntryName
+        let manifestEntry = try indexed.extractToData(
+            named: PortableBackupPackageFormat.manifestEntryName,
+            byteLimit: Int64(limits.maximumManifestBytes)
         )
         guard manifestEntry.count <= limits.maximumManifestBytes else {
             throw PortableBackupPackageError.entryTooLarge(
@@ -328,8 +410,9 @@ public struct PortableBackupPackageReader: Sendable {
                 throw PortableBackupPackageError.attachmentMissing(id: descriptor.id)
             }
         }
-        let checksumsData = try indexed.extract(
-            named: PortableBackupPackageFormat.checksumsEntryName
+        let checksumsData = try indexed.extractToData(
+            named: PortableBackupPackageFormat.checksumsEntryName,
+            byteLimit: Int64(limits.maximumManifestBytes)
         )
         guard checksumsData.count <= limits.maximumManifestBytes else {
             throw PortableBackupPackageError.entryTooLarge(
@@ -338,12 +421,10 @@ public struct PortableBackupPackageReader: Sendable {
                 limit: Int64(limits.maximumManifestBytes)
             )
         }
-        return IndexedArchive(
-            reader: reader,
-            entriesByName: entriesByName,
-            manifest: manifest,
-            rawChecksumsData: checksumsData
-        )
+        indexed.manifest = manifest
+        indexed.rawManifestData = manifestEntry
+        indexed.rawChecksumsData = checksumsData
+        return indexed
     }
 
     // MARK: - manifest / checksums 解析
@@ -394,21 +475,30 @@ public struct PortableBackupPackageReader: Sendable {
             field: "recordFormatVersion",
             context: "manifest"
         )
-        guard recordFormatVersion == PortableBackupPackageFormat.recordsFormatVersion else {
+        // 外层包格式恒为 7；内嵌记录协议 v6（旧版导出）与 v7 都可恢复。
+        let expectedRecordTypes: [String]
+        switch recordFormatVersion {
+        case 6: expectedRecordTypes = PortableBackupFormatV6.recordTypes
+        case 7: expectedRecordTypes = PortableBackupFormatV7.recordTypes
+        default:
             throw PortableBackupPackageError.invalidManifest(
                 "内嵌记录流版本 \(recordFormatVersion) 不受支持。"
             )
         }
         guard let recordOrder = object["recordOrder"] as? [String],
-              recordOrder == PortableBackupFormatV6.recordTypes else {
-            throw PortableBackupPackageError.invalidManifest("recordOrder 不符合 v6 契约。")
+              recordOrder == expectedRecordTypes else {
+            throw PortableBackupPackageError.invalidManifest(
+                "recordOrder 不符合 v\(recordFormatVersion) 契约。"
+            )
         }
         guard let rawCounts = object["counts"] as? [String: Any],
-              Set(rawCounts.keys) == Set(PortableBackupFormatV6.recordTypes) else {
-            throw PortableBackupPackageError.invalidManifest("counts 未完整列出 v6 记录类型。")
+              Set(rawCounts.keys) == Set(expectedRecordTypes) else {
+            throw PortableBackupPackageError.invalidManifest(
+                "counts 未完整列出 v\(recordFormatVersion) 记录类型。"
+            )
         }
         var counts: [String: Int] = [:]
-        for type in PortableBackupFormatV6.recordTypes {
+        for type in expectedRecordTypes {
             let count = try PortableBackupPackageFormat.packageInteger(
                 rawCounts[type], field: type, context: "counts"
             )

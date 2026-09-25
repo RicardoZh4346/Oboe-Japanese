@@ -48,6 +48,9 @@ struct CompactShell: View {
                 inboxService: today.inboxService,
                 processingServices: today.processingServices,
                 inboxImageStore: container.shared.inboxImageStore,
+                sourceContextRepository: container.shared.sourceContextRepository,
+                customStudyRepository: container.shared.customStudyRepository,
+                customStudyService: container.shared.customStudyService,
                 ocrService: container.shared.ocrService,
                 drainSharedCaptures: operations.drainSharedCaptures,
                 pendingContinueItemID: pendingContinueItemID,
@@ -85,7 +88,12 @@ struct CompactShell: View {
                 aiRepairService: decks.aiRepairService,
                 aiCardGenerationService: decks.aiCardGenerationService,
                 sentenceAnalysisService: decks.sentenceAnalysisService,
-                sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService
+                sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService,
+                dictionaryQueryService: container.dictionary.queryService,
+                sourceContextRepository: container.shared.sourceContextRepository,
+                inboxImageStore: container.shared.inboxImageStore,
+                customStudyRepository: container.shared.customStudyRepository,
+                customStudyService: container.shared.customStudyService
             )
                 .id(container.generation)
                 .tabItem {

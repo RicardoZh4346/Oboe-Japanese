@@ -344,6 +344,10 @@ public actor PortableBackupRestorationPreparer {
                     in: db,
                     resourceExists: imageResourceExists
                 )
+                try Self.finalizeImportedCustomStudyData(
+                    in: db,
+                    restoredAt: manifest.exportedAt
+                )
                 // v7：manifest 声明的附件元数据随恢复一并登记。所有 descriptor
                 // 已通过包校验，这里只做幂等插入（临时库为空表，不会冲突）。
                 if !attachmentDescriptors.isEmpty {
@@ -517,7 +521,11 @@ private extension PortableBackupRestorationPreparer {
                     }
                     return nil
                 }
-                let chunk = try handle.read(upToCount: 64 * 1_024) ?? Data()
+                // autoreleasepool：FileHandle.read 返回 autoreleased NSData，
+                // 紧循环里不排水会把累计读量顶进 RSS。
+                let chunk = try autoreleasepool(invoking: {
+                    try handle.read(upToCount: 64 * 1_024) ?? Data()
+                })
                 if chunk.isEmpty {
                     reachedEnd = true
                 } else {
@@ -553,7 +561,13 @@ private extension PortableBackupRestorationPreparer {
         "inbox_processing_contexts.draft_id",
         "capture_import_receipts.capture_id", "capture_import_receipts.inbox_item_id",
         "inbox_commit_receipts.operation_id", "inbox_commit_receipts.processing_context_id",
-        "note_decks.note_id", "note_decks.deck_id"
+        "note_decks.note_id", "note_decks.deck_id",
+        "source_contexts.id", "source_contexts.note_id",
+        "custom_study_sessions.id",
+        "practice_attempts.id", "practice_attempts.event_id",
+        "practice_attempts.session_id", "practice_attempts.card_key",
+        "practice_attempts.note_id",
+        "scheduled_review_origins.event_id", "scheduled_review_origins.session_id"
     ]
 
     static func fileSize(at url: URL) throws -> Int64 {
@@ -585,6 +599,7 @@ private extension PortableBackupRestorationPreparer {
         case 4: sourceSpecifications = PortableBackupFormatV4.tableSpecifications
         case 5: sourceSpecifications = PortableBackupFormatV5.tableSpecifications
         case 6: sourceSpecifications = PortableBackupFormatV6.tableSpecifications
+        case 7: sourceSpecifications = PortableBackupFormatV7.tableSpecifications
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(
                 manifest.sourceFormatVersion
@@ -636,7 +651,7 @@ private extension PortableBackupRestorationPreparer {
             }
 
             guard let sourceSpecification = sourceSpecificationByType[recordType],
-                  let currentSpecification = PortableBackupFormatV6.specificationByRecordType[recordType],
+                  let currentSpecification = PortableBackupFormatV7.specificationByRecordType[recordType],
                   let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
                 throw PortableBackupPreparationError.unexpectedRecordType(
                     line: lineNumber,
@@ -753,6 +768,7 @@ private extension PortableBackupRestorationPreparer {
         case 4: expectedRecordTypes = PortableBackupFormatV4.recordTypes
         case 5: expectedRecordTypes = PortableBackupFormatV5.recordTypes
         case 6: expectedRecordTypes = PortableBackupFormatV6.recordTypes
+        case 7: expectedRecordTypes = PortableBackupFormatV7.recordTypes
         default:
             throw PortableBackupPreparationError.unsupportedFormatVersion(version)
         }
@@ -887,7 +903,7 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        for specification in PortableBackupFormatV6.tableSpecifications {
+        for specification in PortableBackupFormatV7.tableSpecifications {
             let rows = try Row.fetchAll(
                 db,
                 sql: "PRAGMA table_info(\(specification.tableName))"
@@ -1030,7 +1046,51 @@ private extension PortableBackupRestorationPreparer {
         try validateDraftData(in: db)
         try validateCardTemplates(in: db)
         try validateNoteDeckData(in: db)
+        try validateCustomStudyData(in: db)
         return try summarizeDatabase(db)
+    }
+
+    /// v7：filter_json/queue_json 在 CHECK 层只有 json_valid——这里
+    /// 要求它们真的能解码回领域结构；非法 JSON 到运行期才爆太迟。
+    static func validateCustomStudyData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: "SELECT id, filter_json, queue_json FROM custom_study_sessions"
+        )
+        let decoder = JSONDecoder()
+        for row in rows {
+            let sessionID: String = row["id"]
+            let filterJSON: String = row["filter_json"]
+            let queueJSON: String = row["queue_json"]
+            guard (try? decoder.decode(
+                CustomStudyFilter.self, from: Data(filterJSON.utf8)
+            )) != nil else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "专项会话 \(sessionID) 的过滤条件无法解码。"
+                )
+            }
+            guard (try? decoder.decode(
+                CustomStudyQueue.self, from: Data(queueJSON.utf8)
+            )) != nil else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "专项会话 \(sessionID) 的冻结队列无法解码。"
+                )
+            }
+        }
+        let contextCount = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM (
+                    SELECT note_id FROM source_contexts GROUP BY note_id
+                    HAVING SUM(is_primary) > 1
+                )
+                """
+        ) ?? 0
+        guard contextCount == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(contextCount) 个 Note 有多个主要来源。"
+            )
+        }
     }
 
     /// v6 invariants (设计 §9): every note has at least one membership and
@@ -1248,7 +1308,9 @@ private extension PortableBackupRestorationPreparer {
 
     /// Runs inside the import transaction: a malformed attachment reference is
     /// a contract violation (reject), while a well-formed but unresolvable
-    /// resource ID degrades to NULL so the restored item keeps its text.
+    /// resource ID degrades to NULL so the restored row keeps its text.
+    /// D09：同一受控引用规则同时约束 `inbox_items` 与（v7 记录导入的）
+    /// `source_contexts`。
     static func finalizeImportedInboxData(
         in db: Database,
         resourceExists: (String) -> Bool
@@ -1256,15 +1318,18 @@ private extension PortableBackupRestorationPreparer {
         let references = try String.fetchAll(
             db,
             sql: """
-                SELECT DISTINCT image_reference
-                FROM inbox_items
+                SELECT DISTINCT image_reference FROM (
+                    SELECT image_reference FROM inbox_items
+                    UNION
+                    SELECT image_reference FROM source_contexts
+                )
                 WHERE image_reference IS NOT NULL
                 """
         )
         for reference in references {
             guard isControlledInboxResourceID(reference) else {
                 throw PortableBackupPreparationError.databaseValidation(
-                    "inbox_items.image_reference 不是受控资源 ID。"
+                    "image_reference 不是受控资源 ID。"
                 )
             }
             guard !resourceExists(reference) else { continue }
@@ -1276,7 +1341,34 @@ private extension PortableBackupRestorationPreparer {
                     """,
                 arguments: [reference]
             )
+            try db.execute(
+                sql: """
+                    UPDATE source_contexts
+                    SET image_reference = NULL
+                    WHERE image_reference = ?
+                    """,
+                arguments: [reference]
+            )
         }
+    }
+
+    /// 恢复语义（v7 记录 / §7.2）：备份里仍 active 的 Custom Study
+    /// session 在新设备上没有运行态可言——恢复即全部标 interrupted，
+    /// finished_at 取导出时刻（它是该 session 最后被观察为 active 的
+    /// 时间点，且比「恢复时刻」更贴近语义）。practice 历史行原样保留。
+    static func finalizeImportedCustomStudyData(
+        in db: Database,
+        restoredAt: Date
+    ) throws {
+        let restoredAtMilliseconds = try DatabaseValueCodec.encode(restoredAt)
+        try db.execute(
+            sql: """
+                UPDATE custom_study_sessions
+                SET status = 'interrupted', finished_at_ms = ?
+                WHERE status = 'active'
+                """,
+            arguments: [restoredAtMilliseconds]
+        )
     }
 
     /// Attachment references are opaque resource IDs, never filesystem paths —
@@ -1421,7 +1513,7 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        for specification in PortableBackupFormatV6.tableSpecifications {
+        for specification in PortableBackupFormatV7.tableSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(specification.tableName)"

@@ -27,6 +27,7 @@
 		A0010000000000000000000C /* THIRD_PARTY_NOTICES.txt in Resources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */; };
 		A0010000000000000000000D /* JLPTLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000E /* JLPTLibraryView.swift */; };
 		A0010000000000000000000E /* JLPT in Resources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000000F /* JLPT */; };
+		A00100000000000000000090 /* Dictionary in Resources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000090 /* Dictionary */; };
 		A0010000000000000000000F /* StudyScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000010 /* StudyScope.swift */; };
 		A00100000000000000000010 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000011 /* ReviewView.swift */; };
 		A00100000000000000000011 /* ReviewViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000012 /* ReviewViewModel.swift */; };
@@ -44,6 +45,7 @@
 		A0010000000000000000001D /* InboxCaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000001E /* InboxCaptureView.swift */; };
 		A00100000000000000000026 /* InboxProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000027 /* InboxProcessingView.swift */; };
 		A0010000000000000000001E /* OboeInboxUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000001F /* OboeInboxUITests.swift */; };
+		A001000000000000000000A6 /* OboeV060UITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A6 /* OboeV060UITests.swift */; };
 		A0010000000000000000001F /* AddContentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000020 /* AddContentViewModel.swift */; };
 		A00100000000000000000020 /* AddContentEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000021 /* AddContentEditorView.swift */; };
 		A00100000000000000000021 /* VocabularyEditingSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000022 /* VocabularyEditingSections.swift */; };
@@ -114,9 +116,34 @@
 		A0010000000000000000005A /* CaptureDraftCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005A /* CaptureDraftCoordinator.swift */; };
 		A0010000000000000000005B /* AddContentCommitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005B /* AddContentCommitCoordinator.swift */; };
 		A0010000000000000000005C /* ReviewQueueCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005C /* ReviewQueueCoordinator.swift */; };
+		A0010000000000000000009A /* CustomStudyReviewDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009A /* CustomStudyReviewDriver.swift */; };
+		A0010000000000000000009B /* CustomStudySetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009B /* CustomStudySetupModel.swift */; };
+		A0010000000000000000009C /* CustomStudySetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009C /* CustomStudySetupView.swift */; };
+		A001000000000000000000A1 /* BackupImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A1 /* BackupImportCoordinator.swift */; };
+		A001000000000000000000A2 /* RestorationImpactPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A2 /* RestorationImpactPreviewView.swift */; };
+		A001000000000000000000A3 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A3 /* ShareSheet.swift */; };
 		A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */; };
 		A0010000000000000000005E /* ReviewAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005E /* ReviewAudioController.swift */; };
 		A0010000000000000000005F /* ReviewPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005F /* ReviewPresentationState.swift */; };
+		A00100000000000000000080 /* RuntimeServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000080 /* RuntimeServices.swift */; };
+		A00100000000000000000081 /* DatabaseRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000081 /* DatabaseRuntime.swift */; };
+		A00100000000000000000082 /* BackupRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000082 /* BackupRuntime.swift */; };
+		A00100000000000000000083 /* CaptureRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000083 /* CaptureRuntime.swift */; };
+		A00100000000000000000084 /* EnrichmentRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000084 /* EnrichmentRuntime.swift */; };
+		A00100000000000000000085 /* AppearanceRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000085 /* AppearanceRuntime.swift */; };
+		A00100000000000000000086 /* AppFeatureContainerFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000086 /* AppFeatureContainerFactory.swift */; };
+		A00100000000000000000091 /* DictionaryFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000091 /* DictionaryFeatureDependencies.swift */; };
+		A00100000000000000000092 /* DictionarySearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000092 /* DictionarySearchViewModel.swift */; };
+		A00100000000000000000097 /* GlobalSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000097 /* GlobalSearchView.swift */; };
+		A00100000000000000000098 /* DictionaryCardPrefill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000098 /* DictionaryCardPrefill.swift */; };
+		A00100000000000000000093 /* DictionarySearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000093 /* DictionarySearchView.swift */; };
+		A00100000000000000000094 /* DictionaryEntryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000094 /* DictionaryEntryDetailView.swift */; };
+		A00100000000000000000095 /* DictionarySourcesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000095 /* DictionarySourcesView.swift */; };
+		A00100000000000000000096 /* DictionarySearchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000096 /* DictionarySearchViewModelTests.swift */; };
+		A00100000000000000000099 /* DictionaryCardPrefillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000099 /* DictionaryCardPrefillTests.swift */; };
+		A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */; };
+		A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */; };
+		A00100000000000000000087 /* RuntimeSplitWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000087 /* RuntimeSplitWiringTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -162,6 +189,7 @@
 		A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = THIRD_PARTY_NOTICES.txt; sourceTree = "<group>"; };
 		A0020000000000000000000E /* JLPTLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JLPTLibraryView.swift; sourceTree = "<group>"; };
 		A0020000000000000000000F /* JLPT */ = {isa = PBXFileReference; lastKnownFileType = folder; path = JLPT; sourceTree = "<group>"; };
+		A00200000000000000000090 /* Dictionary */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Dictionary; sourceTree = "<group>"; };
 		A00200000000000000000010 /* StudyScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyScope.swift; sourceTree = "<group>"; };
 		A00200000000000000000011 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
 		A00200000000000000000012 /* ReviewViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewViewModel.swift; sourceTree = "<group>"; };
@@ -180,6 +208,7 @@
 		A00200000000000000000027 /* InboxProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxProcessingView.swift; sourceTree = "<group>"; };
 		A0020000000000000000002E /* ImageCaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCaptureView.swift; sourceTree = "<group>"; };
 		A0020000000000000000001F /* OboeInboxUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeInboxUITests.swift; sourceTree = "<group>"; };
+		A002000000000000000000A6 /* OboeV060UITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeV060UITests.swift; sourceTree = "<group>"; };
 		A00200000000000000000020 /* AddContentViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentViewModel.swift; sourceTree = "<group>"; };
 		A00200000000000000000021 /* AddContentEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentEditorView.swift; sourceTree = "<group>"; };
 		A00200000000000000000022 /* VocabularyEditingSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyEditingSections.swift; sourceTree = "<group>"; };
@@ -252,9 +281,34 @@
 		A0020000000000000000005A /* CaptureDraftCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureDraftCoordinator.swift; sourceTree = "<group>"; };
 		A0020000000000000000005B /* AddContentCommitCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddContentCommitCoordinator.swift; sourceTree = "<group>"; };
 		A0020000000000000000005C /* ReviewQueueCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewQueueCoordinator.swift; sourceTree = "<group>"; };
+		A0020000000000000000009A /* CustomStudyReviewDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudyReviewDriver.swift; sourceTree = "<group>"; };
+		A0020000000000000000009B /* CustomStudySetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudySetupModel.swift; sourceTree = "<group>"; };
+		A0020000000000000000009C /* CustomStudySetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudySetupView.swift; sourceTree = "<group>"; };
+		A002000000000000000000A1 /* BackupImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupImportCoordinator.swift; sourceTree = "<group>"; };
+		A002000000000000000000A2 /* RestorationImpactPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestorationImpactPreviewView.swift; sourceTree = "<group>"; };
+		A002000000000000000000A3 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
 		A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSubmissionCoordinator.swift; sourceTree = "<group>"; };
 		A0020000000000000000005E /* ReviewAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAudioController.swift; sourceTree = "<group>"; };
 		A0020000000000000000005F /* ReviewPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewPresentationState.swift; sourceTree = "<group>"; };
+		A00200000000000000000080 /* RuntimeServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeServices.swift; sourceTree = "<group>"; };
+		A00200000000000000000081 /* DatabaseRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseRuntime.swift; sourceTree = "<group>"; };
+		A00200000000000000000082 /* BackupRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRuntime.swift; sourceTree = "<group>"; };
+		A00200000000000000000083 /* CaptureRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureRuntime.swift; sourceTree = "<group>"; };
+		A00200000000000000000084 /* EnrichmentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrichmentRuntime.swift; sourceTree = "<group>"; };
+		A00200000000000000000085 /* AppearanceRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceRuntime.swift; sourceTree = "<group>"; };
+		A00200000000000000000086 /* AppFeatureContainerFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFeatureContainerFactory.swift; sourceTree = "<group>"; };
+		A00200000000000000000091 /* DictionaryFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryFeatureDependencies.swift; sourceTree = "<group>"; };
+		A00200000000000000000092 /* DictionarySearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySearchViewModel.swift; sourceTree = "<group>"; };
+		A00200000000000000000097 /* GlobalSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalSearchView.swift; sourceTree = "<group>"; };
+		A00200000000000000000098 /* DictionaryCardPrefill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryCardPrefill.swift; sourceTree = "<group>"; };
+		A00200000000000000000093 /* DictionarySearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySearchView.swift; sourceTree = "<group>"; };
+		A00200000000000000000094 /* DictionaryEntryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntryDetailView.swift; sourceTree = "<group>"; };
+		A00200000000000000000095 /* DictionarySourcesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySourcesView.swift; sourceTree = "<group>"; };
+		A00200000000000000000096 /* DictionarySearchViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySearchViewModelTests.swift; sourceTree = "<group>"; };
+		A00200000000000000000099 /* DictionaryCardPrefillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryCardPrefillTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudyReviewDriverTests.swift; sourceTree = "<group>"; };
+		A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupImportCoordinatorTests.swift; sourceTree = "<group>"; };
+		A00200000000000000000087 /* RuntimeSplitWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeSplitWiringTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -348,8 +402,23 @@
 				A00200000000000000000048 /* AppRuntimeController.swift */,
 				A00200000000000000000049 /* AppSceneRoot.swift */,
 				A00200000000000000000070 /* RegularShell.swift */,
+				A0050000000000000000001B /* Runtime */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A0050000000000000000001B /* Runtime */ = {
+			isa = PBXGroup;
+			children = (
+				A00200000000000000000080 /* RuntimeServices.swift */,
+				A00200000000000000000081 /* DatabaseRuntime.swift */,
+				A00200000000000000000082 /* BackupRuntime.swift */,
+				A00200000000000000000083 /* CaptureRuntime.swift */,
+				A00200000000000000000084 /* EnrichmentRuntime.swift */,
+				A00200000000000000000085 /* AppearanceRuntime.swift */,
+				A00200000000000000000086 /* AppFeatureContainerFactory.swift */,
+			);
+			path = Runtime;
 			sourceTree = "<group>";
 		};
 		A00500000000000000000017 /* FeatureDependencies */ = {
@@ -360,6 +429,7 @@
 				A0020000000000000000004C /* DeckFeatureDependencies.swift */,
 				A0020000000000000000004D /* SettingsFeatureDependencies.swift */,
 				A0020000000000000000004E /* SharedFeatureDependencies.swift */,
+				A00200000000000000000091 /* DictionaryFeatureDependencies.swift */,
 			);
 			path = FeatureDependencies;
 			sourceTree = "<group>";
@@ -380,6 +450,8 @@
 				A00500000000000000000010 /* JLPTLibrary */,
 				A00500000000000000000015 /* Adaptive */,
 				A00500000000000000000016 /* AIRepair */,
+				A0050000000000000000009D /* CustomStudy */,
+				A005000000000000000000A4 /* Backup */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -389,10 +461,11 @@
 		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
 		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (A00200000000000000000026 /* SentenceAnalysisSections.swift */,); path = SentenceAnalysis; sourceTree = "<group>"; };
 		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000057 /* AddContentFormState.swift */, A00200000000000000000058 /* AddContentAISession.swift */, A00200000000000000000059 /* SentenceAnalysisSession.swift */, A0020000000000000000005A /* CaptureDraftCoordinator.swift */, A0020000000000000000005B /* AddContentCommitCoordinator.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
-		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
+		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000009A /* CustomStudyReviewDriver.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
+		A0050000000000000000009D /* CustomStudy */ = {isa = PBXGroup; children = (A0020000000000000000009B /* CustomStudySetupModel.swift */, A0020000000000000000009C /* CustomStudySetupView.swift */,); path = CustomStudy; sourceTree = "<group>"; };
 		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */, BD40144146D14359888E78DD /* SecondaryPage.swift */,); path = SharedUI; sourceTree = "<group>"; };
-		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */,); path = Resources; sourceTree = "<group>"; };
-		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */, A00200000000000000000073 /* XCUIApplication+SettingsEntry.swift */,); path = OboeUITests; sourceTree = "<group>"; };
+		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */, A00200000000000000000090 /* Dictionary */,); path = Resources; sourceTree = "<group>"; };
+		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A002000000000000000000A6 /* OboeV060UITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */, A00200000000000000000073 /* XCUIApplication+SettingsEntry.swift */,); path = OboeUITests; sourceTree = "<group>"; };
 		A00500000000000000000018 /* Navigation */ = {
 			isa = PBXGroup;
 			children = (
@@ -421,13 +494,19 @@
 				A00200000000000000000068 /* AdaptivePresentationTests.swift */,
 				A00200000000000000000069 /* SceneNavigationStateTests.swift */,
 				A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */,
+				A00200000000000000000087 /* RuntimeSplitWiringTests.swift */,
+				A00200000000000000000096 /* DictionarySearchViewModelTests.swift */,
+				A00200000000000000000099 /* DictionaryCardPrefillTests.swift */,
+				A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */,
+				A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */,
 			);
 			path = OboeAppTests;
 			sourceTree = "<group>";
 		};
 		A0050000000000000000000D /* Products */ = {isa = PBXGroup; children = (A0020000000000000000000A /* Oboe.app */, A0020000000000000000000B /* OboeUITests.xctest */, A0020000000000000000006A /* OboeAppTests.xctest */, A0020000000000000000002D /* OboeShareExtension.appex */,); name = Products; sourceTree = "<group>"; };
-		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (); path = Search; sourceTree = "<group>"; };
+		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (A00200000000000000000092 /* DictionarySearchViewModel.swift */, A00200000000000000000093 /* DictionarySearchView.swift */, A00200000000000000000094 /* DictionaryEntryDetailView.swift */, A00200000000000000000095 /* DictionarySourcesView.swift */, A00200000000000000000097 /* GlobalSearchView.swift */, A00200000000000000000098 /* DictionaryCardPrefill.swift */,); path = Search; sourceTree = "<group>"; };
 		A00500000000000000000011 /* Inbox */ = {isa = PBXGroup; children = (A0020000000000000000001C /* InboxView.swift */, A0020000000000000000001D /* InboxItemDetailView.swift */, A0020000000000000000001E /* InboxCaptureView.swift */, A00200000000000000000027 /* InboxProcessingView.swift */,); path = Inbox; sourceTree = "<group>"; };
+		A005000000000000000000A4 /* Backup */ = {isa = PBXGroup; children = (A002000000000000000000A1 /* BackupImportCoordinator.swift */, A002000000000000000000A2 /* RestorationImpactPreviewView.swift */, A002000000000000000000A3 /* ShareSheet.swift */,); path = Backup; sourceTree = "<group>"; };
 		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */, A00200000000000000000071 /* SettingsCategoryListView.swift */, EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */,); path = Settings; sourceTree = "<group>"; };
 		A00500000000000000000014 /* ImageCapture */ = {isa = PBXGroup; children = (A0020000000000000000002E /* ImageCaptureView.swift */,); path = ImageCapture; sourceTree = "<group>"; };
 		A00500000000000000000010 /* JLPTLibrary */ = {isa = PBXGroup; children = (A0020000000000000000000E /* JLPTLibraryView.swift */, B02400000000000000000002 /* JLPTDashboardView.swift */,); path = JLPTLibrary; sourceTree = "<group>"; };
@@ -578,6 +657,7 @@
 				A00100000000000000000008 /* Assets.xcassets in Resources */,
 				A0010000000000000000000C /* THIRD_PARTY_NOTICES.txt in Resources */,
 				A0010000000000000000000E /* JLPT in Resources */,
+				A00100000000000000000090 /* Dictionary in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -643,6 +723,20 @@
 				A00100000000000000000048 /* AppRuntimeController.swift in Sources */,
 				A00100000000000000000049 /* AppSceneRoot.swift in Sources */,
 				A00100000000000000000070 /* RegularShell.swift in Sources */,
+				A00100000000000000000080 /* RuntimeServices.swift in Sources */,
+				A00100000000000000000081 /* DatabaseRuntime.swift in Sources */,
+				A00100000000000000000082 /* BackupRuntime.swift in Sources */,
+				A00100000000000000000083 /* CaptureRuntime.swift in Sources */,
+				A00100000000000000000084 /* EnrichmentRuntime.swift in Sources */,
+				A00100000000000000000085 /* AppearanceRuntime.swift in Sources */,
+				A00100000000000000000086 /* AppFeatureContainerFactory.swift in Sources */,
+				A00100000000000000000091 /* DictionaryFeatureDependencies.swift in Sources */,
+				A00100000000000000000092 /* DictionarySearchViewModel.swift in Sources */,
+				A00100000000000000000093 /* DictionarySearchView.swift in Sources */,
+				A00100000000000000000094 /* DictionaryEntryDetailView.swift in Sources */,
+				A00100000000000000000095 /* DictionarySourcesView.swift in Sources */,
+				A00100000000000000000097 /* GlobalSearchView.swift in Sources */,
+				A00100000000000000000098 /* DictionaryCardPrefill.swift in Sources */,
 				A0010000000000000000004A /* AppFeatureContainer.swift in Sources */,
 				A0010000000000000000004B /* TodayFeatureDependencies.swift in Sources */,
 				A0010000000000000000004C /* DeckFeatureDependencies.swift in Sources */,
@@ -669,6 +763,12 @@
 				A0010000000000000000005A /* CaptureDraftCoordinator.swift in Sources */,
 				A0010000000000000000005B /* AddContentCommitCoordinator.swift in Sources */,
 				A0010000000000000000005C /* ReviewQueueCoordinator.swift in Sources */,
+				A0010000000000000000009A /* CustomStudyReviewDriver.swift in Sources */,
+				A0010000000000000000009B /* CustomStudySetupModel.swift in Sources */,
+				A0010000000000000000009C /* CustomStudySetupView.swift in Sources */,
+				A001000000000000000000A1 /* BackupImportCoordinator.swift in Sources */,
+				A001000000000000000000A2 /* RestorationImpactPreviewView.swift in Sources */,
+				A001000000000000000000A3 /* ShareSheet.swift in Sources */,
 				A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */,
 				A0010000000000000000005E /* ReviewAudioController.swift in Sources */,
 				A0010000000000000000005F /* ReviewPresentationState.swift in Sources */,
@@ -684,6 +784,7 @@
 			files = (
 				A00100000000000000000009 /* OboeNavigationUITests.swift in Sources */,
 				A0010000000000000000001E /* OboeInboxUITests.swift in Sources */,
+				A001000000000000000000A6 /* OboeV060UITests.swift in Sources */,
 				A00100000000000000000035 /* OboeAdaptiveUITests.swift in Sources */,
 				3D7C3FA3072145EDA7413284 /* OboeTabBarUITests.swift in Sources */,
 				A00100000000000000000073 /* XCUIApplication+SettingsEntry.swift in Sources */,
@@ -711,6 +812,11 @@
 				A00100000000000000000068 /* AdaptivePresentationTests.swift in Sources */,
 				A00100000000000000000069 /* SceneNavigationStateTests.swift in Sources */,
 				A00100000000000000000072 /* AttachmentRestoreWiringTests.swift in Sources */,
+				A00100000000000000000087 /* RuntimeSplitWiringTests.swift in Sources */,
+				A00100000000000000000096 /* DictionarySearchViewModelTests.swift in Sources */,
+				A00100000000000000000099 /* DictionaryCardPrefillTests.swift in Sources */,
+				A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */,
+				A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -725,14 +831,14 @@
 /* Begin XCBuildConfiguration section */
 		A00C00000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_OPTIMIZATION_LEVEL = 0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)",); IPHONEOS_DEPLOYMENT_TARGET = 17.0; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
 		A00C00000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; VALIDATE_PRODUCT = YES; }; name = Release; };
-		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.5.8; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.5.8; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
-		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Release; };
-		A00C00000000000000000007 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.5.8; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		A00C00000000000000000008 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.5.8; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		A00C00000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
-		A00C0000000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 49; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Release; };
+		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
+		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Release; };
+		A00C00000000000000000007 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A00C00000000000000000008 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A00C00000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
+		A00C0000000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

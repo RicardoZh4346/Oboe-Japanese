@@ -239,6 +239,102 @@ final class CaptureResumePayloadTests: XCTestCase {
         )
     }
 
+    // MARK: - SourceContextDraft（v15）
+
+    func testSourceDraftRoundTrip() throws {
+        let sourceDraft = SourceContextDraft(
+            sourceType: .ocr,
+            originalSentence: "今日はいい天気です",
+            surroundingText: "昨日は雨でした。今日はいい天気です。明日は晴れるでしょう。",
+            sourceTitle: "截图-01",
+            sourceApp: "com.example.reader",
+            imageReference: "img-42",
+            isPrimary: true
+        )
+        let payload = CaptureResumePayload(
+            targetDeckID: UUID(),
+            sourceDraft: sourceDraft
+        )
+        let decoded = try CaptureResumePayloadCodec.decode(
+            CaptureResumePayloadCodec.encode(payload)
+        )
+        XCTAssertEqual(decoded.sourceDraft, sourceDraft)
+    }
+
+    func testLegacyPayloadWithoutSourceDraftDecodes() throws {
+        // 旧版写出的 payload 没有 sourceDraft 键——新版读得 nil。
+        let decoded = try CaptureResumePayloadCodec.decode("{\"version\":1}")
+        XCTAssertNil(decoded.sourceDraft)
+    }
+
+    func testOversizedSurroundingRejected() {
+        let payload = CaptureResumePayload(
+            sourceDraft: SourceContextDraft(
+                sourceType: .ocr,
+                surroundingText: String(
+                    repeating: "あ",
+                    count: SourceContextDraft.maximumSurroundingCharacters + 1
+                )
+            )
+        )
+        XCTAssertThrowsError(try CaptureResumePayloadCodec.encode(payload)) { error in
+            XCTAssertEqual(
+                error as? CaptureResumePayloadError,
+                .invalidField("sourceDraft.surroundingText")
+            )
+        }
+    }
+
+    func testResumablePayloadSanitizesSourceDraftTextFields() {
+        let item = InboxItem(
+            id: UUID(),
+            text: "新しい原文",
+            sourceType: .manual,
+            status: .processing,
+            contentRevision: 3,
+            sourceApp: nil,
+            sourceURL: nil,
+            imageReference: nil,
+            createdAt: Date(timeIntervalSince1970: 1_768_000_000),
+            updatedAt: Date(timeIntervalSince1970: 1_768_000_000),
+            processedAt: nil,
+            archivedAt: nil,
+            statusBeforeArchive: nil
+        )
+        let context = InboxProcessingContext(
+            id: UUID(),
+            inboxItemID: item.id,
+            contentRevision: 3,
+            inputText: item.text,
+            mode: .sentenceAnalysis,
+            draftID: nil,
+            payloadVersion: 1,
+            resumePayloadJSON: nil,
+            updatedAt: item.updatedAt
+        )
+        let payload = CaptureResumePayload(
+            analysisContentRevision: 2,
+            sourceDraft: SourceContextDraft(
+                sourceType: .ocr,
+                originalSentence: "旧句子",
+                surroundingText: "旧上下文",
+                sourceApp: "com.example.reader",
+                imageReference: "img-7"
+            )
+        )
+        let session = CaptureProcessingSession(
+            item: item,
+            context: context,
+            payload: payload
+        )
+        let resumable = session.resumablePayload
+        // 文本改版后来源事实保留，句子快照清除。
+        XCTAssertEqual(resumable?.sourceDraft?.sourceApp, "com.example.reader")
+        XCTAssertEqual(resumable?.sourceDraft?.imageReference, "img-7")
+        XCTAssertNil(resumable?.sourceDraft?.originalSentence)
+        XCTAssertNil(resumable?.sourceDraft?.surroundingText)
+    }
+
     private static func makeCardDraft(id: UUID) -> SentenceAnalysisCardDraft {
         SentenceAnalysisCardDraft(
             id: id,

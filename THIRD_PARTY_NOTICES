@@ -4,7 +4,9 @@ This distribution includes the following third-party software and learning
 data. Code and learning-content licenses are separate. The bundled JLPT
 derivative database is offered under CC BY-SA 4.0; its complete source,
 version, attribution, modification and license notice is included alongside
-the database at OboeApp/Resources/JLPT/NOTICE.txt and in the built app.
+the database at OboeApp/Resources/JLPT/NOTICE.txt and in the built app. The
+bundled Japanese dictionary is also offered under CC BY-SA 4.0; its complete
+notice is included at OboeApp/Resources/Dictionary/NOTICE.txt.
 
 -------------------------------------------------------------------------------
 GRDB.swift 7.11.1
@@ -78,6 +80,21 @@ The model files, runtime versions, deterministic generation settings and
 supplemental Tatoeba English input hashes are recorded in
 Scripts/jlpt_translation_model_v1.json. The reviewed derived coverage and
 source-bound corrections are recorded in Scripts/JLPTData/.
+
+-------------------------------------------------------------------------------
+Oboe Built-in Japanese Dictionary 2026.09.24-1
+Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+
+Derived from the EDRDG JMdict snapshot dated 2026-09-24 and the Tomoshi
+Dictionary Open Data (Y1Z) zh-CN layer v2026-09-02. Oboe maps the source data
+into a read-only SQLite schema, adds normalized search fields and overlays
+Chinese glosses only after per-sense fingerprint checks. English JMdict
+glosses are retained as fallback. Full attribution, modifications and update
+policy are recorded in OboeApp/Resources/Dictionary/NOTICE.txt.
+
+https://www.edrdg.org/edrdg/licence.html
+https://github.com/tomoshi-app/tomoshi-dict-data
+https://creativecommons.org/licenses/by-sa/4.0/legalcode
 
 -------------------------------------------------------------------------------
 swift-fsrs, revision 4fbaf20184d62f82a9f44f343337c61a2c5483e9

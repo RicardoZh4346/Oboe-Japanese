@@ -64,7 +64,8 @@ extension AddContentViewModel {
                 deckID: sentenceAnalysisDeckID,
                 deckIDs: sentenceAnalysisDeckIDs,
                 drafts: drafts,
-                capture: capture
+                capture: capture,
+                sourceContext: sourceContextDraft
             )
             let savedIDs = Set(drafts.map(\.id))
             selectedSentenceAnalysisItemIDs.subtract(savedIDs)
@@ -188,7 +189,8 @@ extension AddContentViewModel {
                     rawTagNames: parsedTags(vocabularyTagsText),
                     origin: captureCommitOrigin,
                     capture: capture,
-                    deckIDs: vocabularyDeckIDs
+                    deckIDs: vocabularyDeckIDs,
+                    sourceContext: sourceContextDraft
                 )
                 vocabularyDraftID = nil
                 vocabularyForm = VocabularyFormData()
@@ -203,7 +205,8 @@ extension AddContentViewModel {
                     rawTagNames: parsedTags(grammarTagsText),
                     origin: captureCommitOrigin,
                     capture: capture,
-                    deckIDs: grammarDeckIDs
+                    deckIDs: grammarDeckIDs,
+                    sourceContext: sourceContextDraft
                 )
                 grammarDraftID = nil
                 grammarForm = GrammarFormData()
@@ -215,6 +218,7 @@ extension AddContentViewModel {
             }
             clearPendingCaptureOperation()
             duplicates = []
+            sourceContextDraft = nil
         } catch {
             errorMessage = Self.commitMessage(for: error)
         }
@@ -288,6 +292,20 @@ extension AddContentViewModel {
                 deckIDs: deckIDs,
                 homeDeckID: existing.homeDeckID
             )
+            // S07：已有 Note 加牌组也保留来源——词典/捕获的查词链
+            // 不因走「加入当前牌组」而丢失溯源；已有 primary 时降级。
+            if let draft = sourceContextDraft,
+               let repository = sourceContextRepository {
+                let existing = try await repository.fetchForNote(noteID: noteID)
+                let context = SourceContextService().makeContext(
+                    from: draft,
+                    existing: existing,
+                    noteID: noteID,
+                    now: Date()
+                )
+                try await repository.insert(context)
+                sourceContextDraft = nil
+            }
             return true
         } catch {
             errorMessage = Self.membershipMessage(for: error)

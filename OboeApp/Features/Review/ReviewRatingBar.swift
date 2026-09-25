@@ -5,6 +5,8 @@ struct ReviewRatingBar: View {
     let choices: ReviewChoices
     let isSubmitting: Bool
     let submittingRating: ReviewRating?
+    /// S09 practiceOnly：四档只表示掌握程度，不显示 FSRS 间隔（§7.4）。
+    var showsIntervals: Bool = true
     let onRate: (ReviewRating) -> Void
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -49,7 +51,7 @@ struct ReviewRatingBar: View {
                 if isActiveSubmission {
                     ProgressView()
                         .controlSize(.small)
-                } else {
+                } else if showsIntervals {
                     Text(StudyTimeText.interval(until: dueAt))
                         .font(.caption2.monospacedDigit())
                 }
@@ -75,7 +77,11 @@ struct ReviewRatingBar: View {
         .buttonStyle(.plain)
         .disabled(isSubmitting)
         .opacity(isSubmitting && !isActiveSubmission ? 0.45 : 1)
-        .accessibilityLabel("\(rating.title)，预计\(StudyTimeText.interval(until: dueAt))")
+        .accessibilityLabel(
+            showsIntervals
+                ? "\(rating.title)，预计\(StudyTimeText.interval(until: dueAt))"
+                : rating.title
+        )
         .accessibilityIdentifier("review-rating-\(rating.identifier)")
     }
 }

@@ -2,20 +2,28 @@ import Observation
 import OboeDomain
 import OboeInfrastructure
 import OboeSharedCapture
-import OSLog
 import SwiftUI
 
-/// 运行期控制器：只负责启动、数据库替换和可观察运行态。Feature 服务
-/// 先在 `makeServices` 内全部构造完，再随 `phase = .ready(container)`
-/// 一次性非可选发布——UI 不会看到半初始化状态。
+/// 运行期控制器（技术文档 §10）：只负责 start、phase、generation、
+/// 数据库替换编排、ready 发布与 scene 可见状态。具体职责收敛到
+/// `App/Runtime/` 下的 Database/Backup/Capture/Enrichment/Appearance
+/// runtime 与 `AppFeatureContainerFactory`——这里不直接实现。
+///
+/// Feature 服务先在 `AppFeatureContainerFactory.makeServices` 内全部
+/// 构造完，再随 `phase = .ready(container)` 一次性非可选发布——UI
+/// 不会看到半初始化状态。
 @MainActor
 @Observable
 final class AppRuntimeController {
     private let baseURL: URL
-    private let databaseLifecycle: OboeDatabaseLifecycle
-    /// v7 附件交换日志：恢复提交窗口期崩溃时据此把 InboxImages 收敛回
-    /// 一致状态（设计 §11.3 阶段 9）。
-    private let attachmentJournalStore: AttachmentRestoreJournalStore
+    private let databaseRuntime: DatabaseRuntime
+    private let backupRuntime: BackupRuntime
+    private let captureRuntime = CaptureRuntime()
+    private let enrichmentRuntime = EnrichmentRuntime()
+    /// S11 统一备份导入（AirDrop/外部 URL/Settings 共用）：冷启动
+    /// URL 暂存、串行校验、preview/确认/恢复由根视图驱动。
+    let backupImport = BackupImportCoordinator()
+    private let appearanceRuntime = AppearanceRuntime()
     private let bootstrap = AppBootstrapEnvironment()
     private var didStart = false
 
@@ -40,11 +48,6 @@ final class AppRuntimeController {
     /// bumping it after a database replacement guarantees snapshots read from
     /// the old file can never reach the new view tree (design §4.3).
     private let adaptiveInvalidationCenter = AdaptiveInvalidationCenter()
-    private var jlptEnrichmentTask: Task<Void, Never>?
-    /// `makeServices` 完成时的 `databaseGeneration`——恢复流程中
-    /// 服务已换新但操作标记未复位时仍允许调度，世代不一致（服务还
-    /// 绑着旧库）则拒绝。
-    private var jlptEnrichmentServiceGeneration = -1
 
     /// controller 自用的运行期句柄：与 `phase.ready` 容器同批构造、
     /// 同批发布，专供替换安全与后台调度使用，不暴露给 Feature。
@@ -55,17 +58,6 @@ final class AppRuntimeController {
     /// 否则视图会对中间态取快照且不刷新。
     private var stagedContainer: AppFeatureContainer?
     private var stagedGeneration = 0
-
-    private struct RuntimeServices {
-        let adaptiveCardService: AdaptiveCardService
-        let aiRepairService: AIRepairService
-        let appearancePreferencesService: AppearancePreferencesService
-        let captureImportCoordinator: CaptureImportCoordinator
-        let captureQueueStore: (any CaptureQueueStoring)?
-        let inboxService: InboxService
-        let inboxImageStore: InboxImageStore
-        let jlptEnrichmentService: JLPTLibraryEnrichmentService
-    }
 
     /// DEBUG 测试 seam 访问器：seed 扩展经此触达当前容器的服务。
     /// 与对外容器语义一致——服务要么存在，要么整个容器尚未发布。
@@ -100,23 +92,21 @@ final class AppRuntimeController {
             restoreLocalSnapshot: { try await self.restoreLocalSnapshot($0) },
             pendingSharedCaptureCount: { self.pendingSharedCaptureCount() },
             setAppearancePreference: { try await self.setAppearancePreference($0) },
-            currentAppearancePreference: { self.appearancePreference }
+            currentAppearancePreference: { self.appearancePreference },
+            submitBackupFile: { url in
+                Task { @MainActor in self.backupImport.submit(url) }
+            }
         )
     }
 
     init() {
         let baseURL = AppBootstrapEnvironment.applicationDataURL()
         self.baseURL = baseURL
-        databaseLifecycle = OboeDatabaseLifecycle(
-            databaseURL: baseURL.appendingPathComponent("oboe.sqlite"),
-            snapshotDirectoryURL: baseURL.appendingPathComponent("Snapshots", isDirectory: true)
-        )
-        attachmentJournalStore = AttachmentRestoreJournalStore(
-            fileURL: baseURL.appendingPathComponent(
-                "RestoreJournals/attachment-swap.json",
-                isDirectory: false
-            )
-        )
+        databaseRuntime = DatabaseRuntime(baseURL: baseURL)
+        backupRuntime = BackupRuntime(baseURL: baseURL)
+        enrichmentRuntime.statusHandler = { [weak self] status in
+            self?.jlptEnrichmentStatus = status
+        }
     }
 
     func start() async {
@@ -132,8 +122,17 @@ final class AppRuntimeController {
             // snapshot before launch-time enrichment backfills NULL fields.
             try stageLegacySchemaV12DatabaseIfRequested()
             #endif
-            recoverInterruptedAttachmentSwap()
-            let database = try await databaseLifecycle.open()
+            // 附件 swap journal 收敛失败是显式错误状态（§8.4）：无法证明
+            // 附件目录一致时不允许吞错继续写入。
+            do {
+                _ = try backupRuntime.recoverInterruptedSwap()
+            } catch {
+                phase = .failed(
+                    message: "无法修复上次中断的附件恢复：\(error.localizedDescription)"
+                )
+                return
+            }
+            let database = try await databaseRuntime.open()
             #if DEBUG
             // 先装配不发布：UI 测试种子（waiting/complete 等多步写库）
             // 必须跑在首个视图 `load()` 之前，否则视图会快照中间态。
@@ -219,6 +218,10 @@ final class AppRuntimeController {
             // T06/T07 resume sweep: analyzing drafts revert to retryable and
             // vanished targets become blocked — never auto-requests anything.
             try? await runtimeServices?.aiRepairService.restoreDraftsForLaunch()
+            // S09：上个运行期遗留的 active 专项会话标 interrupted——
+            // 本版不承诺跨运行期续同一 UI（§7.2）。
+            try? await runtimeServices?.customStudyRepository
+                .interruptActiveSessions(at: Date())
             await drainSharedCaptures()
             await sweepOrphanedInboxImages()
             scheduleJLPTEnrichment()
@@ -234,14 +237,10 @@ final class AppRuntimeController {
     /// boundary wait for an explicit user choice instead of auto-replaying.
     func drainSharedCaptures() async {
         guard !isDatabaseOperationInProgress,
-              sharedCapturesAwaitingImport == nil else { return }
-        guard let report = try? await runtimeServices?.captureImportCoordinator
-            .drainPendingCaptures()
-        else { return }
-        if let latest = report.imported.last(where: {
-            $0.requestedAction == .continueInApp
-        }) {
-            pendingContinueItemID = latest.itemID
+              sharedCapturesAwaitingImport == nil,
+              let coordinator = runtimeServices?.captureImportCoordinator else { return }
+        if let itemID = await captureRuntime.drainPendingCaptures(using: coordinator) {
+            pendingContinueItemID = itemID
         }
     }
 
@@ -257,74 +256,34 @@ final class AppRuntimeController {
 
     /// T12 幂等回填调度（设计 §7.4）：启动、进入词库、备份恢复后触发，
     /// 全部合并到同一次后台运行。失败不阻塞主界面——状态经
-    /// `jlptEnrichmentStatus` 暴露给词库页做可重试提示；日志只记计数
-    /// 与错误类别，不含用户正文。
+    /// `jlptEnrichmentStatus` 暴露给词库页做可重试提示。
     func scheduleJLPTEnrichment() {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["OBOE_UI_TEST_JLPT_ENRICHMENT_DISABLED"] != nil {
-            return
-        }
-        #endif
-        guard jlptEnrichmentTask == nil,
-              jlptEnrichmentServiceGeneration == databaseGeneration,
-              let service = runtimeServices?.jlptEnrichmentService else { return }
-        jlptEnrichmentStatus = .running(processed: 0, total: 0)
-        jlptEnrichmentTask = Task {
-            defer { jlptEnrichmentTask = nil }
-            do {
-                let report = try await service.enrich { progress in
-                    await MainActor.run { [weak self] in
-                        self?.jlptEnrichmentStatus = .running(
-                            processed: progress.processed,
-                            total: progress.total
-                        )
-                    }
-                }
-                jlptEnrichmentStatus = .idle
-                Self.enrichmentLogger.log(
-                    "JLPT enrichment finished: candidates=\(report.candidateCount, privacy: .public) pitch=\(report.pitchFilled, privacy: .public) examples=\(report.examplesFilled, privacy: .public) missing=\(report.missingEntries, privacy: .public) skippedInconsistent=\(report.pitchSkippedInconsistent, privacy: .public)"
-                )
-            } catch is CancellationError {
-                jlptEnrichmentStatus = .idle
-            } catch {
-                jlptEnrichmentStatus = .failed(message: error.localizedDescription)
-                Self.enrichmentLogger.error(
-                    "JLPT enrichment failed: \(String(describing: type(of: error)), privacy: .public)"
-                )
-            }
-        }
+        enrichmentRuntime.schedule(
+            service: runtimeServices?.jlptEnrichmentService,
+            currentDatabaseGeneration: databaseGeneration
+        )
     }
 
-    private static let enrichmentLogger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "com.oboe.app",
-        category: "JLPTEnrichment"
-    )
-
-    /// Reclaims attachment files no Inbox row references — abandoned picks,
-    /// items removed before the cleanup hook existed, restore-orphaned
-    /// resources. A creation-time buffer protects files still being attached.
     private func sweepOrphanedInboxImages() async {
-        guard let inboxImageStore = runtimeServices?.inboxImageStore,
-              let inboxService = runtimeServices?.inboxService else { return }
-        guard let referenced = try? await inboxService.fetchImageReferences(),
-              let orphans = try? inboxImageStore.orphanedResourceIDs(
-                  keeping: referenced,
-                  olderThan: 60
-              ) else { return }
-        for resourceID in orphans {
-            try? inboxImageStore.delete(resourceID)
-        }
+        guard let attachmentReferences = runtimeServices?.attachmentReferenceRepository,
+              let inboxImageStore = runtimeServices?.inboxImageStore else { return }
+        await captureRuntime.sweepOrphanedInboxImages(
+            attachmentReferences: attachmentReferences,
+            inboxImageStore: inboxImageStore
+        )
     }
 
     private func refreshAwaitingSharedCaptures() {
-        let count = try? runtimeServices?.captureQueueStore?.pendingFileURLs().count
+        let count = captureRuntime.pendingFileCount(
+            using: runtimeServices?.captureQueueStore
+        )
         sharedCapturesAwaitingImport = (count ?? 0) > 0 ? count : nil
     }
 
     /// Files still waiting in the shared queue. Nil when the App Group
     /// container is unavailable — callers must not misreport that as zero.
     func pendingSharedCaptureCount() -> Int? {
-        try? runtimeServices?.captureQueueStore?.pendingFileURLs().count
+        captureRuntime.pendingFileCount(using: runtimeServices?.captureQueueStore)
     }
 
     func applyPreparedRestoration(_ preparation: PreparedRestoration) async throws {
@@ -339,8 +298,11 @@ final class AppRuntimeController {
             // v7 提交序列（设计 §11.3）：quiesce → swap 附件 → 换库 → 收尾。
             // 附件先于库安装，库替换失败时按 journal 回滚目录，保证两侧一致。
             if let stagedURL = preparation.stagedAttachmentsDirectoryURL {
-                installedAttachmentsJournal = try installStagedAttachments(
-                    from: stagedURL
+                installedAttachmentsJournal = try backupRuntime.installStagedAttachments(
+                    from: stagedURL,
+                    targetURL: AppBootstrapEnvironment.inboxImagesDirectoryURL(
+                        baseURL: baseURL
+                    )
                 )
             }
             let database = try await replaceDatabase(with: preparation.temporaryDatabaseURL)
@@ -348,19 +310,16 @@ final class AppRuntimeController {
             refreshAwaitingSharedCaptures()
             try await reloadAppearancePreference()
             if let journal = installedAttachmentsJournal {
-                try? AttachmentDirectorySwap.completeSwap(
-                    journal: journal,
-                    journalStore: attachmentJournalStore
-                )
+                try? backupRuntime.completeSwap(journal: journal)
             }
             try? await runtimeServices?.aiRepairService.restoreDraftsForLaunch()
             await sweepOrphanedInboxImages()
             scheduleJLPTEnrichment()
         } catch {
             if let journal = installedAttachmentsJournal {
-                rollbackAttachmentSwap(journal: journal)
+                backupRuntime.rollbackSwap(journal: journal)
             }
-            if let restoredCurrent = await databaseLifecycle.currentDatabase() {
+            if let restoredCurrent = await databaseRuntime.currentDatabase() {
                 publishServices(database: restoredCurrent)
                 try? await reloadAppearancePreference()
             } else {
@@ -370,86 +329,22 @@ final class AppRuntimeController {
         }
     }
 
-    /// 附件目录原子替换：现有目录移到 aside，staged 目录 rename 就位，
-    /// 每个阶段都写 journal——进程在窗口期被杀由下次启动的
-    /// `recoverInterruptedAttachmentSwap` 收敛。
-    private func installStagedAttachments(
-        from stagedURL: URL
-    ) throws -> AttachmentRestoreJournal {
-        let targetURL = AppBootstrapEnvironment.inboxImagesDirectoryURL(
-            baseURL: baseURL
-        )
-        let asideURL = targetURL.deletingLastPathComponent()
-            .appendingPathComponent(
-                ".rollback-\(targetURL.lastPathComponent)-\(UUID().uuidString.lowercased())",
-                isDirectory: true
-            )
-        return try AttachmentDirectorySwap.installStagedDirectory(
-            stagedURL: stagedURL,
-            at: targetURL,
-            asideURL: asideURL,
-            journalStore: attachmentJournalStore
-        )
+    /// S11：preview 确认/取消/应用失败后的 staging 清理——与 Settings
+    /// 旧 `discardPreparedRestoration` 同一语义。
+    private func discardPreparedRestoration(
+        _ preparation: PreparedRestoration
+    ) async throws {
+        try await currentContainer?
+            .settings.restorationPreparer.discard(preparation)
     }
-
-    /// 库替换失败后的同步回滚：新目录挪走、aside 移回原位、清 journal。
-    /// 只能用于"install 已返回但库还没换"的窗口——completeSwap 之后旧目录
-    /// 已删，journal 语义不再可回滚。
-    private func rollbackAttachmentSwap(journal: AttachmentRestoreJournal) {
-        let fileManager = FileManager.default
-        let targetURL = URL(fileURLWithPath: journal.targetPath)
-        let trashURL = targetURL.deletingLastPathComponent()
-            .appendingPathComponent(
-                ".swap-rollback-\(UUID().uuidString.lowercased())",
-                isDirectory: true
-            )
-        if fileManager.fileExists(atPath: targetURL.path) {
-            try? fileManager.moveItem(at: targetURL, to: trashURL)
-        }
-        if !journal.oldPath.isEmpty {
-            let asideURL = URL(fileURLWithPath: journal.oldPath)
-            if fileManager.fileExists(atPath: asideURL.path) {
-                try? fileManager.moveItem(at: asideURL, to: targetURL)
-            }
-        }
-        try? fileManager.removeItem(at: trashURL)
-        try? attachmentJournalStore.clear()
-    }
-
-    /// 启动期恢复：上次恢复若在附件 swap 窗口期被杀，按 journal 把
-    /// InboxImages 收敛到一致状态。必须在打开数据库之前运行——镜像
-    /// 服务一启动就可能读附件目录。
-    private func recoverInterruptedAttachmentSwap() {
-        do {
-            let installed = try AttachmentDirectorySwap.recoverInterruptedSwap(
-                journalStore: attachmentJournalStore
-            )
-            if let installed {
-                Self.swapLogger.notice(
-                    "Recovered interrupted attachment swap: installedStaged=\(installed, privacy: .public)"
-                )
-            }
-        } catch {
-            Self.swapLogger.error(
-                "Attachment swap recovery failed: \(String(describing: type(of: error)), privacy: .public)"
-            )
-        }
-    }
-
-    private static let swapLogger = Logger(
-        subsystem: Bundle.main.bundleIdentifier ?? "com.oboe.app",
-        category: "AttachmentSwap"
-    )
 
     func localSnapshots() async throws -> [DatabaseSnapshot] {
-        try await databaseLifecycle.snapshotService.snapshots()
+        try await databaseRuntime.snapshots()
     }
 
     @discardableResult
     func createLocalSnapshot() async throws -> DatabaseSnapshot? {
-        try await databaseLifecycle.createDailySnapshotIfNeeded(
-            hasChanges: true
-        )
+        try await databaseRuntime.createDailySnapshotIfNeeded(hasChanges: true)
     }
 
     func restoreLocalSnapshot(_ snapshot: DatabaseSnapshot) async throws {
@@ -468,7 +363,7 @@ final class AppRuntimeController {
             await sweepOrphanedInboxImages()
             scheduleJLPTEnrichment()
         } catch {
-            if let restoredCurrent = await databaseLifecycle.currentDatabase() {
+            if let restoredCurrent = await databaseRuntime.currentDatabase() {
                 publishServices(database: restoredCurrent)
                 try? await reloadAppearancePreference()
             } else {
@@ -488,7 +383,10 @@ final class AppRuntimeController {
                 runtimeServices?.appearancePreferencesService else {
             throw OboeDatabaseLifecycleError.operationInProgress
         }
-        appearancePreference = try await appearancePreferencesService.set(appearance)
+        appearancePreference = try await appearanceRuntime.set(
+            appearance,
+            using: appearancePreferencesService
+        )
     }
 
     private func reloadAppearancePreference() async throws {
@@ -496,8 +394,8 @@ final class AppRuntimeController {
                 runtimeServices?.appearancePreferencesService else {
             throw OboeDatabaseLifecycleError.operationInProgress
         }
-        appearancePreference = try await appearancePreferencesService.load(
-            defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+        appearancePreference = try await appearanceRuntime.load(
+            using: appearancePreferencesService
         )
     }
 
@@ -513,17 +411,18 @@ final class AppRuntimeController {
         await runtimeServices?.adaptiveCardService.invalidate()
         // Enrichment writes go through the outgoing pool — cancel and wait
         // so no batch can land on a closed database mid-swap.
-        jlptEnrichmentTask?.cancel()
-        await jlptEnrichmentTask?.value
-        jlptEnrichmentTask = nil
-        jlptEnrichmentStatus = .idle
-        await runtimeServices?.captureImportCoordinator.pauseAndWait()
+        await enrichmentRuntime.cancelAndWait()
+        if let coordinator = runtimeServices?.captureImportCoordinator {
+            await captureRuntime.pauseAndWait(using: coordinator)
+        }
         await Task.yield()
     }
 
     private func replaceDatabase(with sourceURL: URL) async throws -> OboeDatabase {
-        try await databaseLifecycle.replaceDatabase(with: sourceURL) { database in
-            let service = Self.makeStudySessionService(database: database)
+        try await databaseRuntime.replaceDatabase(with: sourceURL) { database in
+            let service = AppFeatureContainerFactory.makeStudySessionService(
+                database: database
+            )
             _ = try await service.buildTodayPlan(
                 defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
             )
@@ -535,7 +434,13 @@ final class AppRuntimeController {
     @discardableResult
     private func stageServices(database: OboeDatabase) -> Bool {
         let generation = databaseGeneration &+ 1
-        guard let built = makeServices(database: database, generation: generation) else {
+        guard let built = AppFeatureContainerFactory.makeServices(
+            database: database,
+            generation: generation,
+            baseURL: baseURL,
+            bootstrap: bootstrap,
+            adaptiveInvalidationCenter: adaptiveInvalidationCenter
+        ) else {
             return false
         }
         runtimeServices = built.runtime
@@ -548,8 +453,19 @@ final class AppRuntimeController {
     private func commitStagedServices() {
         guard let stagedContainer else { return }
         databaseGeneration = stagedGeneration
-        jlptEnrichmentServiceGeneration = stagedGeneration
+        enrichmentRuntime.servicePublished(generation: stagedGeneration)
         phase = .ready(stagedContainer)
+        backupImport.configure(
+            preparer: stagedContainer.settings.restorationPreparer,
+            apply: { [weak self] preparation in
+                guard let self else { return }
+                try await self.applyPreparedRestoration(preparation)
+            },
+            discard: { [weak self] preparation in
+                guard let self else { return }
+                try await self.discardPreparedRestoration(preparation)
+            }
+        )
         self.stagedContainer = nil
     }
 
@@ -561,240 +477,5 @@ final class AppRuntimeController {
             return
         }
         commitStagedServices()
-    }
-
-    private struct BuiltServices {
-        let container: AppFeatureContainer
-        let runtime: RuntimeServices
-    }
-
-    /// 所有数据库绑定服务都在局部变量构造完整后才返回；返回 nil 即
-    /// 构建失败（内置 JLPT 词库缺失），由调用方转入 `.failed`。
-    private func makeServices(
-        database: OboeDatabase,
-        generation: Int
-    ) -> BuiltServices? {
-        let deckManagementService = DeckManagementService(
-            repository: GRDBDeckRepository(database: database)
-        )
-        let vocabularyService = VocabularyService(
-            repository: GRDBVocabularyRepository(database: database)
-        )
-        let grammarService = GrammarService(
-            repository: GRDBGrammarRepository(database: database)
-        )
-        let knowledgePointService = KnowledgePointService(
-            repository: GRDBKnowledgePointRepository(database: database)
-        )
-        let knowledgeSearchService = KnowledgeSearchService(
-            repository: GRDBKnowledgeSearchRepository(database: database)
-        )
-        let inboxRepository = GRDBInboxRepository(database: database)
-        let imageStore = AppBootstrapEnvironment.resolveInboxImageStore(baseURL: baseURL)
-        let inbox = InboxService(
-            repository: inboxRepository,
-            onItemDeleted: { reference in
-                // Attachment cleanup is best-effort: the Inbox row is gone
-                // either way, and a stray file is reclaimed by the next
-                // orphan sweep rather than failing the delete.
-                try? imageStore.delete(reference)
-            }
-        )
-        let queueStore = AppBootstrapEnvironment.resolveCaptureQueueStore()
-        let captureImportCoordinator = CaptureImportCoordinator(
-            inboxService: inbox,
-            store: queueStore
-        )
-        let contentCardService = ContentCardService(
-            repository: GRDBContentCardRepository(database: database)
-        )
-        guard let libraryURL = Bundle.main.url(
-            forResource: "jlpt-library",
-            withExtension: "sqlite",
-            subdirectory: "JLPT"
-        ) ?? Bundle.main.url(forResource: "jlpt-library", withExtension: "sqlite"),
-           let jlptLibraryRepository = try? GRDBJLPTLibraryRepository(databaseURL: libraryURL)
-        else {
-            return nil
-        }
-        let jlptLibraryService = JLPTLibraryService(repository: jlptLibraryRepository)
-        let jlptImporter = GRDBJLPTImporter(database: database)
-        let jlptProgressService = JLPTProgressService(
-            libraryRepository: jlptLibraryRepository,
-            associationRepository: GRDBJLPTNoteAssociationRepository(database: database),
-            adaptiveRepository: GRDBAdaptiveRepository(database: database)
-        )
-        let jlptEnrichmentService = JLPTLibraryEnrichmentService(
-            source: jlptLibraryRepository,
-            store: GRDBJLPTEnrichmentRepository(database: database)
-        )
-        let studySessionService = Self.makeStudySessionService(database: database)
-        let studyHistoryService = StudyHistoryService(
-            repository: GRDBStudyHistoryRepository(database: database)
-        )
-        let appearancePreferencesService = AppearancePreferencesService(
-            repository: GRDBAppearancePreferencesRepository(database: database)
-        )
-        let speechPreferencesService = SpeechPreferencesService(
-            repository: GRDBSpeechPreferencesRepository(database: database)
-        )
-        let adaptivePreferencesService = AdaptivePreferencesService(
-            repository: GRDBAdaptivePreferencesRepository(database: database)
-        )
-        let adaptiveCardService = AdaptiveCardService(
-            repository: GRDBAdaptiveRepository(database: database),
-            invalidation: adaptiveInvalidationCenter
-        )
-        let credentialStore = AppBootstrapEnvironment.makeAICredentialStore()
-        let aiRepository = GRDBAIConfigurationRepository(database: database)
-        let aiConfigurationService = AIConfigurationService(
-            repository: aiRepository,
-            credentialStore: credentialStore
-        )
-        let aiConnectionTestService = AIConnectionTestService(
-            repository: aiRepository,
-            credentialStore: credentialStore,
-            client: AppBootstrapEnvironment.makeAIConnectionClient()
-        )
-        let aiModelCatalogService = AIModelCatalogService(
-            repository: aiRepository,
-            credentialStore: credentialStore,
-            client: AppBootstrapEnvironment.makeModelCatalogClient()
-        )
-        let aiCardGenerationService = AICardGenerationService(
-            repository: aiRepository,
-            credentialStore: credentialStore,
-            client: AppBootstrapEnvironment.makeAICardGenerationClient()
-        )
-        let sentenceAnalysisService = SentenceAnalysisService(
-            configurationRepository: aiRepository,
-            credentialStore: credentialStore,
-            client: AppBootstrapEnvironment.makeSentenceAnalysisClient(),
-            draftRepository: GRDBSentenceAnalysisDraftRepository(database: database)
-        )
-        let sentenceAnalysisCardCreationService = SentenceAnalysisCardCreationService(
-            repository: GRDBSentenceAnalysisCardRepository(database: database)
-        )
-        let aiRepairService = AIRepairService(
-            draftStore: GRDBAIRepairDraftRepository(database: database),
-            commitStore: GRDBAIRepairCommitRepository(database: database),
-            configurationRepository: aiRepository,
-            credentialStore: credentialStore,
-            client: AppBootstrapEnvironment.makeAIRepairClient(),
-            vocabularyRepository: GRDBVocabularyRepository(database: database),
-            grammarRepository: GRDBGrammarRepository(database: database),
-            contentCardRepository: GRDBContentCardRepository(database: database),
-            adaptiveCardService: adaptiveCardService
-        )
-        let portableBackupExporter = PortableBackupPackageExporter(
-            database: database,
-            imageStore: imageStore,
-            workingDirectoryURL: baseURL.appendingPathComponent("Exports", isDirectory: true)
-        )
-        let portableBackupRestorationPreparer = PortableBackupRestorationPreparer(
-            currentDatabase: database,
-            workingDirectoryURL: baseURL.appendingPathComponent(
-                "RestorePreparation",
-                isDirectory: true
-            ),
-            inboxImageResourceExists: { reference in
-                imageStore.exists(reference)
-            }
-        )
-        let processingServices = InboxProcessingServices(
-            deckService: deckManagementService,
-            vocabularyService: vocabularyService,
-            grammarService: grammarService,
-            knowledgePointService: knowledgePointService,
-            contentCardService: contentCardService,
-            aiCardGenerationService: aiCardGenerationService,
-            sentenceAnalysisService: sentenceAnalysisService,
-            sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
-            historyService: studyHistoryService,
-            speechService: bootstrap.speechService,
-            studyService: studySessionService
-        )
-
-        let container = AppFeatureContainer(
-            generation: generation,
-            today: TodayFeatureDependencies(
-                studyService: studySessionService,
-                historyService: studyHistoryService,
-                deckService: deckManagementService,
-                speechPreferencesService: speechPreferencesService,
-                adaptiveCardService: adaptiveCardService,
-                adaptivePreferencesService: adaptivePreferencesService,
-                aiRepairService: aiRepairService,
-                inboxService: inbox,
-                processingServices: processingServices
-            ),
-            decks: DeckFeatureDependencies(
-                deckService: deckManagementService,
-                vocabularyService: vocabularyService,
-                grammarService: grammarService,
-                knowledgePointService: knowledgePointService,
-                searchService: knowledgeSearchService,
-                contentCardService: contentCardService,
-                studyService: studySessionService,
-                historyService: studyHistoryService,
-                speechPreferencesService: speechPreferencesService,
-                adaptivePreferencesService: adaptivePreferencesService,
-                adaptiveCardService: adaptiveCardService,
-                aiRepairService: aiRepairService,
-                aiCardGenerationService: aiCardGenerationService,
-                sentenceAnalysisService: sentenceAnalysisService,
-                sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
-                jlpt: JLPTFeatureDependencies(
-                    progressService: jlptProgressService,
-                    libraryService: jlptLibraryService,
-                    importer: jlptImporter
-                )
-            ),
-            settings: SettingsFeatureDependencies(
-                studyService: studySessionService,
-                speechPreferencesService: speechPreferencesService,
-                adaptivePreferencesService: adaptivePreferencesService,
-                aiConfigurationService: aiConfigurationService,
-                aiConnectionTestService: aiConnectionTestService,
-                aiModelCatalogService: aiModelCatalogService,
-                speechService: bootstrap.speechService,
-                exporter: portableBackupExporter,
-                restorationPreparer: portableBackupRestorationPreparer
-            ),
-            shared: SharedFeatureDependencies(
-                speechService: bootstrap.speechService,
-                ocrService: bootstrap.ocrService,
-                inboxImageStore: imageStore
-            )
-        )
-        let runtime = RuntimeServices(
-            adaptiveCardService: adaptiveCardService,
-            aiRepairService: aiRepairService,
-            appearancePreferencesService: appearancePreferencesService,
-            captureImportCoordinator: captureImportCoordinator,
-            captureQueueStore: queueStore,
-            inboxService: inbox,
-            inboxImageStore: imageStore,
-            jlptEnrichmentService: jlptEnrichmentService
-        )
-        return BuiltServices(container: container, runtime: runtime)
-    }
-
-    nonisolated private static func makeStudySessionService(
-        database: OboeDatabase
-    ) -> StudySessionService {
-        let submissionRepository = AppBootstrapEnvironment.makeSubmissionRepository(
-            base: GRDBReviewSubmissionRepository(database: database)
-        )
-        return StudySessionService(
-            studyDayRepository: GRDBStudyDayPlanningRepository(database: database),
-            queueRepository: GRDBTodayQueueRepository(database: database),
-            contentRepository: AppBootstrapEnvironment.makeReviewContentRepository(
-                base: GRDBReviewCardContentRepository(database: database)
-            ),
-            submissionRepository: submissionRepository,
-            undoRepository: GRDBReviewSubmissionRepository(database: database),
-            scheduler: SwiftFSRSReviewScheduler()
-        )
     }
 }

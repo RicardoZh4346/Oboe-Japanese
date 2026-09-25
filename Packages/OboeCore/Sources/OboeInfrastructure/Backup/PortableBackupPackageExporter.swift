@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import GRDB
 import OboeDomain
@@ -28,20 +27,32 @@ public struct PortableBackupPackageExport: Equatable, Sendable {
     }
 }
 
-/// 便携备份 v7 导出器（设计 §11.2）：`.oboe-backup` 扩展名不变，
-/// 内部升级为 ZIP 容器——`manifest.json` + `records.ndjson`（完整 v6 流）
+/// 便携备份 v7 导出器（设计 §11.2 / v0.6.0 §8.2）：`.oboe-backup` 扩展名不变，
+/// 内部为 ZIP 容器——`manifest.json` + `records.ndjson`（完整 v6 流）
 /// + `attachments/<id>.<ext>` + `checksums.json`。
 ///
-/// 附件元数据的唯一事实源是文件字节本身：sha256/大小/MIME/像素都从
-/// `InboxImageStore` 读出的内容实时计算，`attachments` 表不参与导出，
-/// 这样 manifest、checksums 与包内文件不可能互相漂移。
+/// S04 流式化：不再聚合完整 records/ZIP/附件 Data。records.ndjson 先落到
+/// staging 文件（沿用 `writeBackupRecords` 的一致性快照读法），再以
+/// 256 KiB chunk 流式写入 `StreamingZipWriter` 并增量计算 SHA-256；
+/// 附件经 `attachmentFileProvider` 逐文件提供 URL，先嗅探元数据再按 id
+/// 排序写入——内存复杂度 O(chunk + 有界元数据)。
+///
+/// 附件元数据的唯一事实源是文件字节本身：sha256/大小/MIME/像素都从文件
+/// 内容实时计算，`attachments` 表不参与导出，manifest、checksums 与包内
+/// 文件不可能互相漂移。
 public actor PortableBackupPackageExporter {
     public static let formatVersion = PortableBackupPackageFormat.formatVersion
     public static let fileExtension = PortableBackupFormat.fileExtension
 
+    /// 附件文件提供者：受控资源 id → 本地文件 URL。
+    /// S05 的 staged lease 会实现同一契约提供暂存文件；本步只做协议预留，
+    /// 默认实现直接映射 `InboxImageStore` 的存储文件。抛出或文件缺失时
+    /// 该 id 记入 unresolved（与旧版缺文件语义一致），导出继续。
+    public typealias AttachmentFileProvider = @Sendable (String) throws -> URL
+
     private let database: OboeDatabase
-    private let imageStore: InboxImageStore
     private let workingDirectoryURL: URL
+    private let attachmentFileProvider: AttachmentFileProvider
     private let snapshotCreatedHook: (@Sendable () async throws -> Void)?
 
     public init(
@@ -50,8 +61,10 @@ public actor PortableBackupPackageExporter {
         workingDirectoryURL: URL
     ) {
         self.database = database
-        self.imageStore = imageStore
         self.workingDirectoryURL = workingDirectoryURL
+        attachmentFileProvider = { resourceID in
+            try imageStore.fileURL(for: resourceID)
+        }
         snapshotCreatedHook = nil
     }
 
@@ -59,11 +72,14 @@ public actor PortableBackupPackageExporter {
         database: OboeDatabase,
         imageStore: InboxImageStore,
         workingDirectoryURL: URL,
+        attachmentFileProvider: AttachmentFileProvider? = nil,
         snapshotCreatedHook: (@Sendable () async throws -> Void)?
     ) {
         self.database = database
-        self.imageStore = imageStore
         self.workingDirectoryURL = workingDirectoryURL
+        self.attachmentFileProvider = attachmentFileProvider ?? { resourceID in
+            try imageStore.fileURL(for: resourceID)
+        }
         self.snapshotCreatedHook = snapshotCreatedHook
     }
 
@@ -71,6 +87,7 @@ public actor PortableBackupPackageExporter {
         appVersion: String,
         at exportedAt: Date = Date()
     ) async throws -> PortableBackupPackageExport {
+        try Task.checkCancellation()
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: workingDirectoryURL,
@@ -106,13 +123,15 @@ public actor PortableBackupPackageExporter {
         let finalURL = uniqueExportURL(at: exportedAt)
 
         do {
+            try Task.checkCancellation()
             let result = try writePackage(
                 from: snapshot.url,
                 stagingURL: stagingURL,
+                to: pendingURL,
                 appVersion: appVersion,
                 exportedAt: exportedAt
             )
-            try result.archive.write(to: pendingURL, options: .atomic)
+            // 成功才从 .pending 临时名转正——中间失败不留有效名残件。
             try fileManager.moveItem(at: pendingURL, to: finalURL)
             try? fileManager.removeItem(at: stagingURL)
             return PortableBackupPackageExport(
@@ -142,15 +161,22 @@ public actor PortableBackupPackageExporter {
     // MARK: - 打包
 
     private struct PackageResult {
-        let archive: Data
         let recordCounts: [String: Int]
         let attachments: [AttachmentDescriptor]
         let unresolvedAttachmentIDs: [String]
     }
 
+    /// 两阶段打包（§8.2）：
+    /// 1. 快照内写 records.ndjson 到 staging → 流式入包算 sha256；
+    ///    附件逐文件嗅探元数据、按 id 顺序流式入包（store，已压缩内容不再压）。
+    /// 2. 全部 descriptor/digest 已知后写 manifest → checksums → 中央目录。
+    ///
+    /// 包内条目顺序：records → attachments → manifest → checksums
+    /// （manifest 依赖 records/附件摘要；reader 按名字索引，不依赖顺序）。
     private func writePackage(
         from snapshotURL: URL,
         stagingURL: URL,
+        to pendingURL: URL,
         appVersion: String,
         exportedAt: Date
     ) throws -> PackageResult {
@@ -173,117 +199,134 @@ public actor PortableBackupPackageExporter {
         // 附件清单：从同一快照读 inbox_items 的引用集合，保证记录流与
         // 附件集一致——导出进行中新增的引用不会混进包里。
         let referencedIDs = try referencedAttachmentIDs(in: snapshotURL)
+
+        let writer = try StreamingZipWriter(fileURL: pendingURL)
         var attachments: [AttachmentDescriptor] = []
         var unresolved: [String] = []
-        var attachmentPayloads: [(descriptor: AttachmentDescriptor, data: Data)] = []
-        for resourceID in referencedIDs {
-            guard let payload = try attachmentPayload(for: resourceID) else {
-                unresolved.append(resourceID)
-                continue
-            }
-            attachments.append(payload.descriptor)
-            attachmentPayloads.append(payload)
-        }
+        var checksumFiles: [String: String] = [:]
+        do {
+            try Task.checkCancellation()
+            let dosDateTime = ZipArchive.dosDateTime(from: exportedAt)
 
-        let manifest = PortableBackupPackageManifest(
-            format: PortableBackupFormat.identifier,
-            formatVersion: Self.formatVersion,
-            container: PortableBackupPackageFormat.container,
-            appVersion: appVersion,
-            exportedAt: PortableBackupPackageFormat.iso8601String(from: exportedAt),
-            encoding: "utf-8",
-            lineEnding: "lf",
-            checksumAlgorithm: PortableBackupFormat.checksumAlgorithm,
-            recordFormatVersion: PortableBackupPackageFormat.recordsFormatVersion,
-            recordOrder: PortableBackupFormatV6.recordTypes,
-            counts: recordCounts,
-            excludedScopes: PortableBackupPackageFormat.excludedScopes,
-            attachments: attachments
-        )
-        let manifestData = try manifest.encoded()
-
-        let recordsData = try Data(contentsOf: recordsURL)
-        var checksumFiles: [String: String] = [
-            PortableBackupPackageFormat.recordsEntryName: Self.sha256Hex(of: recordsData)
-        ]
-        for payload in attachmentPayloads {
-            checksumFiles[payload.descriptor.relativePath] = payload.descriptor.sha256
-        }
-        let checksums = PortableBackupChecksums(
-            algorithm: PortableBackupFormat.checksumAlgorithm,
-            files: checksumFiles
-        )
-        let checksumsData = try checksums.encoded()
-
-        // 固定条目顺序：manifest → records → attachments（按 id 排序）→ checksums。
-        let dosDateTime = ZipArchive.dosDateTime(from: exportedAt)
-        var entries = [
-            ZipArchive.WriteEntry(
-                name: PortableBackupPackageFormat.manifestEntryName,
-                data: manifestData,
-                dosDate: dosDateTime.date,
-                dosTime: dosDateTime.time
-            ),
-            ZipArchive.WriteEntry(
+            // records.ndjson：staging 文件按 chunk 流式入包，增量算 sha256。
+            try writer.beginEntry(
                 name: PortableBackupPackageFormat.recordsEntryName,
-                data: recordsData,
+                method: .deflate,
                 dosDate: dosDateTime.date,
                 dosTime: dosDateTime.time
             )
-        ]
-        for payload in attachmentPayloads.sorted(by: { $0.descriptor.id < $1.descriptor.id }) {
-            entries.append(ZipArchive.WriteEntry(
-                name: payload.descriptor.relativePath,
-                data: payload.data,
+            try streamFile(at: recordsURL, into: writer)
+            let recordsResult = try writer.finishEntry()
+            checksumFiles[PortableBackupPackageFormat.recordsEntryName] =
+                recordsResult.sha256
+
+            // 附件：逐文件 provider → 嗅探 → 排序写入。字节只经手一个 chunk，
+            // 不再聚合 [(AttachmentDescriptor, Data)]。
+            for resourceID in referencedIDs {
+                try Task.checkCancellation()
+                guard let fileURL = try? attachmentFileProvider(resourceID),
+                      fileManager.fileExists(atPath: fileURL.path),
+                      let inspection = AttachmentContentSniffer.inspect(
+                        fileURL: fileURL
+                      ),
+                      let ext = AttachmentContentSniffer.canonicalExtension(
+                        forMimeType: inspection.mimeType
+                      ) else {
+                    unresolved.append(resourceID)
+                    continue
+                }
+                let relativePath = PortableBackupPackageFormat.canonicalRelativePath(
+                    id: resourceID,
+                    fileExtension: ext
+                )
+                try writer.beginEntry(
+                    name: relativePath,
+                    method: .store,
+                    dosDate: dosDateTime.date,
+                    dosTime: dosDateTime.time
+                )
+                try streamFile(at: fileURL, into: writer)
+                let result = try writer.finishEntry()
+                let descriptor = AttachmentDescriptor(
+                    id: resourceID,
+                    relativePath: relativePath,
+                    mimeType: inspection.mimeType,
+                    byteCount: Int(result.uncompressedSize),
+                    sha256: result.sha256,
+                    pixelWidth: inspection.pixelWidth,
+                    pixelHeight: inspection.pixelHeight
+                )
+                attachments.append(descriptor)
+                checksumFiles[relativePath] = result.sha256
+            }
+
+            // 所有 descriptor/digest 已知后才写 manifest 与 checksums。
+            let manifest = PortableBackupPackageManifest(
+                format: PortableBackupFormat.identifier,
+                formatVersion: Self.formatVersion,
+                container: PortableBackupPackageFormat.container,
+                appVersion: appVersion,
+                exportedAt: PortableBackupPackageFormat.iso8601String(
+                    from: exportedAt
+                ),
+                encoding: "utf-8",
+                lineEnding: "lf",
+                checksumAlgorithm: PortableBackupFormat.checksumAlgorithm,
+                recordFormatVersion: PortableBackupPackageFormat.recordsFormatVersion,
+                recordOrder: PortableBackupFormatV7.recordTypes,
+                counts: recordCounts,
+                excludedScopes: PortableBackupPackageFormat.excludedScopes,
+                attachments: attachments
+            )
+            try writer.beginEntry(
+                name: PortableBackupPackageFormat.manifestEntryName,
+                method: .deflate,
                 dosDate: dosDateTime.date,
                 dosTime: dosDateTime.time
-            ))
+            )
+            try writer.write(manifest.encoded())
+            _ = try writer.finishEntry()
+
+            let checksums = PortableBackupChecksums(
+                algorithm: PortableBackupFormat.checksumAlgorithm,
+                files: checksumFiles
+            )
+            try writer.beginEntry(
+                name: PortableBackupPackageFormat.checksumsEntryName,
+                method: .deflate,
+                dosDate: dosDateTime.date,
+                dosTime: dosDateTime.time
+            )
+            try writer.write(checksums.encoded())
+            _ = try writer.finishEntry()
+
+            try writer.finalizeArchive()
+        } catch {
+            writer.abort()
+            throw error
         }
-        entries.append(ZipArchive.WriteEntry(
-            name: PortableBackupPackageFormat.checksumsEntryName,
-            data: checksumsData,
-            dosDate: dosDateTime.date,
-            dosTime: dosDateTime.time
-        ))
-        let archive = try ZipArchive.archive(entries: entries)
         return PackageResult(
-            archive: archive,
             recordCounts: recordCounts,
             attachments: attachments,
             unresolvedAttachmentIDs: unresolved
         )
     }
 
-    /// 附件字节 → descriptor + 数据。文件缺失或内容不再是受支持图片时
-    /// 返回 nil（调用方记入 unresolved，导出继续）。
-    private func attachmentPayload(
-        for resourceID: String
-    ) throws -> (descriptor: AttachmentDescriptor, data: Data)? {
-        let data: Data
-        do {
-            data = try imageStore.loadPreviewData(for: resourceID)
-        } catch {
-            return nil
+    /// 文件 → ZIP 条目流式搬运：256 KiB chunk，逐块检查取消。
+    private func streamFile(at url: URL, into writer: StreamingZipWriter) throws {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        while true {
+            try Task.checkCancellation()
+            // autoreleasepool：FileHandle.read 返回 autoreleased NSData，
+            // 紧循环里不排水会把累计读量顶进 RSS。
+            guard let chunk = try autoreleasepool(invoking: {
+                try handle.read(upToCount: StreamingZipWriter.chunkSize)
+            }), !chunk.isEmpty else {
+                return
+            }
+            try writer.write(chunk)
         }
-        guard let inspection = AttachmentContentSniffer.inspect(data),
-              let ext = AttachmentContentSniffer.canonicalExtension(
-                forMimeType: inspection.mimeType
-              ) else {
-            return nil
-        }
-        let descriptor = AttachmentDescriptor(
-            id: resourceID,
-            relativePath: PortableBackupPackageFormat.canonicalRelativePath(
-                id: resourceID,
-                fileExtension: ext
-            ),
-            mimeType: inspection.mimeType,
-            byteCount: data.count,
-            sha256: Self.sha256Hex(of: data),
-            pixelWidth: inspection.pixelWidth,
-            pixelHeight: inspection.pixelHeight
-        )
-        return (descriptor, data)
     }
 
     private func referencedAttachmentIDs(in snapshotURL: URL) throws -> [String] {
@@ -293,20 +336,29 @@ public actor PortableBackupPackageExporter {
         let snapshot = try DatabaseQueue(path: snapshotURL.path, configuration: configuration)
         defer { try? snapshot.close() }
         return try snapshot.read { db in
-            try String.fetchAll(
-                db,
-                sql: """
+            // D09（设计 §6.3）：导出清单用统一引用集合——
+            // inbox_items ∪ source_contexts；v15 之前的快照没有
+            // source_contexts 表，探测后按旧集合退化为 inbox 单列。
+            let hasSourceContexts = try db.tableExists("source_contexts")
+            let sql = hasSourceContexts
+                ? """
+                    SELECT DISTINCT image_reference FROM (
+                        SELECT image_reference FROM inbox_items
+                        UNION
+                        SELECT image_reference FROM source_contexts
+                    )
+                    WHERE image_reference IS NOT NULL
+                      AND image_reference <> ''
+                    ORDER BY image_reference
+                    """
+                : """
                     SELECT DISTINCT image_reference
                     FROM inbox_items
                     WHERE image_reference IS NOT NULL
                     ORDER BY image_reference
                     """
-            )
+            return try String.fetchAll(db, sql: sql)
         }
-    }
-
-    static func sha256Hex(of data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private func uniqueExportURL(at date: Date) -> URL {

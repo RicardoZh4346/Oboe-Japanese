@@ -15,4 +15,6 @@ struct SettingsFeatureDependencies {
     let speechService: any SpeechService
     let exporter: PortableBackupPackageExporter
     let restorationPreparer: PortableBackupRestorationPreparer
+    /// S06：关于页「词典来源与许可」的事实源（sources()/metadata()）。
+    let dictionaryQueryService: DictionaryQueryService
 }

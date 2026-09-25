@@ -212,13 +212,16 @@ public struct StudySessionService: Sendable {
 
     /// `scopeDeckID` 为复习会话的牌组 scope；nil 表示从“全部今日
     /// 任务”进入，历史归因到 home 牌组（设计 §4.7）。
+    /// `policy` 仅由专项学习驱动层传入 `.customScheduled`（设计 §7.3）；
+    /// 默认 `.normal` 保持现有 due/daily_tasks 校验。
     public func submit(
         card: LoadedReviewCard,
         rating: ReviewRating,
         studyDay: StudyDay,
         eventID: UUID,
         durationMilliseconds: Int,
-        scopeDeckID: UUID? = nil
+        scopeDeckID: UUID? = nil,
+        policy: ReviewSubmissionPolicy = .normal
     ) async throws -> ReviewLogRecord {
         try await SubmitReview(
             repository: submissionRepository,
@@ -232,7 +235,8 @@ public struct StudySessionService: Sendable {
                 rating: rating,
                 durationMilliseconds: durationMilliseconds,
                 studyDay: studyDay.context,
-                scopeDeckID: scopeDeckID
+                scopeDeckID: scopeDeckID,
+                policy: policy
             )
         )
     }

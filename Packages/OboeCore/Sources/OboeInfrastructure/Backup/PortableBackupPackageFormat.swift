@@ -413,8 +413,23 @@ enum AttachmentContentSniffer {
     /// 返回 nil 表示内容不是受支持的图片类型或尺寸不可解析。
     static func inspect(_ data: Data) -> Inspection? {
         guard !data.isEmpty,
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let uti = CGImageSourceGetType(source) as? String else {
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return nil
+        }
+        return inspect(source: source)
+    }
+
+    /// 文件 URL 版：CGImageSource 以文件为后端读 metadata，
+    /// 不把整文件载入内存，也不解码像素（与 `inspect(_:)` 判定口径一致）。
+    static func inspect(fileURL: URL) -> Inspection? {
+        guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil) else {
+            return nil
+        }
+        return inspect(source: source)
+    }
+
+    private static func inspect(source: CGImageSource) -> Inspection? {
+        guard let uti = CGImageSourceGetType(source) as? String else {
             return nil
         }
         let mimeType: String

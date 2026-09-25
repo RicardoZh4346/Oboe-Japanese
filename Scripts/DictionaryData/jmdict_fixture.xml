@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE JMdict [
+<!ELEMENT JMdict (entry*)>
+<!ELEMENT entry (ent_seq, k_ele*, r_ele+, sense+)>
+<!ELEMENT ent_seq (#PCDATA)>
+<!ELEMENT k_ele (keb, ke_inf*, ke_pri*)>
+<!ELEMENT keb (#PCDATA)>
+<!ELEMENT ke_inf (#PCDATA)>
+<!ELEMENT ke_pri (#PCDATA)>
+<!ELEMENT r_ele (reb, re_nokanji?, re_restr*, re_inf*, re_pri*)>
+<!ELEMENT reb (#PCDATA)>
+<!ELEMENT re_nokanji (#PCDATA)>
+<!ELEMENT re_restr (#PCDATA)>
+<!ELEMENT re_inf (#PCDATA)>
+<!ELEMENT re_pri (#PCDATA)>
+<!ELEMENT sense (stagk*, stagr*, pos*, xref*, ant*, field*, misc*, s_inf*, lsource*, dial*, gloss*, example*)>
+<!ELEMENT stagk (#PCDATA)>
+<!ELEMENT stagr (#PCDATA)>
+<!ELEMENT xref (#PCDATA)*>
+<!ELEMENT ant (#PCDATA)*>
+<!ELEMENT pos (#PCDATA)>
+<!ELEMENT field (#PCDATA)>
+<!ELEMENT misc (#PCDATA)>
+<!ELEMENT lsource (#PCDATA)>
+<!ATTLIST lsource xml:lang CDATA "eng">
+<!ATTLIST lsource ls_type CDATA #IMPLIED>
+<!ATTLIST lsource ls_wasei CDATA #IMPLIED>
+<!ELEMENT dial (#PCDATA)>
+<!ELEMENT gloss (#PCDATA | pri)*>
+<!ATTLIST gloss xml:lang CDATA "eng">
+<!ATTLIST gloss g_gend CDATA #IMPLIED>
+<!ATTLIST gloss g_type CDATA #IMPLIED>
+<!ELEMENT s_inf (#PCDATA)>
+<!ELEMENT example (ex_srce,ex_text,ex_sent+)>
+<!ELEMENT ex_srce (#PCDATA)>
+<!ELEMENT ex_text (#PCDATA)>
+<!ELEMENT ex_sent (#PCDATA)>
+<!ATTLIST ex_sent xml:lang CDATA "eng">
+<!ATTLIST ex_srce exsrc_type CDATA #IMPLIED>
+<!-- Locked subset of the JMdict entity map used by this fixture -->
+<!ENTITY v1 "Ichidan verb">
+<!ENTITY vt "transitive verb">
+<!ENTITY vi "intransitive verb">
+<!ENTITY v5k-s "Godan verb - Iku/Yuku special class">
+<!ENTITY exp "expressions (phrases, clauses, etc.)">
+<!ENTITY aux "auxiliary">
+<!ENTITY int "interjection (kandoushi)">
+<!ENTITY adj-na "adjectival nouns or quasi-adjectives (keiyodoshi)">
+<!ENTITY n "noun (common) (futsuumeishi)">
+<!ENTITY unc "unclassified">
+<!ENTITY food "food, cooking">
+<!ENTITY uk "word usually written using kana alone">
+<!ENTITY ksb "Kansai-ben">
+<!ENTITY ateji "ateji (phonetic) reading">
+<!ENTITY io "irregular okurigana usage">
+<!ENTITY sk "search-only kana form">
+<!ENTITY gikun "gikun (meaning as reading) or jukujikun (special kanji reading)">
+]>
+<!-- JMdict created: 2026-01-01 -->
+<JMdict>
+<entry>
+<ent_seq>1001</ent_seq>
+<k_ele>
+<keb>食べる</keb>
+<ke_pri>news1</ke_pri>
+<ke_pri>nf03</ke_pri>
+</k_ele>
+<k_ele>
+<keb>喰べる</keb>
+<ke_inf>&ateji;</ke_inf>
+<ke_inf>&io;</ke_inf>
+</k_ele>
+<r_ele>
+<reb>たべる</reb>
+<re_restr>食べる</re_restr>
+<re_pri>news1</re_pri>
+</r_ele>
+<r_ele>
+<reb>タベル</reb>
+<re_nokanji/>
+<re_inf>&sk;</re_inf>
+<re_pri>nf10</re_pri>
+</r_ele>
+<sense>
+<stagk>食べる</stagk>
+<stagr>たべる</stagr>
+<pos>&v1;</pos>
+<pos>&vt;</pos>
+<field>&food;</field>
+<misc>&uk;</misc>
+<xref>食う・1</xref>
+<ant>断食する</ant>
+<lsource xml:lang="lat" ls_type="part" ls_wasei="y">edere</lsource>
+<dial>&ksb;</dial>
+<gloss g_type="lit">to eat (literal)</gloss>
+<gloss>to consume</gloss>
+<s_inf>plain form note</s_inf>
+</sense>
+<sense>
+<gloss>to eat (a meal)</gloss>
+</sense>
+<sense>
+<pos>&exp;</pos>
+<pos>&aux;</pos>
+<s_inf>grammarized use</s_inf>
+<gloss>expression sense</gloss>
+</sense>
+</entry>
+<entry>
+<ent_seq>1002</ent_seq>
+<r_ele>
+<reb>あっと</reb>
+<re_inf>&gikun;</re_inf>
+<re_pri>nf20</re_pri>
+</r_ele>
+<sense>
+<pos>&int;</pos>
+<gloss g_type="expl">ah!; oh! (exclamatory)</gloss>
+</sense>
+</entry>
+<entry>
+<ent_seq>1003</ent_seq>
+<k_ele>
+<keb>行く</keb>
+<ke_pri>ichi1</ke_pri>
+</k_ele>
+<r_ele>
+<reb>いく</reb>
+</r_ele>
+<sense>
+<pos>&v5k-s;</pos>
+<pos>&vi;</pos>
+<gloss>to go</gloss>
+</sense>
+<sense>
+<pos>&v5k-s;</pos>
+<pos>&vi;</pos>
+<gloss>to proceed</gloss>
+</sense>
+</entry>
+<entry>
+<ent_seq>1004</ent_seq>
+<r_ele>
+<reb>まれ</reb>
+</r_ele>
+<sense>
+<pos>&adj-na;</pos>
+<gloss>rare; uncommon</gloss>
+</sense>
+</entry>
+</JMdict>

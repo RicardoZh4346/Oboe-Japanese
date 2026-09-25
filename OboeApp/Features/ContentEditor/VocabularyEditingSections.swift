@@ -264,7 +264,7 @@ struct VocabularyRequiredSection: View {
                 identifier: "vocabulary-headword-field"
             )
             LanguageHintTextField(
-                placeholder: "中文释义",
+                placeholder: "释义（中文或英文）",
                 text: $form.meaningZH,
                 hint: .chinesePinyin,
                 identifier: "vocabulary-meaning-field"
@@ -466,7 +466,7 @@ func vocabularyValidationMessage(for form: VocabularyFormData) -> String {
     } catch VocabularyValidationError.headwordRequired {
         return "请填写日语词形。"
     } catch VocabularyValidationError.meaningRequired {
-        return "请填写中文释义。"
+        return "请填写释义。"
     } catch VocabularyValidationError.exampleJapaneseRequired {
         return "填写例句翻译时，也需要填写日语例句。"
     } catch VocabularyValidationError.pitchAccentRequiresReading {

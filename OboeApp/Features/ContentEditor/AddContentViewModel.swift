@@ -38,6 +38,9 @@ struct CaptureEditorSession {
     var context: InboxProcessingContext
     var payload: CaptureResumePayload?
     var isAnalysisStale: Bool
+    /// S07：条目来源事实（sourceType/图片/URL/app）——构建 sourceContextDraft
+    /// 用；老测试未传时按 nil 处理（来源区退化为无）。
+    var item: InboxItem?
 }
 
 @MainActor
@@ -67,6 +70,29 @@ final class AddContentViewModel {
     /// v0.5.5 牌组详情进入的添加流：该牌组是必选成员，不能被移除；
     /// home 默认为它（用户仍可把 home 切到其他成员）。
     let requiredDeckID: UUID?
+    /// S07：词典预填存在时跳过单词草稿恢复（见 init / load()）。
+    private let vocabularyPrefill: VocabularyFormData?
+    /// S07：随预填/查词入口附带的来源草稿；提交时入 Note 事务，
+    /// 取消/清草稿即丢弃，不落库。
+    var sourceContextDraft: SourceContextDraft?
+    /// S07：已有 Note 加牌组时的来源落库通道；nil（旧测试构造）时
+    /// 跳过来源保存，成员关系不受影响。
+    let sourceContextRepository: (any SourceContextRepository)?
+
+    /// S07 编辑器内查词选中词条：表单按词条预填（覆盖当前表单值），
+    /// 来源草稿在既有 lookup 事实（OCR 原句/图片等）上叠词典快照。
+    func applyDictionaryPrefill(
+        _ entry: DictionaryEntry,
+        datasetVersion: String?
+    ) {
+        vocabularyForm = DictionaryCardPrefill.vocabularyForm(from: entry)
+        sourceContextDraft = DictionaryCardPrefill.sourceContextDraft(
+            from: entry,
+            datasetVersion: datasetVersion,
+            lookup: sourceContextDraft
+        )
+        persistCaptureResume()
+    }
     var errorMessage: String?
     var isLoading = true
 
@@ -311,7 +337,13 @@ final class AddContentViewModel {
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         studyService: StudySessionService? = nil,
         requiredDeckID: UUID? = nil,
-        capture: CaptureEditorSession? = nil
+        capture: CaptureEditorSession? = nil,
+        /// S07 词典制卡预填：非 nil 时锁定单词表单为词条值，且不再
+        /// 恢复「上次草稿」（用户的显式选择优先于陈旧草稿）。
+        vocabularyPrefill: VocabularyFormData? = nil,
+        /// S07：查词入口传入的来源草稿（OCR 原句/词典词条快照）。
+        sourceContextDraft: SourceContextDraft? = nil,
+        sourceContextRepository: (any SourceContextRepository)? = nil
     ) {
         self.deckService = deckService
         self.vocabularyService = vocabularyService
@@ -324,10 +356,17 @@ final class AddContentViewModel {
         self.studyService = studyService
         self.requiredDeckID = requiredDeckID
         captureCoordinator = CaptureDraftCoordinator(inboxService: capture?.inboxService)
+        self.vocabularyPrefill = vocabularyPrefill
+        self.sourceContextDraft = sourceContextDraft
+        self.sourceContextRepository = sourceContextRepository
         captureSession = capture
         if let capture {
             captureIsManualEdit = capture.context.mode == .manualEdit
             kind = Self.kind(for: capture.context.mode)
+        }
+        if let vocabularyPrefill {
+            kind = .vocabulary
+            form.vocabularyForm = vocabularyPrefill
         }
     }
 
@@ -370,7 +409,9 @@ final class AddContentViewModel {
             if let captureSession {
                 try await restoreCaptureSession(captureSession)
             } else {
-                try await restoreVocabularyDraft()
+                if vocabularyPrefill == nil {
+                    try await restoreVocabularyDraft()
+                }
                 try await restoreGrammarDraft()
                 try await restoreSentenceAnalysisDraft()
             }

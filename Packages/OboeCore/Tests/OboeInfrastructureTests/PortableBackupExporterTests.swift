@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import GRDB
 import XCTest
+import OboeDomain
 @testable import OboeInfrastructure
 
 final class PortableBackupExporterTests: XCTestCase {
@@ -186,10 +187,11 @@ final class PortableBackupExporterTests: XCTestCase {
 
 private extension PortableBackupExporterTests {
     static let recordTypes = [
-        "deck", "note", "noteDeck", "example", "tag", "noteTag", "profile", "card",
-        "studyDay", "dailyTask", "review", "draft",
-        "inboxItem", "inboxProcessingContext", "captureImportReceipt",
-        "inboxCommitReceipt", "settings"
+        "deck", "note", "noteDeck", "sourceContext", "example", "tag",
+        "noteTag", "profile", "card", "studyDay", "dailyTask", "review",
+        "draft", "inboxItem", "inboxProcessingContext", "captureImportReceipt",
+        "inboxCommitReceipt", "customStudySession", "practiceAttempt",
+        "scheduledReviewOrigin", "settings"
     ]
 
     struct ParsedBackup {
@@ -384,6 +386,69 @@ private extension PortableBackupExporterTests {
                     String(repeating: "cd", count: 32),
                     #"{"noteID":"9B361C4E-7A77-4E46-9B25-4BD90B96CCE1"}"#
                 ]
+            )
+            // v7 新表：sourceContext 紧随 note（FK note_id）；
+            // Custom Study 三表按 session → attempt → origin。
+            let sessionID = UUID()
+            let filterJSON = String(
+                decoding: try JSONEncoder().encode(CustomStudyFilter()),
+                as: UTF8.self
+            )
+            let queueJSON = String(
+                decoding: try JSONEncoder().encode(
+                    CustomStudyQueue.ordered(
+                        cardIDs: [cardID],
+                        order: .due,
+                        randomSeed: nil,
+                        generatedAt: Date(timeIntervalSince1970: 1_789_056_000)
+                    )
+                ),
+                as: UTF8.self
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO source_contexts(
+                        id, note_id, source_type, original_sentence,
+                        surrounding_text, source_title, source_url, source_app,
+                        image_reference, dictionary_entry_id, dictionary_version,
+                        dictionary_sense_key, selected_gloss_language,
+                        is_primary, created_at_ms
+                    ) VALUES (
+                        ?, ?, 'ocr', 'パンを食べたい。', NULL, NULL, NULL,
+                        'com.apple.mobilesafari', 'inbox-image-resource-01',
+                        1358280, '2026.09.24-1', '1358280-1', 'zho', 1, 3
+                    )
+                    """,
+                arguments: [UUID().uuidString.lowercased(), encode(noteID)]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO custom_study_sessions(
+                        id, filter_json, mode, status,
+                        started_at_ms, finished_at_ms, queue_json
+                    ) VALUES (?, ?, 'practiceOnly', 'finished', 1789056000100, 1789056000200, ?)
+                    """,
+                arguments: [encode(sessionID), filterJSON, queueJSON]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO practice_attempts(
+                        id, event_id, session_id, card_key, note_id, rating,
+                        answered_at_ms, duration_ms, content_version, undone_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, 2, 1789056000150, 400, 2, NULL)
+                    """,
+                arguments: [
+                    encode(UUID()), encode(UUID()), encode(sessionID),
+                    encode(cardID), encode(noteID)
+                ]
+            )
+            try db.execute(
+                sql: """
+                    INSERT INTO scheduled_review_origins(
+                        event_id, session_id, submission_kind
+                    ) VALUES (?, ?, 'customScheduled')
+                    """,
+                arguments: [encode(eventID), encode(sessionID)]
             )
             try db.execute(
                 sql: """

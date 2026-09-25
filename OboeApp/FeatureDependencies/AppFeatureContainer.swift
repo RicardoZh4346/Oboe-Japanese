@@ -11,4 +11,6 @@ struct AppFeatureContainer {
     let decks: DeckFeatureDependencies
     let settings: SettingsFeatureDependencies
     let shared: SharedFeatureDependencies
+    /// S06 词典：始终构造（服务无状态）；资源缺失由查询期错误收敛。
+    let dictionary: DictionaryFeatureDependencies
 }

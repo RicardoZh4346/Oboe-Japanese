@@ -130,7 +130,7 @@ public actor PortableBackupExporter {
 
         return try snapshot.read { db in
             var counts: [String: Int] = [:]
-            for specification in PortableBackupFormatV6.tableSpecifications {
+            for specification in PortableBackupFormatV7.tableSpecifications {
                 let countSQL: String
                 if let selectSQL = specification.selectSQL {
                     countSQL = "SELECT COUNT(*) FROM (\(selectSQL))"
@@ -150,13 +150,13 @@ public actor PortableBackupExporter {
                 "encoding": "utf-8",
                 "lineEnding": "lf",
                 "checksumAlgorithm": PortableBackupFormat.checksumAlgorithm,
-                "recordOrder": PortableBackupFormatV6.recordTypes,
+                "recordOrder": PortableBackupFormatV7.recordTypes,
                 "counts": counts,
                 "excludedScopes": PortableBackupFormat.excludedScopes
             ]
             try Self.writeHashedLine(manifest, to: handle, hasher: &hasher)
 
-            for specification in PortableBackupFormatV6.tableSpecifications {
+            for specification in PortableBackupFormatV7.tableSpecifications {
                 let sql: String
                 if let selectSQL = specification.selectSQL {
                     sql = "\(selectSQL) ORDER BY \(specification.orderBy)"

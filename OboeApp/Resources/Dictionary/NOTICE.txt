@@ -1,0 +1,57 @@
+Oboe Japanese Dictionary — Data Sources & Licenses
+
+Dataset version: 2026.09.24-1
+SQLite schema: v1
+JMdict snapshot: 2026-09-24-daily
+Tomoshi Open Data: v2026-09-02
+Entries: 218807 / Forms: 233511 / Readings: 265701 / Senses: 253651
+Chinese (zh-CN) glosses overlaid: 251707 on 217524 entries
+
+This SQLite database is a derived dataset built for offline dictionary lookup
+inside Oboe. The data layer is distributed under CC BY-SA 4.0; Oboe's
+application code license does not cover this dataset.
+
+Sources & Attribution
+
+- JMdict Japanese-Multilingual Dictionary, Electronic Dictionary Research
+  and Development Group (EDRDG) — headwords, readings, senses, English
+  glosses, part-of-speech and restriction data. CC BY-SA 4.0.
+- Tomoshi Dictionary Open Data (Y1Z), release v2026-09-02 — zh-CN gloss
+  overlay derived from JMdict (table `zh_defs` only), consumed under its
+  per-table CC BY-SA 4.0 license. The zh-CN layer is machine-assisted
+  (LLM-aided translation reviewed upstream) and is flagged
+  `is_machine_generated=1` in the database; English JMdict glosses are always
+  retained. The Tomoshi name/logo are not covered by the license; no
+  endorsement by Tomoshi is implied.
+
+Modifications
+
+Parsed the pinned JMdict XML snapshot; mapped ent_seq/k_ele/r_ele/sense
+structure into read-only SQLite schema v1; entity-expanded JMdict tag values
+are stored as their original tag codes; search columns normalized with
+oboe-search-normalizer/1 (NFKC + casefold + katakana to hiragana); priority
+markers folded into a derived common_rank. No upstream content was rewritten.
+
+Sense-aligned zh-CN glosses were overlaid onto JMdict senses after per-sense
+fingerprint checks; misaligned rows were quarantined to the QA report;
+zh_defs examples and all other Tomoshi tables are not imported; the zh-CN
+layer is machine-assisted and flagged is_machine_generated=1.
+
+Entries whose Chinese overlay could not be aligned to this JMdict snapshot
+(0 fully mismatched, 14 missing from JMdict, 0 invalid rows) were quarantined:
+they ship English glosses only and are listed in the build QA report.
+
+Update mechanism
+
+EDRDG requires downstream users to keep their JMdict data reasonably current.
+Oboe updates this dictionary at build time only: the pinned snapshot above is
+re-verified by byte size and SHA-256 on every build, the database is
+regenerated, and updates ship with Oboe releases. The app never downloads
+dictionary data at runtime. JMdict/EDRDG updates are checked on a monthly
+cadence and re-pinned in Scripts/dictionary_sources_v1.json.
+
+Licenses
+
+- https://creativecommons.org/licenses/by-sa/4.0/legalcode
+- https://www.edrdg.org/edrdg/licence.html
+- https://github.com/tomoshi-app/tomoshi-dict-data

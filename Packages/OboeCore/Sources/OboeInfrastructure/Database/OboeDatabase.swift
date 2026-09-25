@@ -91,7 +91,9 @@ public enum OboeDatabaseSchema {
         "v11_primary_deck",
         "v12_fill_vocabulary_directions",
         "v13_note_deck_membership_and_pitch",
-        "v14_attachments"
+        "v14_attachments",
+        "v15_source_context",
+        "v16_custom_study"
     ]
 
     public static let tableNames: Set<String> = [
@@ -113,7 +115,11 @@ public enum OboeDatabaseSchema {
         "capture_import_receipts",
         "inbox_commit_receipts",
         "note_decks",
-        "attachments"
+        "attachments",
+        "source_contexts",
+        "custom_study_sessions",
+        "practice_attempts",
+        "scheduled_review_origins"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -183,6 +189,13 @@ public enum OboeDatabaseSchema {
                 migrator.registerMigration(identifier, migrate: createNoteDeckMembershipAndPitch)
             case "v14_attachments":
                 migrator.registerMigration(identifier, migrate: createAttachmentsTable)
+            case "v15_source_context":
+                migrator.registerMigration(identifier, migrate: createSourceContexts)
+            case "v16_custom_study":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: GRDBCustomStudyRepository.createCustomStudySchema
+                )
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")
             }
@@ -248,6 +261,41 @@ public enum OboeDatabaseSchema {
             );
 
             CREATE INDEX attachments_on_sha256 ON attachments(sha256);
+            """)
+    }
+
+    /// v15（v0.6.0，设计 §6.1）：Note 的来源上下文。`note_id` 级联删除——
+    /// Note 消失其来源记录随之消失；`image_reference` 延续 v14 的宽松
+    /// 引用模型（无 FK，清理由统一引用查询负责）；`dictionary_*` 只存
+    /// 快照值，不对字典库建跨库 FK。`is_primary` 的部分唯一索引表达
+    /// 「有来源时最多一个 primary」——旧 Note 零来源仍合法。
+    private static func createSourceContexts(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE source_contexts (
+                id TEXT PRIMARY KEY NOT NULL,
+                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                source_type TEXT NOT NULL CHECK(source_type IN
+                    ('manual','share','ocr','dictionary','reader','import')),
+                original_sentence TEXT,
+                surrounding_text TEXT,
+                source_title TEXT,
+                source_url TEXT,
+                source_app TEXT,
+                image_reference TEXT,
+                dictionary_entry_id INTEGER,
+                dictionary_version TEXT,
+                dictionary_sense_key TEXT,
+                selected_gloss_language TEXT,
+                is_primary INTEGER NOT NULL DEFAULT 0 CHECK(is_primary IN (0,1)),
+                created_at_ms INTEGER NOT NULL
+            );
+
+            CREATE INDEX source_contexts_on_note
+                ON source_contexts(note_id, created_at_ms, id);
+            CREATE INDEX source_contexts_on_image
+                ON source_contexts(image_reference);
+            CREATE UNIQUE INDEX source_contexts_one_primary
+                ON source_contexts(note_id) WHERE is_primary = 1;
             """)
     }
 

@@ -224,7 +224,8 @@ public struct SentenceAnalysisCardCreationService: Sendable {
         deckIDs: Set<UUID>? = nil,
         drafts: [SentenceAnalysisCardDraft],
         sourceText: String? = nil,
-        capture: CaptureCommitContext? = nil
+        capture: CaptureCommitContext? = nil,
+        sourceContext: SourceContextDraft? = nil
     ) async throws -> SentenceAnalysisCardBatchResult {
         guard let deckID else {
             throw SentenceAnalysisCardCreationError.deckRequired
@@ -232,6 +233,19 @@ public struct SentenceAnalysisCardCreationService: Sendable {
         let membership = (deckIDs ?? []).union([deckID])
         try validate(drafts)
         let createdAt = now()
+        let sourceContextService = SourceContextService()
+        // 批量制卡同样原子写入每个 Note 的来源（设计 §6.2）：同一
+        // draft 装配出每 Note 各自的持久化记录（不同 id/noteID）。
+        func makeContext(noteID: UUID) -> SourceContext? {
+            sourceContext.map {
+                sourceContextService.makeContext(
+                    from: $0,
+                    noteID: noteID,
+                    now: createdAt,
+                    makeID: makeID
+                )
+            }
+        }
         let items = try drafts.map { draft -> SentenceAnalysisCardCommitItem in
             switch draft.kind {
             case .vocabulary:
@@ -241,9 +255,10 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                     .map(\.templateKind)
                     .sorted { $0.rawValue < $1.rawValue }
                     .map { NewCardSeed(id: makeID(), templateKind: $0) }
+                let noteID = makeID()
                 return .vocabulary(
                     VocabularyContentCommit(
-                        noteID: makeID(),
+                        noteID: noteID,
                         exampleID: makeID(),
                         draftID: nil,
                         deckID: deckID,
@@ -254,13 +269,15 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         createdAt: createdAt,
                         origin: .ai,
                         sourceText: capture?.sourceText ?? sourceText,
-                        deckIDs: membership
+                        deckIDs: membership,
+                        sourceContext: makeContext(noteID: noteID)
                     )
                 )
             case .grammar:
+                let noteID = makeID()
                 return .grammar(
                     GrammarContentCommit(
-                        noteID: makeID(),
+                        noteID: noteID,
                         exampleID: makeID(),
                         draftID: nil,
                         deckID: deckID,
@@ -274,7 +291,8 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         createdAt: createdAt,
                         origin: .ai,
                         sourceText: capture?.sourceText ?? sourceText,
-                        deckIDs: membership
+                        deckIDs: membership,
+                        sourceContext: makeContext(noteID: noteID)
                     )
                 )
             }

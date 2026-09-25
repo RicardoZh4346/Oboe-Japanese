@@ -2,7 +2,9 @@ import Foundation
 
 public enum PortableBackupFormat {
     public static let identifier = "oboe-portable-backup"
-    public static let currentVersion = 6
+    /// 记录协议版本（D05）：外层 ZIP 包格式仍是 7，本值只管
+    /// records.ndjson / 纯备份文件的记录契约。
+    public static let currentVersion = 7
     public static let fileExtension = "oboe-backup"
     public static let checksumAlgorithm = "sha256"
 
@@ -333,6 +335,77 @@ enum PortableBackupFormatV6 {
     static let tableSpecifications: [PortableBackupTableSpecification] =
         PortableBackupFormatV5.tableSpecifications.flatMap { specification in
             specification.recordType == "note" ? [note, noteDeck] : [specification]
+        }
+
+    static let recordTypes = tableSpecifications.map(\.recordType)
+    static let specificationByRecordType = Dictionary(
+        uniqueKeysWithValues: tableSpecifications.map { ($0.recordType, $0) }
+    )
+}
+
+/// v7（Oboe v0.6）：新增 `sourceContext`（v15 表，Note 来源）与
+/// Custom Study 三表记录（v16：session/attempt/origin）。
+///
+/// 记录序遵守外键解析方向：`sourceContext` 紧随 `noteDeck`（note_id
+/// 指向已全部写入的 notes）；`customStudySession`/`practiceAttempt`/
+/// `scheduledReviewOrigin` 排在 `commitReceipt` 之后、`settings` 之前
+/// ——origin 的 event_id 指向 review_logs（更早写入）、session_id 指向
+/// 紧邻其前的 sessions（设计 §7.2/§2.5）。旧备份无这四类记录——
+/// 表留空即可，无需字段回填。
+enum PortableBackupFormatV7 {
+    static let sourceContext = PortableBackupTableSpecification(
+        tableName: "source_contexts",
+        recordType: "sourceContext",
+        columns: [
+            "id", "note_id", "source_type", "original_sentence",
+            "surrounding_text", "source_title", "source_url", "source_app",
+            "image_reference", "dictionary_entry_id", "dictionary_version",
+            "dictionary_sense_key", "selected_gloss_language", "is_primary",
+            "created_at_ms"
+        ],
+        orderBy: "note_id, created_at_ms, id"
+    )
+
+    static let customStudySession = PortableBackupTableSpecification(
+        tableName: "custom_study_sessions",
+        recordType: "customStudySession",
+        columns: [
+            "id", "filter_json", "mode", "status",
+            "started_at_ms", "finished_at_ms", "queue_json"
+        ],
+        orderBy: "started_at_ms, id"
+    )
+
+    static let practiceAttempt = PortableBackupTableSpecification(
+        tableName: "practice_attempts",
+        recordType: "practiceAttempt",
+        columns: [
+            "id", "event_id", "session_id", "card_key", "note_id", "rating",
+            "answered_at_ms", "duration_ms", "content_version", "undone_at_ms"
+        ],
+        orderBy: "session_id, answered_at_ms, id"
+    )
+
+    static let scheduledReviewOrigin = PortableBackupTableSpecification(
+        tableName: "scheduled_review_origins",
+        recordType: "scheduledReviewOrigin",
+        columns: ["event_id", "session_id", "submission_kind"],
+        orderBy: "event_id"
+    )
+
+    static let tableSpecifications: [PortableBackupTableSpecification] =
+        PortableBackupFormatV6.tableSpecifications.flatMap { specification in
+            switch specification.recordType {
+            case "noteDeck":
+                return [specification, sourceContext]
+            case "settings":
+                return [
+                    customStudySession, practiceAttempt,
+                    scheduledReviewOrigin, specification
+                ]
+            default:
+                return [specification]
+            }
         }
 
     static let recordTypes = tableSpecifications.map(\.recordType)

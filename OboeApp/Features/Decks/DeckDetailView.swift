@@ -1,4 +1,5 @@
 import OboeDomain
+import OboeInfrastructure
 import SwiftUI
 
 struct DeckDetailView: View {
@@ -20,6 +21,14 @@ struct DeckDetailView: View {
     let aiCardGenerationService: AICardGenerationService
     let sentenceAnalysisService: SentenceAnalysisService
     let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+    /// S07：牌组内复习的背面来源区——nil 不渲染。
+    let sourceContextRepository: (any SourceContextRepository)?
+    let inboxImageStore: InboxImageStore?
+    /// S07：添加流编辑器内「查词典」入口——nil 时按钮不渲染。
+    let dictionaryQueryService: DictionaryQueryService?
+    /// S09：牌组内复习的专项学习驱动与「专项学习」入口。
+    let customStudyRepository: (any CustomStudyRepository)?
+    let customStudyService: CustomStudyService?
     /// regular 壳层：知识点行改为 selection 语义（写入 detail 列
     /// 选择）而非 push；compact 下为 nil，保持 NavigationLink 行为。
     let onSelectNote: ((KnowledgePointSummary) -> Void)?
@@ -38,6 +47,9 @@ struct DeckDetailView: View {
     @State private var isConfirmingContentDeletion = false
     @State private var isMovingBeforeDeletion = false
     @State private var didDeleteAfterMove = false
+    /// S09：专项学习 setup sheet 与已启动会话（非 nil → 复习页 sheet）。
+    @State private var isPresentingCustomSetup = false
+    @State private var activeCustomSession: CustomStudySession?
     @State private var contentModel: DeckContentModel
     @State private var searchText = ""
     @State private var searchModel: KnowledgeSearchModel
@@ -61,6 +73,11 @@ struct DeckDetailView: View {
         aiCardGenerationService: AICardGenerationService,
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        sourceContextRepository: (any SourceContextRepository)? = nil,
+        inboxImageStore: InboxImageStore? = nil,
+        dictionaryQueryService: DictionaryQueryService? = nil,
+        customStudyRepository: (any CustomStudyRepository)? = nil,
+        customStudyService: CustomStudyService? = nil,
         onSelectNote: ((KnowledgePointSummary) -> Void)? = nil,
         onDeleted: (() -> Void)? = nil,
         contentRefreshToken: Int = 0
@@ -83,6 +100,11 @@ struct DeckDetailView: View {
         self.aiCardGenerationService = aiCardGenerationService
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
+        self.sourceContextRepository = sourceContextRepository
+        self.inboxImageStore = inboxImageStore
+        self.dictionaryQueryService = dictionaryQueryService
+        self.customStudyRepository = customStudyRepository
+        self.customStudyService = customStudyService
         self.onSelectNote = onSelectNote
         self.onDeleted = onDeleted
         self.contentRefreshToken = contentRefreshToken
@@ -131,123 +153,34 @@ struct DeckDetailView: View {
             if let deck {
                 let baseView = AnyView(
                     List {
-                    Section {
-                        if model.primaryDeckID == deck.id {
-                            Label("当前主牌组", systemImage: "star.fill")
-                                .foregroundStyle(OboeTheme.Colors.accent)
-                                .accessibilityIdentifier("deck-primary-status")
-                        } else {
-                            Button("设为主牌组") {
-                                Task { await model.setPrimaryDeck(deck.id) }
-                            }
-                            .accessibilityIdentifier("deck-set-primary")
-                        }
-                    } header: {
-                        Text("今日主牌组")
-                    } footer: {
-                        Text("每日新词额度优先分配给主牌组，剩余额度再分配给其他牌组。一个词的全部方向占一个名额。切换后立即重算今日新词。未手动指定时自动使用排序最前的牌组。")
-                    }
+                    primaryDeckSection(deck: deck)
+                    managementSection(deck: deck)
+                    overviewSection(deck: deck)
+                    contentSection(deck: deck)
 
-                    Section {
-                        Button("重命名") {
-                            isPresentingRename = true
-                        }
-                        .accessibilityIdentifier("deck-rename-button")
-
-                        Button("删除牌组", role: .destructive) {
-                            if deck.isEmpty {
-                                isConfirmingDelete = true
-                            } else {
-                                isChoosingNonEmptyDeletion = true
-                                Task { await model.loadDeletionImpact(for: deck.id) }
-                            }
-                        }
-                        .accessibilityIdentifier("deck-delete-button")
-                    } footer: {
-                        if !deck.isEmpty {
-                            Text("删除前可把全部知识点和卡片移动到其他牌组，或明确选择连同内容删除。评分历史仍保留原牌组标识。")
-                        }
-                    }
-
-                    Section("概览") {
-                        LabeledContent("知识点") {
-                            Text("\(deck.noteCount)")
-                                .accessibilityIdentifier("deck-note-count")
-                        }
-                        LabeledContent("卡片") {
-                            Text("\(deck.cardCount)")
-                                .accessibilityIdentifier("deck-card-count")
-                        }
-                    }
-
-                    Section("牌组内容") {
-                        if !SearchTextNormalizer.normalize(searchText).isEmpty {
-                            if searchModel.isLoading {
-                                ProgressView("正在搜索…")
-                            } else if searchModel.items.isEmpty {
-                                Label("没有匹配的知识点", systemImage: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                searchResults
-                            }
-                        } else if contentModel.isLoading {
-                            ProgressView("正在载入内容…")
-                        } else if contentModel.items.isEmpty {
-                            Label("暂无学习内容", systemImage: "tray")
-                            Button("添加单词或语法") {
-                                isPresentingAdd = true
-                            }
-                            .accessibilityIdentifier("deck-add-empty-button")
-                        } else {
-                            ForEach(contentModel.items) { item in
-                                noteRow(item)
-                                    .accessibilityIdentifier("knowledge-row-\(item.id.uuidString)")
-                            }
-                        }
-                    }
-
-                    Section("今日") {
-                        let counts = model.todayTasks(for: deck.id)
-                        NavigationLink {
-                            ReviewView(
-                                service: studyService,
-                                historyService: historyService,
-                                speechPreferencesService: speechPreferencesService,
-                                adaptiveCardService: adaptiveCardService,
-                                adaptivePreferencesService: adaptivePreferencesService,
-                                aiRepairService: aiRepairService,
-                                deckService: deckService,
-                                repairNoteEditor: { noteID, kind, onUpdated in
-                                    AnyView(noteEditorDestination(
-                                        noteID: noteID,
-                                        kind: kind,
-                                        onUpdated: onUpdated
-                                    ))
-                                },
-                                speechService: speechService,
-                                scope: StudyScope(deckID: deck.id, title: deck.name)
-                            )
-                        } label: {
-                            Label("学习此牌组", systemImage: "play.fill")
-                        }
-                        .accessibilityIdentifier("deck-study-button")
-                        LabeledContent("分配新词", value: "\(counts.newCount)")
-                            .accessibilityIdentifier("deck-detail-today-new-count")
-                        LabeledContent("复习任务", value: "\(counts.reviewCount)")
-                            .accessibilityIdentifier("deck-detail-today-review-count")
-                    }
+                    todaySection(deck: deck)
 
                 }
                 .navigationTitle(deck.name)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isPresentingAdd = true
-                        } label: {
-                            Label("添加", systemImage: "plus")
+                        HStack(spacing: 16) {
+                            if customStudyRepository != nil {
+                                Button {
+                                    isPresentingCustomSetup = true
+                                } label: {
+                                    Label("专项学习", systemImage: "scope")
+                                }
+                                .accessibilityIdentifier("deck-custom-study-button")
+                            }
+                            Button {
+                                isPresentingAdd = true
+                            } label: {
+                                Label("添加", systemImage: "plus")
+                            }
+                            .accessibilityIdentifier("deck-add-button")
                         }
-                        .accessibilityIdentifier("deck-add-button")
                     }
                 }
                 .navigationDestination(isPresented: $isPresentingAdd) {
@@ -263,7 +196,9 @@ struct DeckDetailView: View {
                         historyService: historyService,
                         speechService: speechService,
                         studyService: studyService,
-                        requiredDeckID: deckID
+                        requiredDeckID: deckID,
+                        dictionaryQueryService: dictionaryQueryService,
+                        sourceContextRepository: sourceContextRepository
                     )
                 }
                 .onChange(of: isPresentingAdd) { _, isPresenting in
@@ -285,6 +220,21 @@ struct DeckDetailView: View {
                         DeckNameEditor(title: "重命名牌组", initialName: deck.name) { name in
                             await model.renameDeck(id: deck.id, to: name)
                         }
+                    }
+                    .adaptivePresentation(
+                        role: .editor,
+                        isPresented: $isPresentingCustomSetup
+                    ) {
+                        customSetupContent()
+                    }
+                    .adaptivePresentation(
+                        role: .focusedWorkflow,
+                        isPresented: Binding(
+                            get: { activeCustomSession != nil },
+                            set: { if !$0 { activeCustomSession = nil } }
+                        )
+                    ) {
+                        customReviewContent()
                     }
                 )
 
@@ -499,6 +449,192 @@ struct DeckDetailView: View {
                 await searchModel.refresh(searchText)
             }
         }
+    }
+
+    /// S09：主 List 表达式按 section 拆分——参数与修饰符随 S07/S09
+    /// 增长后单表达式类型检查超限。
+    @ViewBuilder
+    private func primaryDeckSection(deck: DeckSummary) -> some View {
+        Section {
+            if model.primaryDeckID == deck.id {
+                Label("当前主牌组", systemImage: "star.fill")
+                    .foregroundStyle(OboeTheme.Colors.accent)
+                    .accessibilityIdentifier("deck-primary-status")
+            } else {
+                Button("设为主牌组") {
+                    Task { await model.setPrimaryDeck(deck.id) }
+                }
+                .accessibilityIdentifier("deck-set-primary")
+            }
+        } header: {
+            Text("今日主牌组")
+        } footer: {
+            Text("每日新词额度优先分配给主牌组，剩余额度再分配给其他牌组。一个词的全部方向占一个名额。切换后立即重算今日新词。未手动指定时自动使用排序最前的牌组。")
+        }
+    }
+
+    @ViewBuilder
+    private func managementSection(deck: DeckSummary) -> some View {
+        Section {
+            Button("重命名") {
+                isPresentingRename = true
+            }
+            .accessibilityIdentifier("deck-rename-button")
+
+            Button("删除牌组", role: .destructive) {
+                if deck.isEmpty {
+                    isConfirmingDelete = true
+                } else {
+                    isChoosingNonEmptyDeletion = true
+                    Task { await model.loadDeletionImpact(for: deck.id) }
+                }
+            }
+            .accessibilityIdentifier("deck-delete-button")
+        } footer: {
+            if !deck.isEmpty {
+                Text("删除前可把全部知识点和卡片移动到其他牌组，或明确选择连同内容删除。评分历史仍保留原牌组标识。")
+            }
+        }
+    }
+
+    private func overviewSection(deck: DeckSummary) -> some View {
+        Section("概览") {
+            LabeledContent("知识点") {
+                Text("\(deck.noteCount)")
+                    .accessibilityIdentifier("deck-note-count")
+            }
+            LabeledContent("卡片") {
+                Text("\(deck.cardCount)")
+                    .accessibilityIdentifier("deck-card-count")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func contentSection(deck: DeckSummary) -> some View {
+        Section("牌组内容") {
+            if !SearchTextNormalizer.normalize(searchText).isEmpty {
+                if searchModel.isLoading {
+                    ProgressView("正在搜索…")
+                } else if searchModel.items.isEmpty {
+                    Label("没有匹配的知识点", systemImage: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                } else {
+                    searchResults
+                }
+            } else if contentModel.isLoading {
+                ProgressView("正在载入内容…")
+            } else if contentModel.items.isEmpty {
+                Label("暂无学习内容", systemImage: "tray")
+                Button("添加单词或语法") {
+                    isPresentingAdd = true
+                }
+                .accessibilityIdentifier("deck-add-empty-button")
+            } else {
+                ForEach(contentModel.items) { item in
+                    noteRow(item)
+                        .accessibilityIdentifier("knowledge-row-\(item.id.uuidString)")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func todaySection(deck: DeckSummary) -> some View {
+        let counts = model.todayTasks(for: deck.id)
+        Section("今日") {
+            NavigationLink {
+                deckReviewView(deck: deck)
+            } label: {
+                Label("学习此牌组", systemImage: "play.fill")
+            }
+            .accessibilityIdentifier("deck-study-button")
+
+            LabeledContent("分配新词", value: "\(counts.newCount)")
+                .accessibilityIdentifier("deck-detail-today-new-count")
+            LabeledContent("复习任务", value: "\(counts.reviewCount)")
+                .accessibilityIdentifier("deck-detail-today-review-count")
+        }
+    }
+
+    /// S09 专项 setup sheet 内容（adaptivePresentation .editor）。
+    @ViewBuilder
+    private func customSetupContent() -> some View {
+        if let customStudyRepository,
+           let customStudyService {
+            NavigationStack {
+                CustomStudySetupView(
+                    customStudyService: customStudyService,
+                    customStudyRepository: customStudyRepository,
+                    deckService: deckService,
+                    initialDeckID: deckID,
+                    onStart: { session in
+                        isPresentingCustomSetup = false
+                        activeCustomSession = session
+                    }
+                )
+                .navigationTitle("专项学习")
+            }
+        }
+    }
+
+    /// S09 专项复习 sheet 内容（adaptivePresentation .focusedWorkflow，
+    /// 自带 NavigationStack——内部 StudyScope destination 可再 push）。
+    @ViewBuilder
+    private func customReviewContent() -> some View {
+        if let session = activeCustomSession {
+            NavigationStack {
+                ReviewView(
+                    service: studyService,
+                    historyService: historyService,
+                    speechPreferencesService: speechPreferencesService,
+                    adaptiveCardService: adaptiveCardService,
+                    adaptivePreferencesService: adaptivePreferencesService,
+                    aiRepairService: aiRepairService,
+                    deckService: deckService,
+                    speechService: speechService,
+                    sourceContextRepository: sourceContextRepository,
+                    inboxImageStore: inboxImageStore,
+                    customStudyRepository: customStudyRepository,
+                    customStudyService: customStudyService,
+                    scope: StudyScope(
+                        deckID: deckID,
+                        title: "专项学习",
+                        queueSource: .customStudy(
+                            sessionID: session.id,
+                            mode: session.mode
+                        )
+                    )
+                )
+            }
+        }
+    }
+
+    /// 「学习此牌组」目的地——提成独立构造避免主列表表达式类型检查
+    /// 超时（参数列表随 S07/S09 增长后单表达式超限）。
+    private func deckReviewView(deck: DeckSummary) -> ReviewView {
+        ReviewView(
+            service: studyService,
+            historyService: historyService,
+            speechPreferencesService: speechPreferencesService,
+            adaptiveCardService: adaptiveCardService,
+            adaptivePreferencesService: adaptivePreferencesService,
+            aiRepairService: aiRepairService,
+            deckService: deckService,
+            repairNoteEditor: { noteID, kind, onUpdated in
+                AnyView(noteEditorDestination(
+                    noteID: noteID,
+                    kind: kind,
+                    onUpdated: onUpdated
+                ))
+            },
+            speechService: speechService,
+            sourceContextRepository: sourceContextRepository,
+            inboxImageStore: inboxImageStore,
+            customStudyRepository: customStudyRepository,
+            customStudyService: customStudyService,
+            scope: StudyScope(deckID: deck.id, title: deck.name)
+        )
     }
 
     /// AI 拆卡 sheet 的手动编辑兜底：按 noteID + kind 直达详情页。

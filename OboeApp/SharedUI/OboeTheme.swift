@@ -33,6 +33,9 @@ enum OboeTheme {
 
 enum OboeFontStyle {
     case questionHeadword
+    /// 中文→日语等以整句中文作问题面的模板：词头 46pt 会让长句溢出，
+    /// 用一档更大但仍收敛的句级字号。
+    case questionPrompt
     case answerHeadword
     case meaningZH
     case kana
@@ -43,6 +46,7 @@ enum OboeFontStyle {
     fileprivate var size: CGFloat {
         switch self {
         case .questionHeadword: 46
+        case .questionPrompt: 26
         case .answerHeadword: 42
         case .meaningZH: 21
         case .kana: 18
@@ -54,7 +58,7 @@ enum OboeFontStyle {
 
     fileprivate var weight: Font.Weight {
         switch self {
-        case .questionHeadword, .answerHeadword, .meaningZH: .semibold
+        case .questionHeadword, .questionPrompt, .answerHeadword, .meaningZH: .semibold
         case .hint: .medium
         case .kana, .exampleJapanese, .translation: .regular
         }
@@ -63,6 +67,7 @@ enum OboeFontStyle {
     fileprivate var textStyle: Font.TextStyle {
         switch self {
         case .questionHeadword, .answerHeadword: .largeTitle
+        case .questionPrompt: .title2
         case .meaningZH: .title3
         case .kana, .exampleJapanese: .body
         case .hint, .translation: .subheadline

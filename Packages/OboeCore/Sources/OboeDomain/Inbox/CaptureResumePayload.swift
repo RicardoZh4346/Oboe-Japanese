@@ -30,6 +30,11 @@ public struct CaptureResumePayload: Equatable, Sendable {
     public var editedCardDrafts: [SentenceAnalysisCardDraft]
     public var analysisContentRevision: Int?
     public var pendingOperationID: UUID?
+    /// 随确认流转的来源草稿（v15，设计 §6.2）：不能仅放在 View 的
+    /// @State——编辑器草稿/续编 payload 必须携带它才能跨进程序活。
+    /// wire 上是可选字段：旧版解码器静默忽略该键（降级不崩溃），
+    /// 本版读旧 payload 时得 nil，向后兼容同一 version=1。
+    public var sourceDraft: SourceContextDraft?
 
     public init(
         selection: CaptureTextSelection? = nil,
@@ -40,7 +45,8 @@ public struct CaptureResumePayload: Equatable, Sendable {
         selectedAnalysisItemIDs: [UUID] = [],
         editedCardDrafts: [SentenceAnalysisCardDraft] = [],
         analysisContentRevision: Int? = nil,
-        pendingOperationID: UUID? = nil
+        pendingOperationID: UUID? = nil,
+        sourceDraft: SourceContextDraft? = nil
     ) {
         self.selection = selection
         self.targetDeckID = targetDeckID
@@ -51,6 +57,7 @@ public struct CaptureResumePayload: Equatable, Sendable {
         self.editedCardDrafts = editedCardDrafts
         self.analysisContentRevision = analysisContentRevision
         self.pendingOperationID = pendingOperationID
+        self.sourceDraft = sourceDraft
     }
 }
 
@@ -147,6 +154,11 @@ public enum CaptureResumePayloadCodec {
                 throw CaptureResumePayloadError.invalidField("analysisContentRevision")
             }
         }
+        if let sourceDraft = payload.sourceDraft,
+           let surrounding = sourceDraft.surroundingText,
+           surrounding.count > SourceContextDraft.maximumSurroundingCharacters {
+            throw CaptureResumePayloadError.invalidField("sourceDraft.surroundingText")
+        }
     }
 
     private struct WirePayload: Codable {
@@ -160,6 +172,7 @@ public enum CaptureResumePayloadCodec {
         var editedCardDrafts: [SentenceAnalysisCardDraft]?
         var analysisContentRevision: Int?
         var pendingOperationID: UUID?
+        var sourceDraft: SourceContextDraft?
 
         init(_ payload: CaptureResumePayload) {
             version = CaptureResumePayloadFormat.currentVersion
@@ -172,6 +185,7 @@ public enum CaptureResumePayloadCodec {
             editedCardDrafts = payload.editedCardDrafts
             analysisContentRevision = payload.analysisContentRevision
             pendingOperationID = payload.pendingOperationID
+            sourceDraft = payload.sourceDraft
         }
 
         func makePayload() -> CaptureResumePayload {
@@ -184,7 +198,8 @@ public enum CaptureResumePayloadCodec {
                 selectedAnalysisItemIDs: selectedAnalysisItemIDs ?? [],
                 editedCardDrafts: editedCardDrafts ?? [],
                 analysisContentRevision: analysisContentRevision,
-                pendingOperationID: pendingOperationID
+                pendingOperationID: pendingOperationID,
+                sourceDraft: sourceDraft
             )
         }
     }

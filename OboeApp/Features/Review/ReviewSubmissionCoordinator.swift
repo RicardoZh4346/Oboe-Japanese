@@ -7,7 +7,9 @@ struct PendingSubmission {
     let rating: ReviewRating
     let durationMilliseconds: Int
     let card: LoadedReviewCard
-    let studyDay: StudyDay
+    /// normal 路径恒非 nil；practiceOnly 专项没有学习日——nil 时
+    /// custom 提交走 `practice_attempts`，不进 `SubmitReview`。
+    let studyDay: StudyDay?
 }
 
 struct LastSubmission {
@@ -34,11 +36,19 @@ final class ReviewSubmissionCoordinator {
 }
 
 extension ReviewViewModel {
-    var canUndo: Bool { lastSubmission != nil }
+    var canUndo: Bool {
+        isCustomSession
+            ? (custom.lastPracticeEventID != nil || lastSubmission != nil)
+            : lastSubmission != nil
+    }
     var isMutating: Bool { isSubmitting || isUndoing }
     var submittingRating: ReviewRating? { pendingSubmission?.rating }
 
     func submit(_ rating: ReviewRating) async {
+        if isCustomSession {
+            await customSubmit(rating)
+            return
+        }
         guard pendingSubmission == nil, !isLoading, !isMutating,
               !hasCommittedCurrentCard, let card,
               let studyDay = plan?.studyDay,
@@ -59,7 +69,8 @@ extension ReviewViewModel {
 
     func retrySubmission() async {
         guard let pendingSubmission, !isMutating, !isLoading,
-              !hasCommittedCurrentCard else { return }
+              !hasCommittedCurrentCard,
+              let studyDay = pendingSubmission.studyDay else { return }
         guard recallAttempt?.beginSubmission(eventID: pendingSubmission.eventID) == true else { return }
         isSubmitting = true
         defer { isSubmitting = false }
@@ -68,14 +79,14 @@ extension ReviewViewModel {
             let submitted = try await service.submit(
                 card: pendingSubmission.card,
                 rating: pendingSubmission.rating,
-                studyDay: pendingSubmission.studyDay,
+                studyDay: studyDay,
                 eventID: pendingSubmission.eventID,
                 durationMilliseconds: pendingSubmission.durationMilliseconds,
                 scopeDeckID: scope.deckID
             )
             lastSubmission = LastSubmission(
                 eventID: submitted.eventID,
-                studyDay: pendingSubmission.studyDay,
+                studyDay: studyDay,
                 cardID: pendingSubmission.card.content.cardID
             )
             hasCommittedCurrentCard = true
@@ -95,6 +106,10 @@ extension ReviewViewModel {
     }
 
     func undoLastSubmission() async {
+        if isCustomSession {
+            await customUndoLastSubmission()
+            return
+        }
         guard let lastSubmission, !isMutating, !isLoading else { return }
         speechService.stop()
         isUndoing = true

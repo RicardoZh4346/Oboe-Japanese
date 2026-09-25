@@ -1,10 +1,17 @@
 import Observation
 import OboeDomain
+import OboeInfrastructure
 import SwiftUI
 
 struct DecksView: View {
     @State private var model: DeckListModel
     @State private var isPresentingCreate = false
+    /// S07：词典词条制卡——非 nil 时以该预填打开编辑器 sheet。
+    /// 元组同时携带表单与来源草稿（词条快照 + dataset 版本）。
+    @State private var dictionaryCardPrefill: (
+        form: VocabularyFormData,
+        source: SourceContextDraft
+    )?
     private let deckService: DeckManagementService
     private let vocabularyService: VocabularyService
     private let grammarService: GrammarService
@@ -30,6 +37,14 @@ struct DecksView: View {
     private let aiCardGenerationService: AICardGenerationService
     private let sentenceAnalysisService: SentenceAnalysisService
     private let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+    /// S06：全局搜索的词典 scope。
+    private let dictionaryQueryService: DictionaryQueryService
+    /// S07：牌组内复习的背面来源区。
+    private let sourceContextRepository: (any SourceContextRepository)?
+    private let inboxImageStore: InboxImageStore?
+    /// S09：专项学习驱动（详情页复习/专项入口透传）。
+    private let customStudyRepository: (any CustomStudyRepository)?
+    private let customStudyService: CustomStudyService?
 
     init(
         service: DeckManagementService,
@@ -52,7 +67,12 @@ struct DecksView: View {
         aiRepairService: AIRepairService,
         aiCardGenerationService: AICardGenerationService,
         sentenceAnalysisService: SentenceAnalysisService,
-        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        dictionaryQueryService: DictionaryQueryService,
+        sourceContextRepository: (any SourceContextRepository)? = nil,
+        inboxImageStore: InboxImageStore? = nil,
+        customStudyRepository: (any CustomStudyRepository)? = nil,
+        customStudyService: CustomStudyService? = nil
     ) {
         deckService = service
         self.vocabularyService = vocabularyService
@@ -75,6 +95,11 @@ struct DecksView: View {
         self.aiCardGenerationService = aiCardGenerationService
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
+        self.dictionaryQueryService = dictionaryQueryService
+        self.sourceContextRepository = sourceContextRepository
+        self.inboxImageStore = inboxImageStore
+        self.customStudyRepository = customStudyRepository
+        self.customStudyService = customStudyService
         _model = State(
             initialValue: DeckListModel(
                 service: service,
@@ -153,10 +178,13 @@ struct DecksView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("牌组")
+            // 同 TodayView：一级页显式钉住 Tab Bar 可见，pop 返回时
+            // 与转场同步恢复，避免 bar 晚到导致的内容上移。
+            .toolbar(.visible, for: .tabBar)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink {
-                        KnowledgeSearchView(
+                        GlobalSearchView(
                             searchService: searchService,
                             deckService: deckService,
                             knowledgeService: knowledgePointService,
@@ -164,7 +192,23 @@ struct DecksView: View {
                             grammarService: grammarService,
                             contentCardService: contentCardService,
                             historyService: historyService,
-                            speechService: speechService
+                            speechService: speechService,
+                            dictionaryQueryService: dictionaryQueryService,
+                            onCreateCard: { entry in
+                                Task {
+                                    let version = try? await dictionaryQueryService
+                                        .metadata().datasetVersion
+                                    dictionaryCardPrefill = (
+                                        form: DictionaryCardPrefill
+                                            .vocabularyForm(from: entry),
+                                        source: DictionaryCardPrefill
+                                            .sourceContextDraft(
+                                                from: entry,
+                                                datasetVersion: version
+                                            )
+                                    )
+                                }
+                            }
                         )
                     } label: {
                         Label("搜索", systemImage: "magnifyingglass")
@@ -213,12 +257,44 @@ struct DecksView: View {
                     speechService: speechService,
                     aiCardGenerationService: aiCardGenerationService,
                     sentenceAnalysisService: sentenceAnalysisService,
-                    sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService
+                    sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                    sourceContextRepository: sourceContextRepository,
+                    inboxImageStore: inboxImageStore,
+                    dictionaryQueryService: dictionaryQueryService,
+                    customStudyRepository: customStudyRepository,
+                    customStudyService: customStudyService
                 )
             }
             .sheet(isPresented: $isPresentingCreate) {
                 DeckNameEditor(title: "新建牌组", initialName: "") { name in
                     await model.createDeck(named: name)
+                }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { dictionaryCardPrefill != nil },
+                    set: { if !$0 { dictionaryCardPrefill = nil } }
+                )
+            ) {
+                NavigationStack {
+                    AddContentEditorView(
+                        deckService: deckService,
+                        vocabularyService: vocabularyService,
+                        grammarService: grammarService,
+                        knowledgePointService: knowledgePointService,
+                        contentCardService: contentCardService,
+                        aiCardGenerationService: aiCardGenerationService,
+                        sentenceAnalysisService: sentenceAnalysisService,
+                        sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+                        historyService: historyService,
+                        speechService: speechService,
+                        studyService: studyService,
+                        vocabularyPrefill: dictionaryCardPrefill?.form,
+                        sourceContextDraft: dictionaryCardPrefill?.source,
+                        dictionaryQueryService: dictionaryQueryService,
+                        sourceContextRepository: sourceContextRepository,
+                        title: "词典制卡"
+                    )
                 }
             }
             .alert(
