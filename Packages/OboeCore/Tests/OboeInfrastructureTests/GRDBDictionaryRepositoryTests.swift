@@ -4,15 +4,14 @@ import OboeDomain
 import XCTest
 @testable import OboeInfrastructure
 
-/// S06 词典仓储测试：真实构建产物（`.codex_tmp/dictionary-artifacts/
+/// S06 词典仓储测试：真实随包产物（`OboeApp/Resources/Dictionary/
 /// japanese-dictionary.sqlite`，sha256 8f0758d4…，schema v1，218,807 条）
 /// 复制到临时目录后使用。
 ///
 /// Fixture 解析顺序：
 /// 1. 环境变量 `OBOE_DICTIONARY_FIXTURE`（CI/特殊环境覆盖）；
-/// 2. 仓库内 `.codex_tmp/dictionary-artifacts/japanese-dictionary.sqlite`
-///    ——若 iCloud dataless（未物化）则跳过，避免阻塞；
-/// 3. `/tmp/oboe-dict/japanese-dictionary.sqlite`（本地预物化副本）。
+/// 2. 仓库内随包词典 `OboeApp/Resources/Dictionary/japanese-dictionary.sqlite`；
+/// 3. 旧的 `.codex_tmp` 产物或 `/tmp/oboe-dict` 本地预物化副本。
 final class GRDBDictionaryRepositoryTests: XCTestCase {
 
     // MARK: - fixture
@@ -47,24 +46,30 @@ final class GRDBDictionaryRepositoryTests: XCTestCase {
             .deletingLastPathComponent() // OboeCore
             .deletingLastPathComponent() // Packages
             .deletingLastPathComponent() // repo root
-        let artifact = repoRoot.appendingPathComponent(
+        let bundled = repoRoot.appendingPathComponent(
+            "OboeApp/Resources/Dictionary/japanese-dictionary.sqlite"
+        )
+        if FileManager.default.fileExists(atPath: bundled.path) {
+            return bundled
+        }
+        let legacyArtifact = repoRoot.appendingPathComponent(
             ".codex_tmp/dictionary-artifacts/japanese-dictionary.sqlite"
         )
-        // iCloud file provider 下的 dataless 文件读取会阻塞；有物化状态才用仓库副本
-        if let status = try? artifact.resourceValues(
+        // iCloud file provider 下的 dataless 文件读取会阻塞；有物化状态才用旧产物
+        if let status = try? legacyArtifact.resourceValues(
             forKeys: [.ubiquitousItemDownloadingStatusKey]
         ).ubiquitousItemDownloadingStatus {
-            if status == .current, FileManager.default.fileExists(atPath: artifact.path) {
-                return artifact
+            if status == .current, FileManager.default.fileExists(atPath: legacyArtifact.path) {
+                return legacyArtifact
             }
-        } else if FileManager.default.fileExists(atPath: artifact.path) {
-            return artifact
+        } else if FileManager.default.fileExists(atPath: legacyArtifact.path) {
+            return legacyArtifact
         }
         let fallback = URL(fileURLWithPath: "/tmp/oboe-dict/japanese-dictionary.sqlite")
         if FileManager.default.fileExists(atPath: fallback.path) {
             return fallback
         }
-        return artifact // 让后续拷贝报错并给出清晰信息
+        return bundled // 让后续拷贝报错并给出清晰信息
     }
 
     private func makeRepository() throws -> (GRDBDictionaryRepository, TestLocation) {
