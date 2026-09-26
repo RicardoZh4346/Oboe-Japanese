@@ -100,7 +100,7 @@ Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它�
 
 ## 开发
 
-需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator。v0.6.0 验证覆盖 iPhone 与 iPad Simulator；CI 会运行 Swift Package 全量测试、App 单元测试、iPhone/iPad navigation smoke，并在 `main` 推送时运行完整 UI 测试。SwiftPM 锁定：
+需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator。v0.6.0 验证覆盖 iPhone 与 iPad Simulator；`main` 推送的 CI 会运行 Swift Package 全量测试、App 单元测试和 iPhone/iPad navigation smoke，完整 UI 回归通过 GitHub Actions 的 `workflow_dispatch` 手动触发。SwiftPM 锁定：
 
 - GRDB 7.11.1；
 - `swift-fsrs` revision `4fbaf20184d62f82a9f44f343337c61a2c5483e9`。
