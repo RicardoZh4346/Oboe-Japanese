@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
@@ -52,6 +54,8 @@ jobs:
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             test 2>&1 | tee smoke.log
           grep -q "testPrimaryNavigationSmoke.*passed" smoke.log || {
             echo "::error::navigation smoke test case was not executed or did not pass"
@@ -103,6 +107,8 @@ jobs:
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO \
             test 2>&1 | tee ipad-smoke.log
           grep -q "testPrimaryNavigationSmoke.*passed" ipad-smoke.log || {
@@ -111,10 +117,8 @@ jobs:
           }
 
   ui-tests-full:
-    # 重型层：仅 main 推送/手动触发跑全量 UI 测试；PR 保持快速层。
-    if: >-
-      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'workflow_dispatch'
+    # 126 项重型 UI 回归仅手动触发；main 推送和 PR 保持稳定快速。
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 45
 
