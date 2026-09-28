@@ -60,7 +60,7 @@ final class BackupImportCoordinatorTests: XCTestCase {
         let container = built.container
         _ = try await container.decks.deckService.createDeck(named: "备份测试")
         let export = try await container.settings.exporter.export(
-            appVersion: "0.6.0-test"
+            appVersion: "0.7.0-test"
         )
         return Fixture(
             baseURL: baseURL,
@@ -101,7 +101,7 @@ final class BackupImportCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.errorMessage)
         let prepared = try XCTUnwrap(coordinator.prepared)
-        XCTAssertEqual(prepared.sourceFormatVersion, 7)
+        XCTAssertEqual(prepared.sourceFormatVersion, 8)
         XCTAssertEqual(prepared.backup.deckCount, 1)
         XCTAssertFalse(coordinator.isVerifying)
     }
