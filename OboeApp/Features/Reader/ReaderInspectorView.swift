@@ -269,25 +269,45 @@ struct ReaderInspectorView: View {
         }
     }
 
+    /// 「自动」＝ 无人工覆盖，状态由制卡情况判定（未制卡=未知、
+    /// 挖词后=学习中）；「已知/已忽略」＝ 人工覆盖，措辞与图例一致。
     private var knowledgeSection: some View {
         Section {
-            HStack(spacing: 12) {
-                Button("已知") { model.mark(.known) }
-                    .disabled(model.selectedCandidate == nil || model.isBusy)
-                    .accessibilityIdentifier("inspector-mark-known")
-                Button("忽略") { model.mark(.ignored) }
-                    .disabled(model.selectedCandidate == nil || model.isBusy)
-                    .accessibilityIdentifier("inspector-mark-ignored")
-                Button("重置") { model.mark(nil) }
-                    .disabled(model.selectedCandidate == nil || model.isBusy)
-                    .accessibilityIdentifier("inspector-mark-reset")
-                Spacer()
+            Picker("标注方式", selection: knowledgeBinding) {
+                Text("自动").tag(KnowledgeOverride?.none)
+                Text("已知").tag(KnowledgeOverride?.some(.known))
+                Text("已忽略").tag(KnowledgeOverride?.some(.ignored))
             }
-            .buttonStyle(.bordered)
-            .font(.footnote)
+            .pickerStyle(.segmented)
+            .disabled(model.selectedCandidate == nil || model.isBusy)
+            .accessibilityIdentifier("inspector-knowledge-override-picker")
         } header: {
-            Text("知识状态")
+            HStack {
+                Text("知识状态")
+                Spacer()
+                if let candidate = model.selectedCandidate {
+                    knowledgeBadge(candidate.knowledgeState)
+                }
+            }
+        } footer: {
+            Text("「自动」按是否已制卡判定：未制卡记为未知，挖词后自动转学习中。")
+                .font(.footnote)
         }
+    }
+
+    /// Picker 选择 ←→ 人工覆盖：已知/已忽略恒来自 override，故
+    /// 解析态可直接反推；其余解析态一律回落到「自动」。
+    private var knowledgeBinding: Binding<KnowledgeOverride?> {
+        Binding(
+            get: {
+                switch model.selectedCandidate?.knowledgeState {
+                case .known: .known
+                case .ignored: .ignored
+                default: nil
+                }
+            },
+            set: { model.mark($0) }
+        )
     }
 
     private var deckSection: some View {
