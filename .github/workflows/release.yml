@@ -165,7 +165,7 @@ jobs:
             exit 1
           }
           echo "build_version=$BV" >> "$GITHUB_OUTPUT"
-          echo "CFBundleVersion=$BV（tag 版本经 MARKETING_VERSION=$VERSION 注入构建）"
+          echo "CFBundleVersion=${BV}（tag 版本经 MARKETING_VERSION=$VERSION 注入构建）"
 
       # SideStore 源设计为用户本地重签，因此流水线产出未签名 IPA（arm64 真机构建）。
       - name: Build unsigned Release archive
