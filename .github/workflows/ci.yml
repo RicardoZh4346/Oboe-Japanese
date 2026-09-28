@@ -199,6 +199,10 @@ jobs:
         run: |
           DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
           echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          # 预热模拟器：冷 runner 上 sim 首 boot 与大 IPA 安装会拖过
+          # XCUIApplication.launch 的 background assertion 超时（偶发红色）。
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
           set -o pipefail
           xcodebuild \
             -project Oboe.xcodeproj \
@@ -240,6 +244,10 @@ jobs:
         run: |
           DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPad")))] | first | .udid')"
           echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          # 预热模拟器：冷 runner 上 sim 首 boot 与大 IPA 安装会拖过
+          # XCUIApplication.launch 的 background assertion 超时（偶发红色）。
+          xcrun simctl boot "$DEVICE_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
           set -o pipefail
           xcodebuild \
             -project Oboe.xcodeproj \
