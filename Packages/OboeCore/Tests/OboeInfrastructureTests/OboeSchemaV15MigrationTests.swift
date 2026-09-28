@@ -42,7 +42,9 @@ final class OboeSchemaV15MigrationTests: XCTestCase {
                     // v19（S12）新增的 Reader 定位弱引用列——升级链整体
                     // 跑到最新迁移时一并带上。
                     "reader_document_id", "reader_chapter_id",
-                    "reader_location", "selected_surface"
+                    "reader_location", "selected_surface",
+                    // v24（S06）新增的学习去重键列。
+                    "study_dedup_key"
                 ]
             )
             // 旧 source_text 原样保留——升级不产生信息退化。

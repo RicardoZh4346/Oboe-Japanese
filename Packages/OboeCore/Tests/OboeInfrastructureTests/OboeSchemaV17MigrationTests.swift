@@ -48,7 +48,9 @@ final class OboeSchemaV17MigrationTests: XCTestCase {
                     "id", "title", "format", "created_at_ms",
                     "last_opened_at_ms", "source_file_name", "source_sha256",
                     "canonical_text_hash", "parser_version", "content_revision",
-                    "progress_basis_points", "availability"
+                    "progress_basis_points", "availability",
+                    // v24（S06）新增的学习牌组绑定列。
+                    "study_deck_id", "study_deck_name_follows_title"
                 ]
             )
             XCTAssertEqual(
