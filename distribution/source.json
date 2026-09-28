@@ -7,6 +7,45 @@
   "website": "https://github.com/RicardoZh4346/Oboe-Japanese",
   "tintColor": "#2563EB",
   "nsfw": false,
-  "apps": [],
+  "apps": [
+    {
+      "name": "Oboe",
+      "bundleIdentifier": "org.example.Oboe",
+      "developerName": "RicardoZh4346",
+      "subtitle": "离线日语 Reader、点词查词与挖词卡",
+      "localizedDescription": "Oboe — iOS 日语学习应用：离线文本 Reader（TXT/EPUB/字幕）、形态学点词查词、JLPT 词库、挖词与 Cloze 复习。经 SideStore 侧载分发；未签名 IPA 由用户 Apple Account 本地重签，不含任何网络账户。",
+      "iconURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/AppIcon.png",
+      "tintColor": "#2563EB",
+      "category": "other",
+      "screenshots": [
+        {
+          "imageURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/screenshot-reader.png",
+          "alt": "Oboe Reader 点词查词界面"
+        },
+        {
+          "imageURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/screenshot-review.png",
+          "alt": "Oboe 复习与挖词卡界面"
+        }
+      ],
+      "versions": [
+        {
+          "version": "0.7.0",
+          "buildVersion": "51",
+          "date": "2026-09-28",
+          "downloadURL": "https://github.com/RicardoZh4346/Oboe-Japanese/releases/download/v0.7.0/Oboe-v0.7.0.ipa",
+          "size": 79095474,
+          "sha256": "3c5ac17d831970cffd3bf748e31fbe39af4980af1868c45d30c0f8075ce023dd",
+          "minOSVersion": "17.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          "com.apple.security.application-groups",
+          "keychain-access-groups"
+        ],
+        "privacy": {}
+      }
+    }
+  ],
   "news": []
 }
