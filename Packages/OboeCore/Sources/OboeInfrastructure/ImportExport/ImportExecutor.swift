@@ -642,76 +642,88 @@ public final class ImportExecutor: Sendable {
                 var details: [ImportExecutionSummary.Detail] = []
             }
 
-            let outcome: BatchOutcome = try await pool.write { db in
-                var outcome = BatchOutcome()
-                for row in batch {
-                    let digest = Self.payloadDigest(of: row)
-                    if let priorDigest = receiptIndex[row.logicalRowNumber] {
-                        if priorDigest != digest {
-                            outcome.digestConflicts += 1
+            let outcome: BatchOutcome
+            do {
+                outcome = try await pool.write { db in
+                    var outcome = BatchOutcome()
+                    for row in batch {
+                        let digest = Self.payloadDigest(of: row)
+                        if let priorDigest = receiptIndex[row.logicalRowNumber] {
+                            if priorDigest != digest {
+                                outcome.digestConflicts += 1
+                            }
+                            continue // 已提交行跳过（§10.3 幂等回放）
                         }
-                        continue // 已提交行跳过（§10.3 幂等回放）
-                    }
-                    guard let plan = planRows[row.logicalRowNumber] else {
-                        continue // plan 缺失的行不算数（防御；precheck 已断言）
-                    }
-                    let action: ImportRowReceipt.Action
-                    var targetNoteID: UUID?
-                    var rowDetail: String?
-                    do {
-                        let applied = try executor.applyRow(
-                            row: row,
-                            plan: plan,
-                            mapping: mapping,
-                            job: detail.job,
-                            timestamp: timestamp,
+                        guard let plan = planRows[row.logicalRowNumber] else {
+                            continue // plan 缺失的行不算数（防御；precheck 已断言）
+                        }
+                        let action: ImportRowReceipt.Action
+                        var targetNoteID: UUID?
+                        var rowDetail: String?
+                        do {
+                            let applied = try executor.applyRow(
+                                row: row,
+                                plan: plan,
+                                mapping: mapping,
+                                job: detail.job,
+                                timestamp: timestamp,
+                                in: db
+                            )
+                            action = applied.action
+                            targetNoteID = applied.targetNoteID
+                            rowDetail = applied.detail
+                        } catch {
+                            // 领域/行级失败：回滚该行，记 failed receipt，批继续。
+                            // （SAVEPOINT 在 applyRow 内部管理——此处 error 已是
+                            //   行回滚后的领域错误。）
+                            action = .failed
+                            rowDetail = String(describing: error)
+                        }
+                        switch action {
+                        case .created: outcome.created += 1
+                        case .updated: outcome.updated += 1
+                        case .mergedTags: outcome.mergedTags += 1
+                        case .skipped: outcome.skipped += 1
+                        case .failed: outcome.failed += 1
+                        }
+                        if rowDetail != nil || action == .failed || action == .skipped {
+                            outcome.details.append(.init(
+                                logicalRow: row.logicalRowNumber,
+                                action: action,
+                                reason: rowDetail
+                            ))
+                        }
+                        try GRDBImportPlanRepository.insertReceipt(
+                            ImportRowReceipt(
+                                jobID: jobID,
+                                logicalRowNumber: row.logicalRowNumber,
+                                payloadDigest: digest,
+                                action: action,
+                                targetNoteID: targetNoteID
+                            ),
+                            detail: rowDetail,
+                            createdAtMilliseconds: timestamp,
                             in: db
                         )
-                        action = applied.action
-                        targetNoteID = applied.targetNoteID
-                        rowDetail = applied.detail
-                    } catch {
-                        // 领域/行级失败：回滚该行，记 failed receipt，批继续。
-                        // （SAVEPOINT 在 applyRow 内部管理——此处 error 已是
-                        //   行回滚后的领域错误。）
-                        action = .failed
-                        rowDetail = String(describing: error)
+                        outcome.committedDelta += 1
                     }
-                    switch action {
-                    case .created: outcome.created += 1
-                    case .updated: outcome.updated += 1
-                    case .mergedTags: outcome.mergedTags += 1
-                    case .skipped: outcome.skipped += 1
-                    case .failed: outcome.failed += 1
-                    }
-                    if rowDetail != nil || action == .failed || action == .skipped {
-                        outcome.details.append(.init(
-                            logicalRow: row.logicalRowNumber,
-                            action: action,
-                            reason: rowDetail
-                        ))
-                    }
-                    try GRDBImportPlanRepository.insertReceipt(
-                        ImportRowReceipt(
-                            jobID: jobID,
-                            logicalRowNumber: row.logicalRowNumber,
-                            payloadDigest: digest,
-                            action: action,
-                            targetNoteID: targetNoteID
-                        ),
-                        detail: rowDetail,
-                        createdAtMilliseconds: timestamp,
+                    try GRDBImportPlanRepository.setCommittedRows(
+                        jobID: jobID,
+                        committedRows: committedBase + outcome.committedDelta,
+                        updatedAtMilliseconds: timestamp,
                         in: db
                     )
-                    outcome.committedDelta += 1
+                    return outcome
                 }
-                try GRDBImportPlanRepository.setCommittedRows(
-                    jobID: jobID,
-                    committedRows: committedBase + outcome.committedDelta,
-                    updatedAtMilliseconds: timestamp,
-                    in: db
-                )
-                return outcome
+            } catch {
+                // GRDB may surface cooperative task cancellation as
+                // SQLITE_ABORT while a write transaction is active. Keep the
+                // public executor contract deterministic for restoration and
+                // callers regardless of where cancellation reaches the batch.
+                if Task.isCancelled {
+                    throw CancellationError()
+                }
+                throw error
             }
 
             committedCount += outcome.committedDelta
