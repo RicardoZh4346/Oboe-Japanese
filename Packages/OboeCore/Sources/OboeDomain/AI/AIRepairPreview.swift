@@ -187,6 +187,10 @@ public enum AIRepairPreviewBuilder {
             } catch let error as GrammarValidationError {
                 throw AIRepairError.invalidCandidate(String(describing: error))
             }
+        case .sentence:
+            // v0.7.0 S12：sentence 快照不会到达这里（service 层先拒），
+            // 防御分支保持显式失败而不是套用词汇/语法表单。
+            throw AIRepairError.fieldNotApplicableForKind("kind=sentence")
         }
     }
 
@@ -246,6 +250,8 @@ public enum AIRepairPreviewBuilder {
                 return .vocabulary(try candidate.vocabularyFormData().validatedContent())
             case .grammar:
                 return .grammar(try candidate.grammarFormData().validatedContent())
+            case .sentence:
+                throw AIRepairError.fieldNotApplicableForKind("kind=sentence")
             }
         } catch let error as VocabularyValidationError {
             throw AIRepairError.invalidCandidate(String(describing: error))
@@ -288,6 +294,9 @@ public enum AIRepairPreviewBuilder {
                 (.notes, note.notes ?? ""),
                 (.examples, render(note.examples))
             ]
+        case .sentence:
+            // 不可达（service 层已拒）；返回最小字段集，不虚构字段映射。
+            return [(.headword, note.headword)]
         }
     }
 

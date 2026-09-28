@@ -82,6 +82,9 @@ final class StreamingZipReader {
     private static let centralDirectoryEntryFixedSize = 46
     private static let localHeaderFixedSize = 30
     private static let flagEncrypted: UInt16 = 0x0001
+    /// flags bit3：本地头 CRC/大小为 0，实际值在数据区后的 data
+    /// descriptor 与中央目录（EPUB 生态常见——流式写出的包）。
+    private static let flagDataDescriptor: UInt16 = 0x0008
     private static let streamChunkSize = 256 * 1_024
 
     private let source: any StreamingZipByteSource
@@ -283,9 +286,25 @@ final class StreamingZipReader {
                     "\(entry.name) 的本地头与中央目录压缩方式不一致。"
                 )
             }
-            guard local.littleEndianUInt32(at: 14) == entry.crc32,
-                  local.littleEndianUInt32(at: 18) == UInt32(entry.compressedSize),
-                  local.littleEndianUInt32(at: 22) == UInt32(entry.uncompressedSize) else {
+            // bit3（data descriptor）条目的本地头 CRC/大小按规范写 0
+            // （实际值在 descriptor/中央目录）；少数写入器写真实值——
+            // 两种情况都合法，只有非零且不符才算损坏。
+            let localCRC = local.littleEndianUInt32(at: 14)
+            let localCompressedSize = local.littleEndianUInt32(at: 18)
+            let localUncompressedSize = local.littleEndianUInt32(at: 22)
+            let crcSizesConsistent =
+                entry.flags & Self.flagDataDescriptor != 0
+                    ? (localCRC == 0 || localCRC == entry.crc32)
+                        && (localCompressedSize == 0
+                            || localCompressedSize == UInt32(entry.compressedSize))
+                        && (localUncompressedSize == 0
+                            || localUncompressedSize
+                                == UInt32(entry.uncompressedSize))
+                    : localCRC == entry.crc32
+                        && localCompressedSize == UInt32(entry.compressedSize)
+                        && localUncompressedSize
+                            == UInt32(entry.uncompressedSize)
+            guard crcSizesConsistent else {
                 throw PortableBackupPackageError.malformedArchive(
                     "\(entry.name) 的本地头与中央目录 CRC/大小不一致。"
                 )

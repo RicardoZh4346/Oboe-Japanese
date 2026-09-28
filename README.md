@@ -6,19 +6,22 @@
 
 Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它把资料采集、AI 辅助整理、制卡和 FSRS-6 间隔复习放在同一个本地工作流里；没有账号、业务后端或云同步，AI 默认关闭。
 
-当前版本为 **v0.6.0（构建号 50）**，最低支持 iOS / iPadOS 17。
+当前版本为 **v0.7.0（构建号 51）**，最低支持 iOS / iPadOS 17。
 
 > GitHub Release 提供 arm64 未签名 IPA。安装前需要使用你自己的证书重新签名；项目不包含开发团队、证书、描述文件或 App Store 上传配置。
 
-## v0.6.0 更新
+## v0.7.0 更新
 
-- **内置离线日语词典**：21.8 万条 JMdict 词条随包发布，支持原形、假名与活用形检索（有限深度反活用，如「食べた」→「食べる」）；中文释义逐 sense 指纹对齐 Tomoshi 开放数据，未对齐行进 QA 隔离、英文释义兜底，词典来源与许可可在设置内离线查看。
-- **查词→制卡一键预填**：词典详情可直接制卡，词性、假名读音、释义（含英文兜底）和词来源预填进词汇编辑器；编辑器内也可随时唤起查词；收集箱句析与手动制卡均持久化来源上下文。
-- **专项学习（Custom Study）**：牌组详情「专项学习」按预设/牌组/标签/JLPT/收藏筛选候选，预览数量后进入与日常复习相同的卡片界面；可选「仅练习」（不写 FSRS、不显示间隔、记录练习次并可撤销）或「提前纳入调度」（写正式复习记录、注明专项来源）。
-- **来源上下文（SourceContext）**：句析/手动制卡自动记录来源句与截图，已有单词加入新牌组时保留非主要来源；复习背面可查看来源句与图片，来源缺失时安全降级。
-- **备份互传与统一导入**：`.oboe-backup` 经系统 Share Sheet（含 AirDrop）分享，文件 App/AirDrop/设置内「检查备份」统一走 security-scope→暂存→全量校验→预览→确认的安全链路，串行去重，取消不触碰当前库。
-- **流式备份与附件打包**：备份写读改为 256KiB 流式分块，峰值内存降至个位数 MB；v7 包继续原子恢复并兼容 v1–v6 明文备份。
-- **已知限制**：本版不含 CSV/TSV 导入（按计划后移）；AirDrop 双设备验收与真机性能测量列入发布 checklist 证据项。
+- **离线 Reader（五种输入）**：粘贴、TXT、EPUB（非 DRM 可重排）、SRT、VTT 导入个人图书馆；粘贴与文件导入统一为卡片入口，长文本预处理移出主线程；章节导航、阅读位置与书签持久化，iPhone/iPad 双壳自适应。
+- **点词查词与挖词**：NL+反活用+JMdict 混合形态分析；点词出词典详情（中文优先、英文兜底）并可一键挖词成卡；批量挖词只有勾选条目后才能选择候选，修复整行点击、取消选择与选中态反馈，默认生成日→义、义→日、听力三种方向；receipt 幂等防重复制卡，恢复/换库有世代屏障拦截陈旧写入。
+- **Cloze 句子挖空卡**：选段或点词生成 sentence 挖空卡，正面遮罩不泄题、独立 FSRS 调度、多答案接受、支持撤销与专项练习隔离；原文删除后仍可复习，重关联原文后来源定位字段原样保留。
+- **CSV/TSV 导入导出**：五步导入向导（文件→编码→列映射→重复策略→预览确认），支持 UTF-8/UTF-16 BOM 与无 BOM 检测、10 个可映射字段、三种重复策略、10 万行有界内存、取消后断点续跑；词汇 CSV 导出为 10 字段、不含内部调度键。
+- **活用练习**：13 种活用形 × 各词性（含不规则动词），正反向一致校验；练习会话与记录完全隔离于正式 FSRS 调度。
+- **统计与 Reader 分析**：概览/记忆保持/复习预测/易错弱点按冻结口径聚合；Reader 覆盖率趋势按词典与形态学版本分段，阅读事件按学习日聚合，删除原文后历史保留。
+- **词典 2.0**：释义 zh→en 显式 fallback 链、分层词元绑定（来源上下文>书写形>读音>反活用>沿用核验）、换词典库后同层重放重绑、产物 SHA-256 核验台账与中文覆盖质检报告。
+- **备份 v8 协议与恢复屏障**：v8 记录协议共 36 类（新增 Reader 元数据/位置/书签、Cloze、词元知识、导入作业、活用与阅读历史），恢复端兼容 v1–v8；Reader 正文本体不入包，恢复后经 SHA-256/canonical hash 重关联回可读态；恢复窗口有工作闸门抽干在册任务、原子换库失败整体回滚。默认导出即 v8 包。
+- **SideStore 源与发布流水线**：`distribution/` 静态安装页、AltStore 兼容 `source.json` 生成器与 tag→Release→Pages 九阶段流水线，全部一致性门禁本地演练通过。
+- **界面与自动化稳定性**：完成 iPad regular `NavigationSplitView` UI 测试适配；修复进入二级页面后 Tab Bar 残留、首页大标题换行，以及 Reader 空状态入口重复等问题。
 
 ## 主要功能
 
@@ -33,7 +36,17 @@ Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它�
 - AI 修卡对易错卡给出最小上下文建议，逐字段预览差异、显式确认后原子写入；
 - 牌组内可按预设、标签、JLPT、收藏与顺序创建专项学习；练习模式不改变 FSRS，提前调度模式写入正式复习记录；
 - 设备 `ja-JP` 系统语音朗读，核心学习流程可在飞行模式使用。
+- Cloze 句子挖空卡与词汇卡共用同一复习管线：正面遮罩、四档评分、撤销、专项「仅练习」隔离；每条 sentence 笔记恰好一条挖空定义与一张挖空卡。
+- 活用练习覆盖 13 种活用形与各词性，含不规则动词；练习次、正确率单独记录，不写正式调度。
 - iPhone / 窄窗口使用双 Tab 与设置齿轮；常规宽度 iPad 使用自适应侧边栏和多栏导航，并支持常用键盘快捷键。
+
+### 阅读与挖词
+
+- 个人图书馆支持粘贴文本、TXT、EPUB、SRT、VTT 五种输入；流式解析与按块渲染，大文件不阻塞滚动；书签、阅读位置与进度跨启动保留。
+- 正文按 token 形态学切分，词汇知识状态实时着色（unknown/learning/known/ignored），覆盖率先按已分析部分标注、不冒充全书覆盖。
+- 点词唤起词典详情（原形/假名/活用形归一），可直接制卡或创建挖空卡；Inspector 支持多选批量挖词，重复挖取由 receipt 幂等去重。
+- 未知词分页列表与覆盖率趋势可按词典/形态学版本分段回看；删除文档不清除历史统计。
+- 原文文件只保存在本机受控目录，不进入备份；换机恢复后可在库内重新关联原文（SHA-256 或 canonical hash 命中）。
 
 ### 采集与制卡
 
@@ -53,14 +66,16 @@ Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它�
 - 日文、假名、平/片假名、半角及中文本地搜索；
 - 内置 8,334 个社区 JLPT N5–N1 参考词汇，带可追溯音调与中文例句翻译，可离线浏览、搜索、朗读并幂等导入；
 - 内置 218,807 条 JMdict 词条的只读离线词典，中文释义层按 sense 指纹对齐，未对齐时使用英文释义兜底；
-- `.oboe-backup` v7 全量导出学习数据、来源上下文、专项学习记录与图片附件，提供流式读写、逐文件校验、严格预检、原子恢复和三份本机滚动快照；
+- `.oboe-backup` 全量导出学习数据、来源上下文、专项学习记录与图片附件，提供流式读写、逐文件校验、严格预检、原子恢复和三份本机滚动快照；恢复端兼容 v1–v8，默认导出为 v8 包（含 Reader 元数据、Cloze、词元与导入历史）；
 - 备份可通过系统分享页（包括 AirDrop）发送，也可从文件 App、AirDrop 或设置入口统一预检并恢复；
 - API Key 仅保存在 iOS Keychain，不写入 SQLite、日志或可携带备份；
 - 跟随系统、浅色和深色外观，支持辅助功能字号和 VoiceOver 语义。
 
 ## 获取与安装
 
-在 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 v0.6.0 对应的 `Oboe-v0.6.0.ipa`。该文件是支持 iPhone / iPad 的 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
+在 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 v0.7.0 对应的 `Oboe-v0.7.0.ipa`。该文件是支持 iPhone / iPad 的 **arm64 未签名构建**，需要用自己的 Apple Account 重新签名后安装。以下流程仅首次配置需要电脑，之后可在同一 Wi-Fi 下通过 SideStore 刷新。
+
+已配置 SideStore 的设备也可以直接添加 Oboe 源：打开 [Oboe 侧载源安装页](https://ricardozh4346.github.io/Oboe-Japanese/) 点按「在 SideStore 中添加源」，或在 SideStore / AltStore 的 Sources 页粘贴 `https://ricardozh4346.github.io/Oboe-Japanese/source.json`。添加后可在 My Apps 内直接安装并接收新版本更新提醒，无需再手动下载 IPA。
 
 > iLoader、LocalDevVPN 和 SideStore 均为第三方项目，不属于 Oboe，也不受本项目维护或担保。请只从其官方页面下载，不要向他人发送 Apple Account 验证信息或设备配对文件。
 
@@ -88,7 +103,7 @@ Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它�
 
 ### 2. 使用 SideStore 安装 Oboe
 
-1. 在设备上从 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 `Oboe-v0.6.0.ipa`，并保存到“文件”App。
+1. 在设备上从 [Releases 页面](https://github.com/RicardoZh4346/Oboe-Japanese/releases) 下载 `Oboe-v0.7.0.ipa`，并保存到“文件”App。
 2. 确认设备已连接 Wi-Fi，且 LocalDevVPN 处于 **Connected** 状态。
 3. 打开 SideStore，进入 **My Apps**，点按右上角 **+**，选择刚下载的 IPA。
 4. 等待 SideStore 完成签名与安装，然后从主屏幕启动 Oboe。
@@ -100,7 +115,7 @@ Oboe 是一款开源、离线优先的 iPhone 与 iPad 日语学习应用。它�
 
 ## 开发
 
-需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator。v0.6.0 验证覆盖 iPhone 与 iPad Simulator；`main` 推送的 CI 会运行 Swift Package 全量测试、App 单元测试和 iPhone/iPad navigation smoke，完整 UI 回归通过 GitHub Actions 的 `workflow_dispatch` 手动触发。SwiftPM 锁定：
+需要 macOS、Xcode 16.3+、Swift 6.1+ 和 iOS 17+ Simulator，克隆后需 git-lfs 拉取内置词典产物。v0.7.0 的自动化覆盖 iPhone 与 iPad Simulator，并已适配 iPad regular `NavigationSplitView`。CI 分两道：`ci.yml`（push/PR）跑 OboeCore 全量（Domain+Infrastructure）、Scripts 工具链单测、词典/JLPT 校验、App 单元测试和 iPhone/iPad navigation smoke，并对每个 job 断言实际执行用例数下限；`ci-heavy.yml`（`workflow_dispatch` 按套件选跑，夜间自动跑 Core 重型子集）覆盖完整 UI 回归（iPhone+iPad）、AX5 大字号切片、门控性能与大导入/EPUB/备份故障注入套件。SwiftPM 锁定：
 
 - GRDB 7.11.1；
 - `swift-fsrs` revision `4fbaf20184d62f82a9f44f343337c61a2c5483e9`。
@@ -142,16 +157,20 @@ AI 服务的数据保留、移动端直连限制和地区政策由对应服务�
 
 ## 备份与恢复
 
-`.oboe-backup` v7 是未加密的 ZIP 容器，包含 `manifest.json`、`records.ndjson`、`checksums.json` 和可选的 `attachments/`。其中 `records.ndjson` 使用固定记录顺序和 SHA-256 footer，保存学习数据、设置、`note_decks` 成员关系、来源上下文、专项学习会话、练习记录及以下收集箱记录：
+`.oboe-backup` 是未加密的 ZIP 容器，包含 `manifest.json`、`records.ndjson`、`checksums.json` 和可选的 `attachments/`。其中 `records.ndjson` 使用固定记录顺序和 SHA-256 footer，保存学习数据、设置、`note_decks` 成员关系、来源上下文、专项学习会话、练习记录及以下收集箱记录：
 
 - `inboxItem`；
 - `inboxProcessingContext`；
 - `captureImportReceipt`；
 - `inboxCommitReceipt`。
 
-v7 会把收集箱及来源上下文引用的图片附件连同 MIME、大小、SHA-256 和像素元数据写入包内，并以 256KiB 分块流式读写。备份仍不包含 API Key、AI 连接配置、内置只读词库、搜索派生索引、本机快照或尚未导入的共享队列文件；易错与趋势属派生数据，恢复后由评分日志重建。
+备份会把收集箱及来源上下文引用的图片附件连同 MIME、大小、SHA-256 和像素元数据写入包内，并以 256KiB 分块流式读写。备份仍不包含 API Key、AI 连接配置、内置只读词库、搜索派生索引、本机快照或尚未导入的共享队列文件；易错与趋势属派生数据，恢复后由评分日志重建。
 
-恢复前 App 会检查 ZIP 结构、路径穿越、符号链接、压缩与解压限额、CRC、逐文件 SHA-256、附件类型和像素，以及记录格式、数量、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入：数据库与附件先在临时位置准备，附件目录通过 journal 记录的原子交换安装，失败或进程中断时自动回滚或完成收敛。Oboe 可按内容自动识别并恢复 v1～v6 明文 NDJSON 与 v7 附件包；旧备份缺失的新增字段会补默认值，缺失图片安全降级，并明确拒绝未来格式和未知调度算法。
+v8 记录协议在此基础上新增 15 类记录（共 36 类）：Reader 文档/章节元数据、阅读位置与书签、Cloze 挖空定义、词元与词汇知识覆盖、阅读事件/挖词回执/覆盖率快照、CSV 导入作业与行回执、活用练习会话与记录。Reader 正文本体（`reader_blocks`）、安装态资产路径（`reader_assets`）、分词缓存（`reader_token_cache`）、词典产物台账/绑定与导入暂存文件**不进入备份**：v8 恢复后 Reader 文档先落为 `missing`，由「重新关联原文」流程按 `source_sha256` 或 canonical hash 校验后重建章块并回到 `available`；同机恢复若文件仍在原位则自动自愈。Cloze 卡保存独立句子快照，原文缺失或被删除不影响复习。
+
+App 默认导出 v8 包；v1–v7 备份仍可恢复，旧格式只读、不再生成。旧版本 App（v0.6.x 及更早）无法读取 v8 包，跨版本迁移请先升级两端到 v0.7.0。
+
+恢复前 App 会检查 ZIP 结构、路径穿越、符号链接、压缩与解压限额、CRC、逐文件 SHA-256、附件类型和像素，以及记录格式、数量、外键、调度状态和算法版本；预检不修改当前数据库。正式恢复是**完整替换**而不是合并导入：恢复窗口先关门抽干在册的导入/挖词任务（配合世代屏障拒绝陈旧写入），数据库与附件在临时位置准备，附件目录通过 journal 记录的原子交换安装，失败或进程中断时自动回滚或完成收敛。Oboe 可按内容自动识别并恢复 v1～v6 明文 NDJSON 与 v7/v8 附件包；旧备份缺失的新增字段会补默认值，缺失图片安全降级，并明确拒绝未来格式、未知调度算法和版本不一致的包。
 
 ## 内置 JLPT 词汇库
 
@@ -235,14 +254,20 @@ OboeShareExtension/        系统分享扩展
 Packages/OboeCore/         Domain、Infrastructure、共享采集协议
 OboeAppTests/              布局、导航状态和恢复接线单元测试
 OboeUITests/               导航、布局与端到端 UI 测试
-Scripts/                   JLPT 与日语词典生成、校验工具
-.github/workflows/ci.yml   持续集成
+Scripts/                   JLPT、日语词典与 SideStore source 生成/校验工具
+distribution/              SideStore/AltStore 静态安装页与 canonical source.json
+.github/workflows/         ci.yml（快道）、ci-heavy.yml（重型回归）、release.yml（发布）
 ```
 
 ## 已知限制
 
-- 没有账号、云同步、嵌套牌组、Anki/CSV/TSV 导入、备份合并或备份加密；
-- 不支持相机直接拍摄或云 OCR；v7 备份可迁移已进入收集箱的图片附件，尚未导入的分享队列文件不包含在备份内；
+- 没有账号、云同步、嵌套牌组、Anki 格式导入、备份合并或备份加密；
+- 不支持相机直接拍摄或云 OCR；备份可迁移已进入收集箱的图片附件，尚未导入的分享队列文件不包含在备份内；
+- Reader 原文不进入备份：恢复后需在库内重新关联原文文件（SHA-256/canonical hash 校验），否则文档保持 `missing`；默认导出 v8 包；v1–v7 备份可恢复但不可再生成——旧版本 App（v0.6.x 及更早）无法读取 v8 包，跨版本迁移请先升级两端到 v0.7.0；
+- 无 BOM 的 UTF-16 文件若采样前缀全为低 ASCII 内容，可能被误判为 UTF-8；导入向导中可手动指定编码覆盖；
+- 10MB 病态单章 EPUB（全书 canonical-hash 扫描）在主机 Release 口径实测约 5.2s，超出 ≤3s 预算行，已按夹具形态记录偏差，真机数据待补；
+- iPhone/iPad 模拟器自动化不能替代真机验收；SideStore 安装与刷新、AirDrop 双机传输、VoiceOver 完整走查仍需在对应真机环境验证；
+- 克隆仓库需安装 git-lfs（内置词典 SQLite 经 LFS 追踪）；`--validate-existing` 校验脚本可对已有产物复检；
 - 系统 TTS 不提供标准重音词典、真人录音、语速、音色或重音标注设置；音调来自 UniDic/kanjium 词典标注，202 个无法可靠匹配的词保持未设置，不做 AI 猜测；
 - 音调选择器取值范围由假名读音的 mora 数决定，需先填写读音；
 - 表单输入法自动切换需系统已添加对应键盘；

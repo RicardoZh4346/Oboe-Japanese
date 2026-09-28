@@ -70,7 +70,9 @@ final class OboeSettingsAIUITests: XCTestCase {
         // 搜索过滤：输入 model-b 后只剩 B。
         let search = app.searchFields["搜索模型 ID 或名称"]
         if !search.exists {
-            app.collectionViews.firstMatch.swipeDown()
+            app.revealElementBySwipingDown(
+                search, requireHittable: false, passes: 4
+            )
         }
         XCTAssertTrue(search.waitForExistence(timeout: 3))
         search.tap()
@@ -474,6 +476,12 @@ final class OboeSettingsAIUITests: XCTestCase {
     @MainActor
     private func openSettings(in app: XCUIApplication) {
         app.openSettingsFromTodayGear()
+        // regular：设置是三栏——AI 表单只在选中分类后挂载到 detail 列。
+        if app.isRegularShell {
+            let category = app.staticTexts["settings-category-ai"]
+            XCTAssertTrue(category.waitForExistence(timeout: 5))
+            category.tap()
+        }
     }
 
     @MainActor
@@ -497,75 +505,22 @@ final class OboeSettingsAIUITests: XCTestCase {
         }
     }
 
-    /// List 懒挂载 + 视口边缘行可能已挂载但不可命中：粗扫定位，
-    /// 一旦挂载就改用小幅拖拽把元素带进视口中心——避免全屏 swipe
-    /// 把边缘行甩出去并卸载。
+    /// List 懒挂载 + 视口边缘行可能已挂载但不可命中：委派共享
+    /// 多列感知显露（regular 下自动锁定 detail 列容器与分类行）。
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<16 {
-            if element.exists {
-                if element.isHittable { return }
-                nudgeIntoView(element, form: form)
-            } else {
-                form.swipeUp()
-            }
-        }
-        for _ in 0..<16 {
-            if element.exists {
-                if element.isHittable { return }
-                nudgeIntoView(element, form: form)
-            } else {
-                form.swipeDown()
-            }
-        }
-    }
-
-    /// 元素已挂载但贴边：向视口中心方向做 1/4 屏拖拽。
-    @MainActor
-    private func nudgeIntoView(
-        _ element: XCUIElement,
-        form: XCUIElement
-    ) {
-        let below = element.frame.midY > form.frame.midY
-        let start = form.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.75 : 0.25)
-        )
-        let end = form.coordinate(
-            withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)
-        )
-        start.press(forDuration: 0.05, thenDragTo: end)
+        app.revealElement(element, passes: 16)
     }
 
     /// 目标可能永远不可命中（disabled 按钮等），只要求挂载进无障碍树。
     @MainActor
     private func revealExistence(_ element: XCUIElement, in app: XCUIApplication) {
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<12 {
-            if element.exists {
-                return
-            }
-            form.swipeUp()
-        }
-        for _ in 0..<12 {
-            if element.exists {
-                return
-            }
-            form.swipeDown()
-        }
+        app.revealElement(element, requireHittable: false, passes: 12)
     }
 
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
-        guard app.keyboards.firstMatch.exists else { return }
-        for name in ["done", "Done", "完成", "return", "换行"] {
-            let key = app.keyboards.buttons[name]
-            if key.exists {
-                key.tap()
-                return
-            }
-        }
-        app.keyboards.firstMatch.swipeDown()
+        app.dismissOnscreenKeyboard()
     }
 
     @MainActor

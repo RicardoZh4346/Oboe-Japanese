@@ -83,10 +83,22 @@ public actor PortableBackupPackageExporter {
         self.snapshotCreatedHook = snapshotCreatedHook
     }
 
+    /// `formatVersion` 默认 v8（v0.7.0 起）；显式传 7 仍可产出
+    /// (7,7) 版本对包供兼容测试/内部验证——导出端只写合法对，
+    /// 见 `PortableBackupPackageFormat.isSupportedVersionPair`。
     public func export(
         appVersion: String,
-        at exportedAt: Date = Date()
+        at exportedAt: Date = Date(),
+        formatVersion: Int = PortableBackupPackageFormat.formatVersion
     ) async throws -> PortableBackupPackageExport {
+        guard PortableBackupPackageFormat.isSupportedVersionPair(
+            packageVersion: formatVersion,
+            recordVersion: formatVersion
+        ) else {
+            throw PortableBackupExportError.unsupportedRecordFormatVersion(
+                formatVersion
+            )
+        }
         try Task.checkCancellation()
         let fileManager = FileManager.default
         try fileManager.createDirectory(
@@ -129,7 +141,8 @@ public actor PortableBackupPackageExporter {
                 stagingURL: stagingURL,
                 to: pendingURL,
                 appVersion: appVersion,
-                exportedAt: exportedAt
+                exportedAt: exportedAt,
+                formatVersion: formatVersion
             )
             // 成功才从 .pending 临时名转正——中间失败不留有效名残件。
             try fileManager.moveItem(at: pendingURL, to: finalURL)
@@ -178,7 +191,8 @@ public actor PortableBackupPackageExporter {
         stagingURL: URL,
         to pendingURL: URL,
         appVersion: String,
-        exportedAt: Date
+        exportedAt: Date,
+        formatVersion: Int
     ) throws -> PackageResult {
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
@@ -186,14 +200,16 @@ public actor PortableBackupPackageExporter {
             PortableBackupPackageFormat.recordsEntryName
         )
 
-        // records.ndjson：与独立 v6 导出逐字节同构的记录流。
+        // records.ndjson：与独立导出逐字节同构的记录流，版本由 registry
+        // 决定（v7/v8 各有独立表规格）。
         // writeBackupRecords 走 FileHandle 写入，目标文件必须先存在。
         fileManager.createFile(atPath: recordsURL.path, contents: nil)
         let recordCounts = try PortableBackupExporter.writeBackupRecords(
             from: snapshotURL,
             to: recordsURL,
             appVersion: appVersion,
-            exportedAt: exportedAt
+            exportedAt: exportedAt,
+            recordFormatVersion: formatVersion
         )
 
         // 附件清单：从同一快照读 inbox_items 的引用集合，保证记录流与
@@ -261,9 +277,13 @@ public actor PortableBackupPackageExporter {
             }
 
             // 所有 descriptor/digest 已知后才写 manifest 与 checksums。
+            // 版本对契约：导出端只写 (7,7)/(8,8)；recordOrder/排除清单
+            // 全部按 registry 中该版本的冻结规格生成。
+            let recordOrder = PortableBackupFormatRegistry
+                .recordTypes(forVersion: formatVersion) ?? []
             let manifest = PortableBackupPackageManifest(
                 format: PortableBackupFormat.identifier,
-                formatVersion: Self.formatVersion,
+                formatVersion: formatVersion,
                 container: PortableBackupPackageFormat.container,
                 appVersion: appVersion,
                 exportedAt: PortableBackupPackageFormat.iso8601String(
@@ -272,10 +292,12 @@ public actor PortableBackupPackageExporter {
                 encoding: "utf-8",
                 lineEnding: "lf",
                 checksumAlgorithm: PortableBackupFormat.checksumAlgorithm,
-                recordFormatVersion: PortableBackupPackageFormat.recordsFormatVersion,
-                recordOrder: PortableBackupFormatV7.recordTypes,
+                recordFormatVersion: formatVersion,
+                recordOrder: recordOrder,
                 counts: recordCounts,
-                excludedScopes: PortableBackupPackageFormat.excludedScopes,
+                excludedScopes: formatVersion >= PortableBackupFormatRegistry.v8Version
+                    ? PortableBackupPackageFormat.excludedScopesV8
+                    : PortableBackupPackageFormat.excludedScopes,
                 attachments: attachments
             )
             try writer.beginEntry(

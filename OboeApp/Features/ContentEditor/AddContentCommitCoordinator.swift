@@ -196,6 +196,8 @@ extension AddContentViewModel {
                 vocabularyForm = VocabularyFormData()
                 vocabularyTagsText = ""
                 vocabularyStatusMessage = "已正式保存，生成 \(result.cardCount) 张卡片"
+                // S11：Reader 挖词入口的 lexeme 关联补写（可选 hook）。
+                onVocabularyCommitted?(result.noteID)
             case .grammar:
                 result = try await contentCardService.commitGrammar(
                     draftID: grammarDraftID,

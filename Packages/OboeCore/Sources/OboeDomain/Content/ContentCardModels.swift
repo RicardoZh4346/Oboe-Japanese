@@ -40,6 +40,10 @@ public enum ContentOrigin: String, Equatable, Sendable {
     case manual
     case ai
     case builtinJLPT = "builtin_jlpt"
+    /// v0.7.0 S12（设计 §9.1）：Reader 挖词/挖句与 CSV/TSV 导入来源。
+    /// 只加合法值，不改旧值语义。
+    case reader
+    case `import`
 }
 
 public enum ContentCardError: Error, Equatable, Sendable {
@@ -52,6 +56,13 @@ public enum ContentCardError: Error, Equatable, Sendable {
     /// 提交的来源记录 noteID 与本次 commit 的 noteID 不一致——
     /// 静默错挂到其它 Note 比失败更糟，事务层直接拒绝（设计 §6.2）。
     case sourceContextNoteMismatch
+    /// v0.7.0 S12（设计 §9.1）：`sentence_cloze` 卡不是可单独删除的方向卡
+    /// ——裸删会让 sentence Note 失去唯一卡片与 definition。删除 Cloze
+    /// 必须走整条 Note 删除（`deleteKnowledgePoint`）。
+    case clozeDeletionRequiresNoteDelete
+    /// v0.7.0 S12：sentence Note 的卡片集合不可经方向替换改写——
+    /// 它恒为恰好一张 `sentence_cloze` 卡，方向管理只覆盖词汇/语法。
+    case sentenceCardsNotDirectionManaged
 }
 
 public struct VocabularyContentCommit: Equatable, Sendable {
@@ -190,6 +201,12 @@ public protocol ContentCardRepository: Sendable {
         _ commit: GrammarContentCommit,
         capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult
+    /// v0.7.0 S12：sentence Note + `sentence_cloze` Card +
+    /// `cloze_definitions` 的原子提交（设计 §9.1–9.3）。
+    func commitSentence(
+        _ commit: SentenceContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult
     func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState]
     func replaceEnabledCardDirections(
         _ replacement: CardDirectionReplacement
@@ -325,6 +342,69 @@ public struct ContentCardService: Sendable {
         return try await repository.commitGrammar(commit, capture: capture)
     }
 
+    /// v0.7.0 S12：装配并提交一条 sentence/Cloze 创建命令。blank 校验
+    /// 在 `ValidatedClozeContent` 构造内完成——非法 range/表面不符/空
+    /// 答案集/surface 缺失在持久化前抛 `ClozeError`，不产生任何写入。
+    /// `deckIDs` 语义与 `commitVocabulary` 相同。
+    public func commitSentence(
+        deckID: UUID?,
+        sentenceSnapshot: String,
+        utf16Start: Int,
+        utf16Length: Int,
+        targetSurface: String,
+        targetLemma: String? = nil,
+        targetReading: String? = nil,
+        acceptedAnswers: [String],
+        hint: String? = nil,
+        meaningZH: String? = nil,
+        notes: String? = nil,
+        rawTagNames: [String] = [],
+        origin: ContentOrigin = .manual,
+        capture: CaptureCommitContext? = nil,
+        deckIDs: Set<UUID>? = nil,
+        sourceContext: SourceContextDraft? = nil
+    ) async throws -> ContentCommitResult {
+        guard let deckID else {
+            throw ContentCardError.deckRequired
+        }
+        let cloze = try ValidatedClozeContent(
+            sentenceSnapshot: sentenceSnapshot,
+            utf16Start: utf16Start,
+            utf16Length: utf16Length,
+            targetSurface: targetSurface,
+            targetLemma: targetLemma,
+            targetReading: targetReading,
+            acceptedAnswers: acceptedAnswers,
+            hint: hint
+        )
+        let noteID = makeID()
+        let createdAt = now()
+        let commit = SentenceContentCommit(
+            noteID: noteID,
+            clozeID: makeID(),
+            deckID: deckID,
+            cloze: cloze,
+            card: NewCardSeed(id: makeID(), templateKind: .sentenceCloze),
+            schedulerProfileID: makeID(),
+            createdAt: createdAt,
+            meaningZH: meaningZH,
+            notes: notes,
+            tags: try makeTags(rawTagNames),
+            origin: origin,
+            sourceText: capture?.sourceText,
+            deckIDs: deckIDs,
+            sourceContext: sourceContext.map {
+                sourceContextService.makeContext(
+                    from: $0,
+                    noteID: noteID,
+                    now: createdAt,
+                    makeID: makeID
+                )
+            }
+        )
+        return try await repository.commitSentence(commit, capture: capture)
+    }
+
     public func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState] {
         try await repository.fetchCardDirections(noteID: noteID)
     }
@@ -398,6 +478,8 @@ public extension CardTemplateKind {
             .vocabulary
         case .grammarFormToExplanation:
             .grammar
+        case .sentenceCloze:
+            .sentence
         }
     }
 
@@ -410,6 +492,11 @@ public extension CardTemplateKind {
             [.vocabularyJapaneseToChinese, .vocabularyChineseToJapanese, .vocabularyListening]
         case .grammar:
             [.grammarFormToExplanation]
+        case .sentence:
+            // 句子 Note 恒为恰好一张 sentence_cloze——该集合只用于
+            // kind↔template 映射校验；方向替换对 sentence 一律拒绝
+            // （仓储层 `sentenceCardsNotDirectionManaged`）。
+            [.sentenceCloze]
         }
     }
 }

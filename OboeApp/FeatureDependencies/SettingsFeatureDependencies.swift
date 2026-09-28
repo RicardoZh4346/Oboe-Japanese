@@ -17,4 +17,12 @@ struct SettingsFeatureDependencies {
     let restorationPreparer: PortableBackupRestorationPreparer
     /// S06：关于页「词典来源与许可」的事实源（sources()/metadata()）。
     let dictionaryQueryService: DictionaryQueryService
+    /// v0.7.0 S18：CSV/TSV 导入向导 + 导出页直接使用库句柄
+    /// （staging/precheck/execute 走 `ImportExecutor`）。
+    let database: OboeDatabase
+    /// 导入向导/导出页的牌组选项来源。
+    let deckService: DeckManagementService
+    /// S24 恢复屏障闸门：CSV 导入执行（confirmExecute/resume）登记，
+    /// 恢复窗口内关门 → 登记即取消。
+    let workGate: RestorationWorkGate
 }

@@ -304,6 +304,29 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("portable-backup-preview-scope-note")
+
+                    NavigationLink {
+                        ImportWizardView(
+                            model: importWizardModel()
+                        )
+                    } label: {
+                        Label("导入 CSV / TSV 词汇", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(isBusy)
+                    .accessibilityIdentifier("csv-import-wizard-button")
+
+                    NavigationLink {
+                        VocabularyExportView(
+                            model: vocabularyExportModel()
+                        )
+                    } label: {
+                        Label("导出词汇 CSV / TSV", systemImage: "tablecells")
+                    }
+                    .accessibilityIdentifier("csv-export-button")
+
+                    Text("CSV 导入走两段式流程：先预检并给出逐行判定，确认后才分批写入；可中途取消，中断后可从设置页续跑。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("本机快照") {
@@ -1342,6 +1365,24 @@ struct SettingsView: View {
     /// appear and foreground so the export scope note stays honest.
     private func refreshPendingSharedCaptures() {
         pendingSharedCaptureCount = operations.pendingSharedCaptureCount()
+    }
+
+    /// v0.7.0 S18：构造导入向导 VM（deckProvider 只捕获 Sendable 服务）。
+    private func importWizardModel() -> ImportWizardViewModel {
+        let deckService = dependencies.deckService
+        return ImportWizardViewModel(
+            database: dependencies.database,
+            deckProvider: { try await deckService.fetchDecks() },
+            workGate: dependencies.workGate
+        )
+    }
+
+    private func vocabularyExportModel() -> VocabularyExportViewModel {
+        let deckService = dependencies.deckService
+        return VocabularyExportViewModel(
+            database: dependencies.database,
+            deckProvider: { try await deckService.fetchDecks() }
+        )
     }
 
     private func prepareExport() {

@@ -19,6 +19,11 @@ struct RuntimeServices {
     let jlptEnrichmentService: JLPTLibraryEnrichmentService
     /// S09：启动期把上个运行期遗留的 active 专项会话标 interrupted。
     let customStudyRepository: any CustomStudyRepository
+    /// S24 恢复屏障闸门：本世代内 Reader 导入/覆盖率分析与 CSV
+    /// 导入执行登记于此。`suspendBeforeDatabaseReplacement` 先
+    /// `closeAndWait`（关门→取消→抽干）再换库；闸门单向，新世代
+    /// 容器自带新实例。
+    let workGate: RestorationWorkGate
 }
 
 /// `AppFeatureContainerFactory.makeServices` 的返回包：Feature 容器与

@@ -14,11 +14,32 @@ public enum AnswerComparator {
         headword: String?,
         reading: String?
     ) -> RecallComparison? {
+        compareAgainstAcceptedSet(
+            input: input,
+            acceptedAnswers: [headword, reading].compactMap { $0 }
+        )
+    }
+
+    /// v0.7.0 S12（设计 §9.3）：`sentence_cloze` 的判分集是
+    /// `cloze_definitions.accepted_answers`——targetSurface 本体 +
+    /// 用户确认的活用读音/额外答案。绝不拿整句快照当判分基准
+    /// （headword 即原句，比对它永远 different）。
+    public static func compare(
+        input: String,
+        acceptedAnswers: [String]
+    ) -> RecallComparison? {
+        compareAgainstAcceptedSet(input: input, acceptedAnswers: acceptedAnswers)
+    }
+
+    private static func compareAgainstAcceptedSet(
+        input: String,
+        acceptedAnswers: [String]
+    ) -> RecallComparison? {
         let normalizedInput = normalize(input)
         guard !normalizedInput.isEmpty else { return nil }
         let accepted = Set(
-            [headword, reading]
-                .compactMap { $0.map(normalize) }
+            acceptedAnswers
+                .map(normalize)
                 .filter { !$0.isEmpty }
         )
         guard !accepted.isEmpty else { return nil }

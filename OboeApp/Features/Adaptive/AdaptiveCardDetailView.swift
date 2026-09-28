@@ -172,25 +172,38 @@ struct AdaptiveCardDetailView: View {
                 .accessibilityIdentifier("adaptive-detail-edit")
 
                 if let aiRepairService {
-                    NavigationLink {
-                        AIRepairView(
-                            service: aiRepairService,
-                            cardID: item.cardID,
-                            deckService: deckService,
-                            noteEditor: repairNoteEditor,
-                            onChanged: {
-                                await model.load()
-                                await onChanged()
-                            },
-                            onCommitted: {
-                                await model.load()
-                                await onChanged()
-                            }
-                        )
-                    } label: {
+                    if item.templateKind == .sentenceCloze {
+                        // S14：AI 修卡不支持句子卡（service 层
+                        // `unsupportedNoteKind` 同样拒绝）——入口保留但
+                        // 置灰并说明手动编辑路径。
                         Label("AI 修卡", systemImage: "sparkles")
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("adaptive-detail-ai-repair-disabled")
+                            .accessibilityHint("句子卡暂不支持 AI 修卡")
+                        Text("句子卡暂不支持 AI 修卡，可在笔记详情中手动编辑。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        NavigationLink {
+                            AIRepairView(
+                                service: aiRepairService,
+                                cardID: item.cardID,
+                                deckService: deckService,
+                                noteEditor: repairNoteEditor,
+                                onChanged: {
+                                    await model.load()
+                                    await onChanged()
+                                },
+                                onCommitted: {
+                                    await model.load()
+                                    await onChanged()
+                                }
+                            )
+                        } label: {
+                            Label("AI 修卡", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("adaptive-detail-ai-repair")
                     }
-                    .accessibilityIdentifier("adaptive-detail-ai-repair")
                 }
 
                 Text("编辑会更新同一知识点的其他学习方向。")

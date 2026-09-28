@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import OboeDomain
 
-public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
+public struct GRDBContentCardRepository: ContentCardRepository, ContentBatchWriter, Sendable {
     private let pool: DatabasePool
 
     public init(database: OboeDatabase) {
@@ -13,127 +13,12 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         _ commit: VocabularyContentCommit,
         capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult {
-        let timestamp = try DatabaseValueCodec.encode(commit.createdAt)
-        return try await pool.write { db in
-            if let capture {
-                let digest = CaptureCommitDigest.vocabulary(commit)
-                if let receipt = try GRDBInboxRepository.fetchCommitReceiptRow(
-                    operationID: capture.operationID,
-                    in: db
-                ) {
-                    return try Self.replayCommitReceipt(
-                        receipt,
-                        expectedPayloadHash: digest
-                    )
-                }
-            }
-            if let sourceRef = commit.sourceRef,
-               let existing = try Row.fetchOne(
-                   db,
-                   sql: """
-                       SELECT notes.id, COUNT(cards.id) AS card_count
-                       FROM notes
-                       LEFT JOIN cards ON cards.note_id = notes.id
-                       WHERE notes.origin = 'builtin_jlpt' AND notes.source_ref = ?
-                       GROUP BY notes.id
-                       """,
-                   arguments: [sourceRef]
-               ) {
-                return ContentCommitResult(
-                    noteID: try DatabaseValueCodec.decodeUUID(existing["id"]),
-                    cardCount: existing["card_count"],
-                    wasCreated: false
-                )
-            }
-            for memberDeckID in commit.deckIDs {
-                try Self.requireDeck(memberDeckID, in: db)
-            }
-            let profileID = try GRDBSchedulerProfileStore.ensureConfiguredProfile(
-                candidateID: commit.schedulerProfileID,
-                createdAtMilliseconds: timestamp,
+        try await pool.write { db in
+            try GRDBContentWriteExecutor.execute(
+                .vocabulary(commit),
+                capture: capture,
                 in: db
             )
-            try db.execute(
-                sql: """
-                    INSERT INTO notes(
-                        id, deck_id, kind, headword, reading, meaning_zh,
-                        part_of_speech, jlpt, notes, origin, source_ref, source_text,
-                        pitch_accent, content_version, created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, 'vocabulary', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-                    """,
-                arguments: [
-                    DatabaseValueCodec.encode(commit.noteID),
-                    DatabaseValueCodec.encode(commit.deckID),
-                    commit.content.headword,
-                    commit.content.reading,
-                    commit.content.meaningZH,
-                    commit.content.partOfSpeech,
-                    commit.content.jlpt?.rawValue,
-                    commit.content.notes,
-                    commit.origin.rawValue,
-                    commit.sourceRef,
-                    commit.sourceText,
-                    commit.content.pitchAccent?.rawValue,
-                    timestamp,
-                    timestamp
-                ]
-            )
-            try Self.insertMemberships(
-                noteID: commit.noteID,
-                deckIDs: commit.deckIDs,
-                atMilliseconds: timestamp,
-                in: db
-            )
-            if let example = commit.content.example {
-                try Self.insertExample(
-                    id: commit.exampleID,
-                    noteID: commit.noteID,
-                    japanese: example.japanese,
-                    translationZH: example.translationZH,
-                    in: db
-                )
-            }
-            try Self.insertTags(commit.tags, noteID: commit.noteID, in: db)
-            for card in commit.cards {
-                guard card.templateKind.knowledgePointKind == .vocabulary else {
-                    throw ContentCardError.invalidTemplateForKnowledgePoint
-                }
-                try Self.insertOrEnableCard(
-                    card,
-                    noteID: commit.noteID,
-                    profileID: profileID,
-                    dueAtMilliseconds: timestamp,
-                    in: db
-                )
-            }
-            // 来源记录与 Note/Card 同事务（设计 §6.2）：事务回滚则
-            // 来源、Note、capture receipt 一起消失，无半截来源。
-            // builtin_jlpt 去重提前返回的路径不补来源——既有 Note 的
-            // 来源追加走 SourceContextRepository，不经 commit。
-            if let sourceContext = commit.sourceContext {
-                guard sourceContext.noteID == commit.noteID else {
-                    throw ContentCardError.sourceContextNoteMismatch
-                }
-                try GRDBSourceContextRepository.insert(sourceContext, in: db)
-            }
-            if let draftID = commit.draftID {
-                try Self.deleteDraft(id: draftID, kind: "vocabulary", in: db)
-            }
-            let result = ContentCommitResult(
-                noteID: commit.noteID,
-                cardCount: commit.cards.count
-            )
-            if let capture {
-                try Self.recordCaptureCommit(
-                    capture,
-                    payloadHash: CaptureCommitDigest.vocabulary(commit),
-                    resultJSON: Self.encodeCommitResult(result),
-                    inboxItemID: capture.inboxItemID,
-                    at: commit.createdAt,
-                    in: db
-                )
-            }
-            return result
         }
     }
 
@@ -141,98 +26,44 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         _ commit: GrammarContentCommit,
         capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult {
-        let timestamp = try DatabaseValueCodec.encode(commit.createdAt)
-        return try await pool.write { db in
-            if let capture {
-                let digest = CaptureCommitDigest.grammar(commit)
-                if let receipt = try GRDBInboxRepository.fetchCommitReceiptRow(
-                    operationID: capture.operationID,
-                    in: db
-                ) {
-                    return try Self.replayCommitReceipt(
-                        receipt,
-                        expectedPayloadHash: digest
-                    )
-                }
-            }
-            for memberDeckID in commit.deckIDs {
-                try Self.requireDeck(memberDeckID, in: db)
-            }
-            guard commit.card.templateKind == .grammarFormToExplanation else {
-                throw ContentCardError.invalidTemplateForKnowledgePoint
-            }
-            let profileID = try GRDBSchedulerProfileStore.ensureConfiguredProfile(
-                candidateID: commit.schedulerProfileID,
-                createdAtMilliseconds: timestamp,
+        try await pool.write { db in
+            try GRDBContentWriteExecutor.execute(
+                .grammar(commit),
+                capture: capture,
                 in: db
             )
-            try db.execute(
-                sql: """
-                    INSERT INTO notes(
-                        id, deck_id, kind, headword, meaning_zh, usage,
-                        connection, jlpt, notes, origin, source_text,
-                        content_version, created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, 'grammar', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-                    """,
-                arguments: [
-                    DatabaseValueCodec.encode(commit.noteID),
-                    DatabaseValueCodec.encode(commit.deckID),
-                    commit.content.grammarForm,
-                    commit.content.meaningZH,
-                    commit.content.usage,
-                    commit.content.connection,
-                    commit.content.jlpt?.rawValue,
-                    commit.content.notes,
-                    commit.origin.rawValue,
-                    commit.sourceText,
-                    timestamp,
-                    timestamp
-                ]
-            )
-            try Self.insertMemberships(
-                noteID: commit.noteID,
-                deckIDs: commit.deckIDs,
-                atMilliseconds: timestamp,
+        }
+    }
+
+    /// v0.7.0 S12：sentence Note + `sentence_cloze` Card +
+    /// `cloze_definitions`（+可选来源）在一次 `pool.write` 内原子提交。
+    public func commitSentence(
+        _ commit: SentenceContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult {
+        try await pool.write { db in
+            try GRDBContentWriteExecutor.execute(
+                .sentence(commit),
+                capture: capture,
                 in: db
             )
-            if let example = commit.content.example {
-                try Self.insertExample(
-                    id: commit.exampleID,
-                    noteID: commit.noteID,
-                    japanese: example.japanese,
-                    translationZH: example.translationZH,
+        }
+    }
+
+    /// S03 批量写入：整批一次 `pool.write`——任一命令失败整批回滚，
+    /// 调用方（导入/挖词）不得把批失败记成部分成功。
+    /// 结果数组与输入等长同序。
+    public func apply(
+        _ operations: [ContentWriteOperation]
+    ) async throws -> [ContentCommitResult] {
+        try await pool.write { db in
+            try operations.map {
+                try GRDBContentWriteExecutor.execute(
+                    $0.command,
+                    capture: $0.capture,
                     in: db
                 )
             }
-            try Self.insertTags(commit.tags, noteID: commit.noteID, in: db)
-            try Self.insertOrEnableCard(
-                commit.card,
-                noteID: commit.noteID,
-                profileID: profileID,
-                dueAtMilliseconds: timestamp,
-                in: db
-            )
-            if let sourceContext = commit.sourceContext {
-                guard sourceContext.noteID == commit.noteID else {
-                    throw ContentCardError.sourceContextNoteMismatch
-                }
-                try GRDBSourceContextRepository.insert(sourceContext, in: db)
-            }
-            if let draftID = commit.draftID {
-                try Self.deleteDraft(id: draftID, kind: "grammar", in: db)
-            }
-            let result = ContentCommitResult(noteID: commit.noteID, cardCount: 1)
-            if let capture {
-                try Self.recordCaptureCommit(
-                    capture,
-                    payloadHash: CaptureCommitDigest.grammar(commit),
-                    resultJSON: Self.encodeCommitResult(result),
-                    inboxItemID: capture.inboxItemID,
-                    at: commit.createdAt,
-                    in: db
-                )
-            }
-            return result
         }
     }
 
@@ -256,6 +87,11 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
             }
             guard persistedKind == replacement.kind.rawValue else {
                 throw ContentCardError.invalidTemplateForKnowledgePoint
+            }
+            // v0.7.0 S12：sentence Note 的卡片集合恒为恰好一张
+            // sentence_cloze——方向替换对它一律拒绝，不在这里改写/停用。
+            guard replacement.kind != .sentence else {
+                throw ContentCardError.sentenceCardsNotDirectionManaged
             }
             let allowedTemplates = Set(CardTemplateKind.applicable(to: replacement.kind))
             guard replacement.enabledCards.allSatisfy({ allowedTemplates.contains($0.templateKind) }) else {
@@ -370,7 +206,23 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
     /// SET NULLs so `card_key` history stays orphaned (a rebuilt direction
     /// gets a fresh Card.id and must not reattach it), `daily_tasks` rows
     /// cascade, and the Note survives even with zero cards left.
+    ///
+    /// v0.7.0 S12 守卫：`sentence_cloze` 卡不是可单独删除的方向卡——
+    /// 裸删会让 sentence Note 失去唯一卡片与 `cloze_definitions`（即便
+    /// 定义随 FK 级联消失，Note 也成了无卡孤儿）。删除 Cloze 必须走
+    /// `deleteKnowledgePoint` 整 Note 删除；此处一律拒绝。拆卡流程
+    /// （GRDBAIRepairCommitRepository 的事务内调用）复用本守卫。
     static func deleteCard(cardID: UUID, in db: Database) throws {
+        guard let templateValue: String = try String.fetchOne(
+            db,
+            sql: "SELECT template_kind FROM cards WHERE id = ?",
+            arguments: [DatabaseValueCodec.encode(cardID)]
+        ) else {
+            throw ContentCardError.cardNotFound
+        }
+        guard templateValue != CardTemplateKind.sentenceCloze.rawValue else {
+            throw ContentCardError.clozeDeletionRequiresNoteDelete
+        }
         try db.execute(
             sql: "DELETE FROM cards WHERE id = ?",
             arguments: [DatabaseValueCodec.encode(cardID)]
@@ -522,7 +374,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         )
     }
 
-    private static func requireDeck(_ deckID: UUID, in db: Database) throws {
+    static func requireDeck(_ deckID: UUID, in db: Database) throws {
         guard try Bool.fetchOne(
             db,
             sql: "SELECT EXISTS(SELECT 1 FROM decks WHERE id = ?)",
@@ -532,7 +384,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         }
     }
 
-    private static func insertExample(
+    static func insertExample(
         id: UUID,
         noteID: UUID,
         japanese: String,
@@ -553,7 +405,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         )
     }
 
-    private static func insertTags(
+    static func insertTags(
         _ tags: [KnowledgeTag],
         noteID: UUID,
         in db: Database
@@ -581,7 +433,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         }
     }
 
-    private static func insertOrEnableCard(
+    static func insertOrEnableCard(
         _ card: NewCardSeed,
         noteID: UUID,
         profileID: UUID,
@@ -608,7 +460,7 @@ public struct GRDBContentCardRepository: ContentCardRepository, Sendable {
         )
     }
 
-    private static func deleteDraft(id: UUID, kind: String, in db: Database) throws {
+    static func deleteDraft(id: UUID, kind: String, in db: Database) throws {
         try db.execute(
             sql: "DELETE FROM drafts WHERE id = ? AND draft_kind = ?",
             arguments: [DatabaseValueCodec.encode(id), kind]

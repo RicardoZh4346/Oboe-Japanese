@@ -1,0 +1,18 @@
+WEBVTT - テスト字幕
+
+NOTE このブロックは無視される
+複数行でも
+
+REGION
+id:fred
+
+STYLE
+::cue { color: lime }
+
+cue-1
+00:00:01.000 --> 00:00:03.500 align:center line:90%
+<v 朗読者>吾輩は猫である。</v> 名前は&lt;まだ&gt;無い&amp;。
+
+00:05.000 --> 00:06.250
+<v.second>第二 cue</v> <b>太字</b>
+

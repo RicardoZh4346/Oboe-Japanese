@@ -11,6 +11,8 @@ struct KnowledgeSearchView: View {
     let contentCardService: ContentCardService
     let historyService: StudyHistoryService
     let speechService: any SpeechService
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    let clozeRepository: (any ClozeRepository)?
 
     @State private var query = ""
     @State private var model: KnowledgeSearchModel
@@ -23,7 +25,8 @@ struct KnowledgeSearchView: View {
         grammarService: GrammarService,
         contentCardService: ContentCardService,
         historyService: StudyHistoryService,
-        speechService: any SpeechService
+        speechService: any SpeechService,
+        clozeRepository: (any ClozeRepository)? = nil
     ) {
         self.deckService = deckService
         self.knowledgeService = knowledgeService
@@ -32,6 +35,7 @@ struct KnowledgeSearchView: View {
         self.contentCardService = contentCardService
         self.historyService = historyService
         self.speechService = speechService
+        self.clozeRepository = clozeRepository
         _model = State(
             initialValue: KnowledgeSearchModel(service: searchService, deckID: nil)
         )
@@ -124,6 +128,16 @@ struct KnowledgeSearchView: View {
                 contentCardService: contentCardService,
                 historyService: historyService,
                 speechService: speechService
+            ) {
+                await model.refresh(query)
+            }
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: item.id,
+                headword: item.headword,
+                meaningZH: item.meaningZH,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgeService
             ) {
                 await model.refresh(query)
             }

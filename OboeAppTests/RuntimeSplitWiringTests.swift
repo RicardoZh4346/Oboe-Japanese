@@ -91,6 +91,7 @@ struct RuntimeSplitWiringTests {
             baseURL: env.baseURL,
             bootstrap: AppBootstrapEnvironment(),
             adaptiveInvalidationCenter: AdaptiveInvalidationCenter(),
+            generationSource: DatabaseGenerationSource(),
             jlptLibraryURLOverride: URL(fileURLWithPath: "/nonexistent/jlpt.sqlite")
         )
         #expect(built == nil)
@@ -112,7 +113,8 @@ struct RuntimeSplitWiringTests {
             generation: 1,
             baseURL: env.baseURL,
             bootstrap: AppBootstrapEnvironment(),
-            adaptiveInvalidationCenter: AdaptiveInvalidationCenter()
+            adaptiveInvalidationCenter: AdaptiveInvalidationCenter(),
+            generationSource: DatabaseGenerationSource()
         )
         #expect(built != nil)
         #expect(built?.container.generation == 1)

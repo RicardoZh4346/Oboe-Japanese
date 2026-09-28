@@ -264,8 +264,11 @@ private struct P22bPerformanceFixture {
             )
         )
         let preparation = try await preparer.prepare(fileURL: export.url)
+        // 恢复管线对缺方向卡的 vocabulary Note 重跑 v12 补齐
+        // （fillVocabularyDirections）：本夹具每词只种 2 方向，恢复后
+        // 每词补出 vocabulary_listening → 20k→30k 是预期语义而非漂移。
         guard preparation.backup.noteCount == 10_000,
-              preparation.backup.cardCount == 20_000,
+              preparation.backup.cardCount == 30_000,
               preparation.backup.reviewCount == 100_000 else {
             throw P22bPerformanceFixtureError.invalidPortableDataset
         }

@@ -51,6 +51,35 @@ enum CaptureCommitDigest {
         return digest(fields)
     }
 
+    /// v0.7.0 S12：sentence commit 的 digest——覆盖全部 Cloze 逻辑内容
+    ///（快照/hash/range/surface/lemma/reading/answers/hint/meaning），
+    /// 同 operationID 的不同挖空参数会被判为 payload 冲突。
+    static func sentence(_ commit: SentenceContentCommit) -> String {
+        var fields: [String?] = [
+            "sentence",
+            commit.deckID.uuidString,
+            commit.cloze.sentenceSnapshot,
+            commit.cloze.sentenceSHA256,
+            String(commit.cloze.range.version),
+            String(commit.cloze.range.utf16Start),
+            String(commit.cloze.range.utf16Length),
+            commit.cloze.targetSurface,
+            commit.cloze.targetLemma,
+            commit.cloze.targetReading,
+            commit.cloze.hint,
+            commit.meaningZH,
+            commit.notes,
+            commit.card.templateKind.rawValue,
+            commit.origin.rawValue,
+            commit.sourceText
+        ]
+        // answers 顺序本身是内容（用户确认序），不做排序归并。
+        fields.append(contentsOf: commit.cloze.acceptedAnswers)
+        fields.append(contentsOf: commit.tags.map(\.normalizedName).sorted())
+        fields.append(contentsOf: sourceContextFields(commit.sourceContext))
+        return digest(fields)
+    }
+
     static func batch(_ batch: SentenceAnalysisCardBatchCommit) -> String {
         var fields: [String?] = ["sentence_analysis_batch", batch.deckID.uuidString]
         fields.append(
@@ -82,6 +111,23 @@ enum CaptureCommitDigest {
             context.dictionaryVersion,
             context.dictionarySenseKey,
             context.selectedGlossLanguage,
+            // v19 定位列：Reader 来源的同一确认重试产生同一组字段；
+            // 改了定位的重试判冲突（与其他内容字段同规则）。
+            context.readerDocumentID?.uuidString,
+            context.readerChapterID?.uuidString,
+            context.readerLocation.map {
+                [
+                    String($0.version),
+                    String($0.chapterOrdinal),
+                    String($0.blockOrdinal),
+                    String($0.utf16Offset),
+                    $0.blockTextHash,
+                    $0.prefix,
+                    $0.suffix,
+                    $0.cueStartMilliseconds.map(String.init) ?? ""
+                ].joined(separator: ":")
+            },
+            context.selectedSurface,
             context.isPrimary ? "1" : "0"
         ]
     }

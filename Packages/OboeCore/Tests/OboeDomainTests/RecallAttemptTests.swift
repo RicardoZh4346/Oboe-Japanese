@@ -183,6 +183,47 @@ final class RecallAttemptTests: XCTestCase {
         assertClean(nextCard)
     }
 
+    /// S14（设计 §9.3）：cloze 挖空作答天然是输入型——RecallMode 恒为
+    /// typedJapanese，词汇侧两个 typed 开关无论怎么配都不影响它。
+    func testSentenceClozeAlwaysResolvesTypedRecall() {
+        XCTAssertEqual(
+            RecallMode.resolve(template: .sentenceCloze, preferences: .defaults),
+            .typedJapanese
+        )
+        for chinese in [false, true] {
+            for listening in [false, true] {
+                let preferences = AdaptivePreferences(
+                    typedAnswerChineseToJapanese: chinese,
+                    autoPlayListeningAudio: false,
+                    typedAnswerListening: listening,
+                    leechRemindersEnabled: false
+                )
+                XCTAssertEqual(
+                    RecallMode.resolve(template: .sentenceCloze, preferences: preferences),
+                    .typedJapanese
+                )
+            }
+        }
+    }
+
+    /// S14：typed 语义对 cloze 同样成立——空白输入不能确认，输入后
+    /// confirm 携带 acceptedAnswers 比对结果进 answer 面。
+    func testSentenceClozeAttemptRequiresNonBlankInput() {
+        var state = RecallAttempt(
+            cardID: UUID(), contentVersion: 1,
+            template: .sentenceCloze, preferences: .defaults
+        )
+        XCTAssertEqual(state.mode, .typedJapanese)
+        XCTAssertFalse(state.canConfirm)
+        XCTAssertFalse(state.confirmInput(comparison: .matched))
+        XCTAssertTrue(state.updateInput("　見た　"))
+        XCTAssertTrue(state.canConfirm)
+        XCTAssertTrue(state.confirmInput(comparison: .matched))
+        XCTAssertEqual(state.phase, .answer)
+        XCTAssertEqual(state.rawInput, "　見た　")
+        XCTAssertEqual(state.comparison, .matched)
+    }
+
     private func assertClean(_ state: RecallAttempt, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(state.phase, .question, file: file, line: line)
         XCTAssertEqual(state.rawInput, "", file: file, line: line)

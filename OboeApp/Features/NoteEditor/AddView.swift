@@ -981,6 +981,8 @@ private extension CardTemplateKind {
             "中文 → 日语"
         case .vocabularyListening:
             "听力 → 中文"
+        case .sentenceCloze:
+            "句子挖空"
         case .grammarFormToExplanation:
             "语法形式 → 解释"
         }

@@ -5,6 +5,9 @@ public enum CardTemplateKind: String, CaseIterable, Codable, Hashable, Sendable 
     case vocabularyChineseToJapanese = "vocabulary_zh_ja"
     case vocabularyListening = "vocabulary_listening"
     case grammarFormToExplanation = "grammar_form_explanation"
+    /// v0.7.0 S12（设计 §9.1）：句子挖空卡。一张 sentence Note 恰好一张；
+    /// 不是可开关的"方向卡"——`deleteCard`/方向集合替换对它一律拒绝。
+    case sentenceCloze = "sentence_cloze"
 
     /// 同一 Note 的方向卡在队列里的固定顺序：日→中、中→日、听力
     /// （从易到难——新词先认形再回忆最后辨音）。非方向模板返回 0。
@@ -13,7 +16,7 @@ public enum CardTemplateKind: String, CaseIterable, Codable, Hashable, Sendable 
         case .vocabularyJapaneseToChinese: 0
         case .vocabularyChineseToJapanese: 1
         case .vocabularyListening: 2
-        case .grammarFormToExplanation: 0
+        case .grammarFormToExplanation, .sentenceCloze: 0
         }
     }
 }

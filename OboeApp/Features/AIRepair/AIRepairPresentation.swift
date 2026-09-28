@@ -180,6 +180,16 @@ struct AIRepairEditableFields: Equatable {
                 notes: optionalValue(notes, .notes),
                 examples: examples
             )
+        case .sentence:
+            // S12：句子卡不支持 AI 修卡——service 层在 prepareDraft 之前已拒，
+            // 此分支仅为穷举兜底；万一误入下游，mergedContent 仍会以
+            // fieldNotApplicableForKind("kind=sentence") 拒绝，不写任何字段。
+            patch = AIRepairFieldPatch(
+                headword: trimmed(headword),
+                meaningZH: trimmed(meaningZH),
+                notes: optionalValue(notes, .notes),
+                examples: examples
+            )
         }
         return AIRepairSuggestion(
             type: .rewriteMeaning,

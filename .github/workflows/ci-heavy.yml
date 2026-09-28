@@ -1,0 +1,253 @@
+name: CI Heavy
+
+# S27 重型道：不进入 push/PR 快道，避免日常 CI 无限延长。
+#
+#   suite 输入（workflow_dispatch）：
+#     all        全部重型套件（默认）
+#     core       门控性能套件 + S28 §17 预算断言 + 大导入/EPUB/备份故障注入（Core 层）
+#     ui-iphone  OboeUITests 全量（126 例，含 Reader/rotation/AX5 内嵌用例）· iPhone
+#     ui-ipad    OboeUITests 全量（iPad 模拟器完整矩阵）· iPad
+#     ax5        只跑 ax5 最大辅助功能字号用例（Scripts/select_ax5_ui_tests.py 动态选取）· iPhone
+#
+#   schedule：每天 UTC 02:30 只跑 core（Core 层规模/故障注入回归）；
+#   UI 全套矩阵保持手动触发，避免夜间占用两个全套 UI 的 macOS 时长。
+#   如需关闭夜间回归，注释掉 schedule 段即可。
+#
+# 签名约定与 ci.yml 一致：test 不禁用签名（ad-hoc 带 entitlement）；
+# 设备名不绑定具体型号，用 simctl 兜底取第一台可用 iPhone/iPad。
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 要运行的重型套件
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - core
+          - ui-iphone
+          - ui-ipad
+          - ax5
+  schedule:
+    - cron: "30 2 * * *"
+
+concurrency:
+  group: ci-heavy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MIN_HEAVY_CORE_TESTS: "250"
+  MIN_UI_TESTS: "120"
+
+jobs:
+  core-heavy:
+    name: Core heavy (gated perf + large import/EPUB + backup fault)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    # 门控性能套件只在本道实跑；快道里保持 skipped。
+    env:
+      OBOE_RUN_ADAPTIVE_PERFORMANCE: "1"
+      OBOE_RUN_P22B_PERFORMANCE: "1"
+      OBOE_RUN_T15_PERFORMANCE: "1"
+      OBOE_RUN_T24_PERFORMANCE: "1"
+      OBOE_RUN_S28_PERFORMANCE: "1"
+    if: >-
+      ${{ github.event_name == 'schedule' ||
+          inputs.suite == 'all' ||
+          inputs.suite == 'core' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Run heavy/scale/fault-injection core suites
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/OboeCore \
+            --scratch-path "$RUNNER_TEMP/oboe-core-spm" \
+            --filter 'AdaptivePerformanceTests|P22bPerformanceTests|T15IntegrationAndPerformanceTests|T24InboxPerformanceTests|S28IntegrationPerformanceTests|StreamingBackupScaleTests|StreamingZip|S24RestoreBarrierTests|PortableBackup|EPUBParserTests|DelimitedTextParserTests|ImportExecutorTests|ImportStagingTests|ImportEncodingTests|StatisticsRepositoryTests' \
+            2>&1 | tee core-heavy.log
+          count="$(grep -oE 'Executed [0-9]+ tests?' core-heavy.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "heavy core executed: ${count:-0} (floor $MIN_HEAVY_CORE_TESTS)"
+          [ "${count:-0}" -ge "$MIN_HEAVY_CORE_TESTS" ] || {
+            echo "::error::heavy core executed ${count:-0}, below floor $MIN_HEAVY_CORE_TESTS"
+            exit 1
+          }
+
+      - name: Assert performance gates actually ran (not skipped)
+        run: |
+          for suite in AdaptivePerformanceTests P22bPerformanceTests \
+                       T15IntegrationAndPerformanceTests T24InboxPerformanceTests \
+                       S28IntegrationPerformanceTests; do
+            summary="$(grep -A1 "Test Suite '$suite'" core-heavy.log | grep -oE 'Executed [0-9]+ tests?, with [0-9]+ tests? skipped|Executed [0-9]+ tests?, with [0-9]+' | tail -1)"
+            echo "$suite → ${summary:-missing}"
+            [ -n "$summary" ] || {
+              echo "::error::$suite produced no summary — suite did not run"
+              exit 1
+            }
+            echo "$summary" | grep -q skipped && {
+              echo "::error::$suite was skipped — OBOE_RUN_* env gate did not propagate"
+              exit 1
+            }
+          done
+
+      - name: Upload heavy core log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-heavy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: core-heavy.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ui-iphone-full:
+    name: Full OboeUITests (iPhone)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    if: ${{ inputs.suite == 'all' || inputs.suite == 'ui-iphone' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Run full OboeUITests on iPhone Simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/ui-iphone" \
+            -resultBundlePath "$RUNNER_TEMP/UITests-iPhone.xcresult" \
+            -only-testing:OboeUITests \
+            test 2>&1 | tee uitests-iphone.log
+          count="$(grep -oE 'Executed [0-9]+ tests?' uitests-iphone.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "OboeUITests executed: ${count:-0} (floor $MIN_UI_TESTS)"
+          [ "${count:-0}" -ge "$MIN_UI_TESTS" ] || {
+            echo "::error::OboeUITests executed ${count:-0}, below floor $MIN_UI_TESTS"
+            exit 1
+          }
+
+      - name: Upload iPhone UI artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-iphone-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            uitests-iphone.log
+            ${{ runner.temp }}/UITests-iPhone.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ui-ipad-full:
+    name: Full OboeUITests (iPad matrix)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    if: ${{ inputs.suite == 'all' || inputs.suite == 'ui-ipad' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Run full OboeUITests on iPad Simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPad")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/ui-ipad" \
+            -resultBundlePath "$RUNNER_TEMP/UITests-iPad.xcresult" \
+            -only-testing:OboeUITests \
+            test 2>&1 | tee uitests-ipad.log
+          count="$(grep -oE 'Executed [0-9]+ tests?' uitests-ipad.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "OboeUITests on iPad executed: ${count:-0} (floor $MIN_UI_TESTS)"
+          [ "${count:-0}" -ge "$MIN_UI_TESTS" ] || {
+            echo "::error::OboeUITests on iPad executed ${count:-0}, below floor $MIN_UI_TESTS"
+            exit 1
+          }
+
+      - name: Upload iPad UI artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-ipad-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            uitests-ipad.log
+            ${{ runner.temp }}/UITests-iPad.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ui-ax5:
+    name: AX5 accessibility-size slice (iPhone)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    if: ${{ inputs.suite == 'all' || inputs.suite == 'ax5' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Select ax5-marked UI tests
+        id: ax5
+        run: |
+          python3 Scripts/select_ax5_ui_tests.py | tee ax5-tests.txt
+          count="$(wc -l < ax5-tests.txt | tr -d ' ')"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "selected $count ax5 test(s):"
+          cat ax5-tests.txt
+          [ "$count" -ge 5 ] || {
+            echo "::error::ax5 selection returned $count test(s) — selector may be broken"
+            exit 1
+          }
+
+      - name: Run ax5 slice on iPhone Simulator
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          args=()
+          while IFS= read -r identifier; do
+            args+=("-only-testing:$identifier")
+          done < ax5-tests.txt
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/ui-ax5" \
+            -resultBundlePath "$RUNNER_TEMP/UITests-AX5.xcresult" \
+            "${args[@]}" \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
+            test 2>&1 | tee ax5.log
+          executed="$(grep -oE 'Executed [0-9]+ tests?' ax5.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "ax5 executed: ${executed:-0} (selected ${{ steps.ax5.outputs.count }})"
+          [ "${executed:-0}" -ge "${{ steps.ax5.outputs.count }}" ] || {
+            echo "::error::ax5 executed ${executed:-0} < selected ${{ steps.ax5.outputs.count }}"
+            exit 1
+          }
+
+      - name: Upload ax5 artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-ax5-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ax5-tests.txt
+            ax5.log
+            ${{ runner.temp }}/UITests-AX5.xcresult
+          if-no-files-found: ignore
+          retention-days: 14

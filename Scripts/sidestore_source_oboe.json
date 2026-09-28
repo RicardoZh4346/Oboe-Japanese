@@ -1,0 +1,31 @@
+{
+  "source": {
+    "name": "Oboe Sideloading Source",
+    "identifier": "org.example.Oboe.sidestore-source",
+    "subtitle": "Oboe — 日语阅读与词汇挖掘（侧载测试源）",
+    "description": "Oboe iOS 日语学习应用的 SideStore/AltStore 兼容源。IPA 为未签名 arm64 构建，由用户 Apple Account 本地重签安装。",
+    "iconURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/AppIcon.png",
+    "website": "https://github.com/RicardoZh4346/Oboe-Japanese",
+    "tintColor": "#2563EB"
+  },
+  "app": {
+    "name": "Oboe",
+    "bundleIdentifier": "org.example.Oboe",
+    "developerName": "RicardoZh4346",
+    "subtitle": "离线日语 Reader、点词查词与挖词卡",
+    "localizedDescription": "Oboe — iOS 日语学习应用：离线文本 Reader（TXT/EPUB/字幕）、形态学点词查词、JLPT 词库、挖词与 Cloze 复习。经 SideStore 侧载分发；未签名 IPA 由用户 Apple Account 本地重签，不含任何网络账户。",
+    "iconURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/AppIcon.png",
+    "tintColor": "#2563EB",
+    "category": "other",
+    "screenshots": [
+      {
+        "imageURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/screenshot-reader.png",
+        "alt": "Oboe Reader 点词查词界面"
+      },
+      {
+        "imageURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/screenshot-review.png",
+        "alt": "Oboe 复习与挖词卡界面"
+      }
+    ]
+  }
+}

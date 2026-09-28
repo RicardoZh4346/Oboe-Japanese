@@ -446,7 +446,8 @@ public actor OboeDatabaseLifecycle {
                 let noteID: String = note["id"]
                 let headword: String = note["headword"]
                 let reading: String? = note["reading"]
-                let meaning: String = note["meaning_zh"]
+                // v19 起 meaning_zh 可空（sentence Note 可无整句翻译）。
+                let meaning: String = (note["meaning_zh"] as String?) ?? ""
                 try db.execute(
                     sql: """
                         INSERT INTO search_documents(

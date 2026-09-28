@@ -1,5 +1,24 @@
 name: CI
 
+# S27 分层快道：push/PR/手动触发只跑「快」套件，重型套件在 ci-heavy.yml。
+#   core-tests      OboeCore 全量（Domain + Infrastructure）+ 词典/JLPT 校验
+#   scripts-tests   Scripts/ Python 工具链单测（Linux，不占 macOS 分钟数）
+#   app-unit-tests  OboeAppTests（iPhone Simulator）
+#   iphone-smoke    iPad/iPhone navigation smoke（各一）
+#
+# 防「构建过但没跑」假绿：每个测试 job 提取真实执行数并断言下限。
+# 计数基线（2026-09-27 本机实测，Xcode 27 / Swift 6.4）：
+#   OboeInfrastructureTests = 1027（含 11 skipped：5 个 OBOE_RUN_* 门控套件
+#     （含 S28 §17 预算套件 5 例）+ OBOE_AI_QUALITY_* 与一处条件断言跳过）
+#   OboeDomainTests         = 451
+#   OboeAppTests            = 82（XCTest 66 + Swift Testing 16，两种计数格式求和）
+#   OboeUITests             = 126（全部在 heavy 道）
+#
+# 签名/entitlement 约定（README §模拟器构建）：CODE_SIGNING_ALLOWED=NO 只用于
+# 纯编译检查；test 动作一律不禁用签名——模拟器 ad-hoc 签名会把 app group /
+# keychain entitlements 带进产物，行为与真机构建一致。设备选择在每步用
+# `xcrun simctl list devices available` 兜底，不绑定具体型号。
+
 on:
   push:
     branches:
@@ -7,13 +26,27 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 同一 ref 的新提交取消在跑的旧 run（快道只关心最新提交是否绿）。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
+# runner.temp 不能用于顶层 env（该 context 仅在 job 内存在）；run 块内直接
+# 用 runner 预设的 $RUNNER_TEMP 环境变量定位 scratch/derivedData/xcresult。
+env:
+  MIN_INFRA_TESTS: "1000"
+  MIN_DOMAIN_TESTS: "440"
+  MIN_APP_TESTS: "80"
+  MIN_SCRIPTS_TESTS: "60"
+
 jobs:
-  build-and-test:
+  core-tests:
+    name: OboeCore + dictionary validation
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -25,46 +58,93 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Test OboeCore
-        run: swift test --package-path Packages/OboeCore
+      - name: Test OboeDomainTests (parser-facing domain suite)
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/OboeCore \
+            --scratch-path "$RUNNER_TEMP/oboe-core-spm" \
+            --filter 'OboeDomainTests\.' 2>&1 | tee core-domain.log
+          count="$(grep -oE 'Executed [0-9]+ tests?' core-domain.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "OboeDomainTests executed: ${count:-0} (floor $MIN_DOMAIN_TESTS)"
+          [ "${count:-0}" -ge "$MIN_DOMAIN_TESTS" ] || {
+            echo "::error::OboeDomainTests executed ${count:-0}, below floor $MIN_DOMAIN_TESTS"
+            exit 1
+          }
 
-      - name: Validate bundled JLPT library
+      - name: Test OboeInfrastructureTests (infra/parser/import/morphology/backup)
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/OboeCore \
+            --scratch-path "$RUNNER_TEMP/oboe-core-spm" \
+            --filter 'OboeInfrastructureTests\.' 2>&1 | tee core-infra.log
+          # 同一 run 里非目标 bundle 会打印 "Executed 0 tests" 块，取最大值。
+          count="$(grep -oE 'Executed [0-9]+ tests?' core-infra.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          echo "OboeInfrastructureTests executed: ${count:-0} (floor $MIN_INFRA_TESTS)"
+          [ "${count:-0}" -ge "$MIN_INFRA_TESTS" ] || {
+            echo "::error::OboeInfrastructureTests executed ${count:-0}, below floor $MIN_INFRA_TESTS"
+            exit 1
+          }
+          # 门控性能套件在本道应保持 skipped（实跑属于 ci-heavy）。
+          skipped="$(grep -oE 'Executed [0-9]+ tests?, with [0-9]+ tests? skipped' core-infra.log | sort -u | tail -1 || true)"
+          echo "note: default-run skips (env-gated perf/AI suites): ${skipped:-none}"
+
+      - name: Validate bundled dictionaries (JLPT + JMdict)
         run: |
           python3 Scripts/build_jlpt_library.py \
             --validate-existing \
             --output OboeApp/Resources/JLPT/jlpt-library.sqlite \
             --notice OboeApp/Resources/JLPT/NOTICE.txt
+          python3 Scripts/build_dictionary.py \
+            --validate-existing \
+            --qa-cases Scripts/DictionaryData/dictionary_qa_cases.json \
+            --output OboeApp/Resources/Dictionary/japanese-dictionary.sqlite \
+            --notice OboeApp/Resources/Dictionary/NOTICE.txt
 
-      - name: Build for iOS Simulator
-        run: |
-          xcodebuild \
-            -project Oboe.xcodeproj \
-            -scheme Oboe \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
+      - name: Upload core test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: core-*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
-      - name: Run navigation smoke test
+  scripts-tests:
+    name: Scripts python tooling tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Scripts/tests unittest suite
         run: |
-          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
-          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
           set -o pipefail
-          xcodebuild \
-            -project Oboe.xcodeproj \
-            -scheme Oboe \
-            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
-            -retry-tests-on-failure \
-            -test-iterations 2 \
-            test 2>&1 | tee smoke.log
-          grep -q "testPrimaryNavigationSmoke.*passed" smoke.log || {
-            echo "::error::navigation smoke test case was not executed or did not pass"
+          python3 -m unittest discover -s Scripts/tests -v 2>&1 | tee scripts-tests.log
+          count="$(grep -oE 'Ran [0-9]+ tests' scripts-tests.log | tail -1 | grep -oE '[0-9]+')"
+          echo "Scripts tests executed: ${count:-0} (floor $MIN_SCRIPTS_TESTS)"
+          [ "${count:-0}" -ge "$MIN_SCRIPTS_TESTS" ] || {
+            echo "::error::Scripts tests executed ${count:-0}, below floor $MIN_SCRIPTS_TESTS"
             exit 1
           }
 
+      - name: Upload scripts test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scripts-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scripts-tests.log
+          if-no-files-found: ignore
+          retention-days: 14
+
   app-unit-tests:
+    name: OboeAppTests (iPhone Simulator)
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
@@ -80,15 +160,74 @@ jobs:
             -project Oboe.xcodeproj \
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/app" \
+            -resultBundlePath "$RUNNER_TEMP/OboeAppTests.xcresult" \
             -only-testing:OboeAppTests \
-            CODE_SIGNING_ALLOWED=NO \
             test 2>&1 | tee app-tests.log
-          grep -q "OboeAppTests.xctest.*passed" app-tests.log || {
-            echo "::error::OboeAppTests bundle was not executed or did not pass"
+          # XCTest 与 Swift Testing 的计数格式不同，分开取最大值再求和。
+          xctest="$(grep -oE 'Executed [0-9]+ tests?' app-tests.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          st="$(grep -oE 'Test run with [0-9]+ tests?' app-tests.log | grep -oE '[0-9]+' | sort -n | tail -1)"
+          total=$(( ${xctest:-0} + ${st:-0} ))
+          echo "OboeAppTests executed: xctest=${xctest:-0} + swift-testing=${st:-0} = $total (floor $MIN_APP_TESTS)"
+          [ "$total" -ge "$MIN_APP_TESTS" ] || {
+            echo "::error::OboeAppTests executed $total, below floor $MIN_APP_TESTS"
             exit 1
           }
 
+      - name: Upload app test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-unit-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app-tests.log
+            ${{ runner.temp }}/OboeAppTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  iphone-smoke:
+    name: iPhone navigation smoke
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Build and run iPhone navigation smoke
+        run: |
+          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
+          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/iphone-smoke" \
+            -resultBundlePath "$RUNNER_TEMP/iPhoneSmoke.xcresult" \
+            -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
+            test 2>&1 | tee iphone-smoke.log
+          grep -q "testPrimaryNavigationSmoke.*passed" iphone-smoke.log || {
+            echo "::error::navigation smoke test case was not executed or did not pass"
+            exit 1
+          }
+
+      - name: Upload iPhone smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iphone-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            iphone-smoke.log
+            ${{ runner.temp }}/iPhoneSmoke.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
   ipad-smoke:
+    name: iPad navigation smoke
     runs-on: macos-latest
     timeout-minutes: 20
 
@@ -106,40 +245,24 @@ jobs:
             -project Oboe.xcodeproj \
             -scheme Oboe \
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -derivedDataPath "$RUNNER_TEMP/oboe-derived/ipad-smoke" \
+            -resultBundlePath "$RUNNER_TEMP/iPadSmoke.xcresult" \
             -only-testing:OboeUITests/OboeNavigationUITests/testPrimaryNavigationSmoke \
             -retry-tests-on-failure \
             -test-iterations 2 \
-            CODE_SIGNING_ALLOWED=NO \
             test 2>&1 | tee ipad-smoke.log
           grep -q "testPrimaryNavigationSmoke.*passed" ipad-smoke.log || {
             echo "::error::iPad navigation smoke test case was not executed or did not pass"
             exit 1
           }
 
-  ui-tests-full:
-    # 126 项重型 UI 回归仅手动触发；main 推送和 PR 保持稳定快速。
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    timeout-minutes: 45
-
-    steps:
-      - uses: actions/checkout@v4
+      - name: Upload iPad smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          lfs: true
-
-      - name: Run full OboeUITests on iPhone Simulator
-        run: |
-          DEVICE_ID="$(xcrun simctl list devices available --json | jq -er '[.devices[][] | select(.isAvailable == true and (.name | startswith("iPhone")))] | first | .udid')"
-          echo "Using simulator: $(xcrun simctl list devices | grep "$DEVICE_ID" || true)"
-          set -o pipefail
-          xcodebuild \
-            -project Oboe.xcodeproj \
-            -scheme Oboe \
-            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-            -only-testing:OboeUITests \
-            CODE_SIGNING_ALLOWED=NO \
-            test 2>&1 | tee uitests.log
-          grep -q "OboeUITests.xctest.*passed" uitests.log || {
-            echo "::error::OboeUITests bundle was not executed or did not pass"
-            exit 1
-          }
+          name: ipad-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ipad-smoke.log
+            ${{ runner.temp }}/iPadSmoke.xcresult
+          if-no-files-found: ignore
+          retention-days: 14

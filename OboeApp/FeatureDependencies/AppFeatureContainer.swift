@@ -13,4 +13,6 @@ struct AppFeatureContainer {
     let shared: SharedFeatureDependencies
     /// S06 词典：始终构造（服务无状态）；资源缺失由查询期错误收敛。
     let dictionary: DictionaryFeatureDependencies
+    /// S10 Reader：仓储/文件仓/导入/覆盖率/形态分析装配。
+    let reader: ReaderFeatureDependencies
 }

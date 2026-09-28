@@ -134,6 +134,10 @@ public struct ReviewSpeechPolicy: Equatable, Sendable {
             true
         case .vocabularyChineseToJapanese, .vocabularyListening:
             false
+        case .sentenceCloze:
+            // v0.7.0 S12（设计 §9.3）：正面只展示挖空句——primaryText 是
+            // 含答案的原句，问题面朗读等于泄题，恒为 false。
+            false
         }
     }
 
@@ -143,6 +147,9 @@ public struct ReviewSpeechPolicy: Equatable, Sendable {
             true
         case .vocabularyJapaneseToChinese, .grammarFormToExplanation:
             false
+        case .sentenceCloze:
+            // 背面允许整句 TTS（含答案的原句只在背面出现）。
+            true
         }
     }
 

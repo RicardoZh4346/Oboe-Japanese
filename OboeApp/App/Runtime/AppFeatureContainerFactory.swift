@@ -44,6 +44,9 @@ enum AppFeatureContainerFactory {
         baseURL: URL,
         bootstrap: AppBootstrapEnvironment,
         adaptiveInvalidationCenter: AdaptiveInvalidationCenter,
+        /// S11 挖词世代屏障的活读源：恢复时控制器先 bump 世代再换库，
+        /// 绑定旧代的服务在写事务内复核到这里的新值而拒写。
+        generationSource: DatabaseGenerationSource,
         jlptLibraryURLOverride: URL? = nil,
         dictionaryURLOverride: URL? = nil
     ) -> BuiltServices? {
@@ -168,13 +171,15 @@ enum AppFeatureContainerFactory {
         )
         // S06：词典服务无条件构造——资源缺失/损坏在查询期抛错，
         // UI 收敛为「词典不可用」，不阻断其他 feature。
+        let dictionaryURL = resolveDictionaryURL(override: dictionaryURLOverride)
+            ?? baseURL.appendingPathComponent(
+                "japanese-dictionary-missing.sqlite"
+            )
+        let dictionaryRepository = GRDBDictionaryRepository(
+            databaseURL: dictionaryURL
+        )
         let dictionaryQueryService = DictionaryQueryService(
-            repository: GRDBDictionaryRepository(
-                databaseURL: resolveDictionaryURL(override: dictionaryURLOverride)
-                    ?? baseURL.appendingPathComponent(
-                        "japanese-dictionary-missing.sqlite"
-                    )
-            ),
+            repository: dictionaryRepository,
             deinflector: JapaneseDeinflector()
         )
         let portableBackupRestorationPreparer = PortableBackupRestorationPreparer(
@@ -202,11 +207,71 @@ enum AppFeatureContainerFactory {
             dictionaryQueryService: dictionaryQueryService,
             sourceContextRepository: GRDBSourceContextRepository(
                 database: database
-            )
+            ),
+            clozeRepository: GRDBClozeRepository(database: database)
         )
 
         let customStudyRepository = GRDBCustomStudyRepository(
             database: database
+        )
+
+        // S10 Reader 装配：文件仓根目录 = App Support baseURL（内部再分
+        // `ReaderFiles/` 与 `ReaderStaging/`）；形态/知识/覆盖率三件套
+        // 依赖词典 sqlite——资源缺失时 resolver 懒打开在查询期抛错，
+        // Reader 正文阅读不受影响（VM 里着色失败降级纯文本）。
+        let readerRepository = GRDBReaderRepository(database: database)
+        let readerFileStore = LocalReaderFileStore(baseDirectoryURL: baseURL)
+        let readerIngest = ReaderIngestService(
+            fileStore: readerFileStore,
+            repository: readerRepository
+        )
+        // S24：恢复屏障闸门（每世代一只，单向关闭）+ 缺原文重链
+        // 服务（stage→hash 二段确认→稳定 ID 重建→单事务提交）。
+        let workGate = RestorationWorkGate()
+        let readerRelinkService = ReaderRelinkService(
+            fileStore: readerFileStore,
+            repository: readerRepository,
+            store: readerRepository
+        )
+        let morphologyService = NLJapaneseMorphologyService(
+            resolver: GRDBMorphologyCandidateResolver(
+                databaseURL: dictionaryURL
+            )
+        )
+        let readerKnowledge = GRDBVocabularyKnowledgeRepository(
+            pool: database.pool
+        )
+        let readerCoverage = GRDBReaderCoverageService(
+            pool: database.pool,
+            morphology: morphologyService,
+            knowledge: readerKnowledge
+        )
+        // S11 挖词闭环：lookup 服务 + 原子写 store + 知识服务。
+        // `currentGeneration` 读控制器持有的活世代盒——本批服务绑定的
+        // 快照 `generation` 只做请求 expectedGeneration，写事务内与活
+        // 值复核，恢复窗口内旧代请求被拒。
+        let readerMiningService = ReaderMiningService(
+            dictionary: dictionaryRepository,
+            deinflector: JapaneseDeinflector(),
+            knowledge: readerKnowledge,
+            linking: readerKnowledge,
+            store: GRDBReaderMiningStore(pool: database.pool),
+            currentGeneration: { generationSource.value }
+        )
+        let readerKnowledgeService = VocabularyKnowledgeService(
+            repository: readerKnowledge,
+            linking: readerKnowledge
+        )
+        let miningDependencies = ReaderMiningDependencies(
+            service: readerMiningService,
+            knowledge: readerKnowledgeService,
+            decks: deckManagementService,
+            primaryDeckIDProvider: {
+                try? await studySessionService.loadLearningSettings(
+                    defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
+                ).primaryDeckID
+            },
+            generation: generation
         )
 
         let container = AppFeatureContainer(
@@ -220,7 +285,15 @@ enum AppFeatureContainerFactory {
                 adaptivePreferencesService: adaptivePreferencesService,
                 aiRepairService: aiRepairService,
                 inboxService: inbox,
-                processingServices: processingServices
+                processingServices: processingServices,
+                statisticsSource: AppStatisticsInsightSource(
+                    statistics: GRDBStatisticsRepository(database: database),
+                    insights: GRDBRetentionInsightRepository(database: database)
+                ),
+                readerAnalyticsSource: AppReaderAnalyticsSource(
+                    repository: GRDBReaderAnalyticsRepository(
+                        database: database)
+                )
             ),
             decks: DeckFeatureDependencies(
                 deckService: deckManagementService,
@@ -254,7 +327,10 @@ enum AppFeatureContainerFactory {
                 speechService: bootstrap.speechService,
                 exporter: portableBackupExporter,
                 restorationPreparer: portableBackupRestorationPreparer,
-                dictionaryQueryService: dictionaryQueryService
+                dictionaryQueryService: dictionaryQueryService,
+                database: database,
+                deckService: deckManagementService,
+                workGate: workGate
             ),
             shared: SharedFeatureDependencies(
                 speechService: bootstrap.speechService,
@@ -263,11 +339,23 @@ enum AppFeatureContainerFactory {
                 sourceContextRepository: GRDBSourceContextRepository(
                     database: database
                 ),
+                clozeRepository: GRDBClozeRepository(database: database),
                 customStudyRepository: customStudyRepository,
                 customStudyService: CustomStudyService()
             ),
             dictionary: DictionaryFeatureDependencies(
                 queryService: dictionaryQueryService
+            ),
+            reader: ReaderFeatureDependencies(
+                repository: readerRepository,
+                fileStore: readerFileStore,
+                ingest: readerIngest,
+                coverage: readerCoverage,
+                morphology: morphologyService,
+                tokenStates: readerKnowledge,
+                mining: miningDependencies,
+                relink: readerRelinkService,
+                workGate: workGate
             )
         )
         let runtime = RuntimeServices(
@@ -280,7 +368,8 @@ enum AppFeatureContainerFactory {
             inboxService: inbox,
             inboxImageStore: imageStore,
             jlptEnrichmentService: jlptEnrichmentService,
-            customStudyRepository: customStudyRepository
+            customStudyRepository: customStudyRepository,
+            workGate: workGate
         )
         return BuiltServices(container: container, runtime: runtime)
     }

@@ -11,16 +11,45 @@ import UniformTypeIdentifiers
 /// 单独解出来就是一个可读的 v6 备份；附件元数据只在 package manifest 里
 /// 登记一次，不进记录流——避免同一信息两处存储漂移。
 public enum PortableBackupPackageFormat {
-    public static let formatVersion = 7
+    /// v7 包版本（Oboe v0.6 默认；仍可读入/恢复——见
+    /// `isSupportedVersionPair` 与 `supportedFormatVersions`）。
+    public static let formatVersionV7 = 7
+    /// v8 包版本：v8 包恒携带 v8 记录流（合法版本对见
+    /// `isSupportedVersionPair`）。
+    public static let formatVersionV8 = 8
+    /// 当前默认包版本：v0.7.0（S30 签核）起新导出即 v8。
+    public static let formatVersion = formatVersionV8
+    /// 读取端可接受的最高包版本——超出即 `futurePackageVersion`。
+    public static let maximumSupportedFormatVersion = formatVersionV8
+    /// 全部已知包版本；之外的版本号报 `unsupportedPackageVersion`。
+    public static let supportedFormatVersions: Set<Int> = [
+        formatVersionV7, formatVersionV8
+    ]
     public static let container = "zip"
     public static let manifestEntryName = "manifest.json"
     public static let recordsEntryName = "records.ndjson"
     public static let checksumsEntryName = "checksums.json"
     public static let attachmentsDirectoryName = "attachments"
 
-    /// 内嵌 `records.ndjson` 遵循的记录流版本。v7 的增量只在容器层
-    /// （附件 sidecar + checksums），记录契约与 v6 完全一致。
+    /// 内嵌 `records.ndjson` 遵循的记录流版本（当前默认 v8）。v7 的
+    /// 增量只在容器层（附件 sidecar + checksums），其记录契约与 v6
+    /// 完全一致——故历史上存在 (7,6) 合法版本对。
     public static let recordsFormatVersion = PortableBackupFormat.currentVersion
+
+    /// 包/记录版本的合法组合（设计 §14.1）：v7 容器可携带 v6（历史
+    /// 导出）或 v7 记录流；v8 包恒携带 v8 记录。其余组合一律拒绝——
+    /// 不猜测、不静默降级。
+    public static func isSupportedVersionPair(
+        packageVersion: Int,
+        recordVersion: Int
+    ) -> Bool {
+        switch (packageVersion, recordVersion) {
+        case (7, 6), (7, 7), (8, 8):
+            return true
+        default:
+            return false
+        }
+    }
 
     /// v7 的排除范围：imageAttachments 移出——附件字节随包分发。
     /// 其余排除项与 v3+ 相同（凭据、AI 连接配置、共享中转、派生索引）。
@@ -30,6 +59,11 @@ public enum PortableBackupPackageFormat {
         "sharedTransferFiles",
         "derivedSearchIndex"
     ]
+
+    /// v8 包的排除范围：v7 集合 + Reader 正文/派生数据、词典数据、
+    /// 导入 staging（见 `PortableBackupFormatV8.additionalExcludedScopes`）。
+    public static let excludedScopesV8: [String] =
+        excludedScopes + PortableBackupFormatV8.additionalExcludedScopes
 
     /// 接受的图片 MIME → 允许的包内扩展名（小写）。
     /// 与 `InboxImageValidator` 接受的源格式一致；当前导出端只写 JPEG 预览，

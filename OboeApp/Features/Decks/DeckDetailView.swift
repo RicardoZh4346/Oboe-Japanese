@@ -23,6 +23,8 @@ struct DeckDetailView: View {
     let sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService
     /// S07：牌组内复习的背面来源区——nil 不渲染。
     let sourceContextRepository: (any SourceContextRepository)?
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    let clozeRepository: (any ClozeRepository)?
     let inboxImageStore: InboxImageStore?
     /// S07：添加流编辑器内「查词典」入口——nil 时按钮不渲染。
     let dictionaryQueryService: DictionaryQueryService?
@@ -74,6 +76,7 @@ struct DeckDetailView: View {
         sentenceAnalysisService: SentenceAnalysisService,
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         sourceContextRepository: (any SourceContextRepository)? = nil,
+        clozeRepository: (any ClozeRepository)? = nil,
         inboxImageStore: InboxImageStore? = nil,
         dictionaryQueryService: DictionaryQueryService? = nil,
         customStudyRepository: (any CustomStudyRepository)? = nil,
@@ -101,6 +104,7 @@ struct DeckDetailView: View {
         self.sentenceAnalysisService = sentenceAnalysisService
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         self.sourceContextRepository = sourceContextRepository
+        self.clozeRepository = clozeRepository
         self.inboxImageStore = inboxImageStore
         self.dictionaryQueryService = dictionaryQueryService
         self.customStudyRepository = customStudyRepository
@@ -448,6 +452,18 @@ struct DeckDetailView: View {
                 await model.refreshDecks()
                 await searchModel.refresh(searchText)
             }
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: item.id,
+                headword: item.headword,
+                meaningZH: item.meaningZH,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgePointService
+            ) {
+                await contentModel.load()
+                await model.refreshDecks()
+                await searchModel.refresh(searchText)
+            }
         }
     }
 
@@ -665,6 +681,13 @@ struct DeckDetailView: View {
                 contentCardService: contentCardService,
                 historyService: historyService,
                 speechService: speechService,
+                onUpdated: onUpdated
+            )
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: noteID,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgePointService,
                 onUpdated: onUpdated
             )
         }

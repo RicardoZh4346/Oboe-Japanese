@@ -159,6 +159,13 @@ struct InboxView: View {
                 }
             }
         }
+        // 图片收集 sheet 没有 onSaved 回调——关闭即重取，否则 iPad
+        // detail 列常驻时列表停留在保存前快照。
+        .onChange(of: isImageCapturePresented) { _, presented in
+            if !presented {
+                Task { await model.reload() }
+            }
+        }
         .alert(
             "删除这条内容？",
             isPresented: Binding(

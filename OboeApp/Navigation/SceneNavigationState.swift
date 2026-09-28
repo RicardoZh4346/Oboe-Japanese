@@ -77,7 +77,8 @@ final class SceneNavigationState {
     func selectTab(_ section: AppSection) {
         self.section = section
         switch section {
-        case .today:
+        case .today, .reader:
+            // reader 同样是两栏 split（sidebar+阅读区），与 today 同形态。
             splitVisibility = .doubleColumn
             // 两栏 split 没有 content 列——preferredCompactColumn 只能取
             // sidebar/detail，压扁时直接给 detail（功能页本身）。

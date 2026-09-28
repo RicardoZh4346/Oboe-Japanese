@@ -7,5 +7,6 @@ enum AppSection: Hashable {
     case today
     case decks
     case inbox
+    case reader
     case settings
 }

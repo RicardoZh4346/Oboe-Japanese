@@ -52,7 +52,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         let reveal = app.buttons["review-show-answer-button"]
         XCTAssertTrue(reveal.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["review-recall-input"].exists)
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.waitForKeyboardDismissed(timeout: 1))
         reveal.tap()
         XCTAssertTrue(app.buttons["review-rating-easy"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["你的答案"].exists)
@@ -71,18 +71,22 @@ final class OboeAdaptiveUITests: XCTestCase {
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
         app.dismissSettingsSheet()
-        app.tabBars.buttons["今日"].tap()
+        app.selectPrimarySection("今日")
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        // iPad 默认接硬件键盘、不出软键盘——仅 compact 断言软键盘弹出。
+        if !app.isRegularShell {
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        }
         let confirm = app.buttons["review-confirm-input-button"]
         XCTAssertFalse(confirm.isEnabled)
         XCTAssertFalse(app.buttons["review-show-answer-button"].exists)
         XCTAssertFalse(app.buttons["review-rating-easy"].exists)
         XCTAssertFalse(app.staticTexts["受ける"].exists)
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("ukeru")
-        app.scrollViews["review-content-scroll"].swipeUp()
+        app.swipeContainerUp(app.scrollViews["review-content-scroll"])
         XCTAssertEqual(input.value as? String, "ukeru")
         XCTAssertTrue(confirm.isHittable)
         XCUIDevice.shared.press(.home)
@@ -96,7 +100,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertEqual(answer.label, "ukeru")
         XCTAssertTrue(app.staticTexts["标准答案"].exists)
         XCTAssertTrue(app.staticTexts["review-progress-summary"].label.contains("已完成 0"))
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.waitForKeyboardDismissed(timeout: 1))
         let easy = app.buttons["review-rating-easy"]
         XCTAssertTrue(easy.isHittable)
         easy.tap()
@@ -113,9 +117,10 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 5))
         XCTAssertTrue((input.value as? String) == "请用日语回答" || (input.value as? String) == "")
         XCTAssertFalse(confirm.isEnabled)
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("answer")
         app.buttons["review-dismiss-keyboard-button"].tap()
-        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.waitForKeyboardDismissed(timeout: 1))
         XCTAssertTrue(confirm.isHittable)
         confirm.tap()
         XCTAssertTrue(answer.waitForExistence(timeout: 5))
@@ -137,7 +142,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
         app.dismissSettingsSheet()
-        app.tabBars.buttons["今日"].tap()
+        app.selectPrimarySection("今日")
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -150,6 +155,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertFalse(feedback.exists, "问题面不得出现对比结果")
 
         // matched：命中 reading，展示原文输入；评分仍需显式选择。
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("うける")
         confirm.tap()
         XCTAssertTrue(feedback.waitForExistence(timeout: 5))
@@ -165,6 +171,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertFalse(feedback.exists)
 
         // close：长度≥4 纯假名、编辑距离 1。
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("うけれる")
         confirm.tap()
         XCTAssertTrue(feedback.waitForExistence(timeout: 5))
@@ -175,6 +182,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(input.waitForExistence(timeout: 5))
 
         // different：只说明写法不同，自评仍由用户完成。
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("たべもの")
         confirm.tap()
         XCTAssertTrue(feedback.waitForExistence(timeout: 5))
@@ -202,14 +210,29 @@ final class OboeAdaptiveUITests: XCTestCase {
         start.tap()
         let input = app.textFields["review-recall-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
+        // ax5 下问题面整体增高，输入框初始在折叠线以下——存在但不可
+        // 点击，typeText 因无键盘焦点直接失败。先滚入视口（T16 同款
+        // reveal 模式），聚焦后再输入。
+        let contentScroll = app.scrollViews["review-content-scroll"]
+        XCTAssertTrue(contentScroll.waitForExistence(timeout: 5))
+        for _ in 0..<8 where !input.isHittable {
+            app.swipeContainerUp(contentScroll)
+        }
+        XCTAssertTrue(input.isHittable, "ax5 下输入框必须可滚动到达")
+        input.tap()
         input.typeText("わかりません")
-        app.buttons["review-confirm-input-button"].tap()
+        let confirm = app.buttons["review-confirm-input-button"]
+        for _ in 0..<8 where !confirm.isHittable {
+            app.swipeContainerUp(contentScroll)
+        }
+        XCTAssertTrue(confirm.isHittable, "ax5 下确认按钮必须可达")
+        confirm.tap()
         XCTAssertTrue(app.staticTexts["review-your-answer"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["review-comparison-feedback"].exists)
         // 长答案随卡片滚动容器可达；评分区由底部安全区域承载，始终可点。
         let scroll = app.scrollViews["review-content-scroll"]
         XCTAssertTrue(scroll.exists)
-        scroll.swipeUp()
+        app.swipeContainerUp(scroll)
         let easy = app.buttons["review-rating-easy"]
         XCTAssertTrue(easy.waitForExistence(timeout: 5))
         XCTAssertTrue(easy.isHittable, "大字号长答案下评分按钮必须可达")
@@ -245,7 +268,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         reveal(toggle, in: app)
         setSwitch(toggle, enabled: true, in: app)
         app.dismissSettingsSheet()
-        app.tabBars.buttons["今日"].tap()
+        app.selectPrimarySection("今日")
         app.buttons["today-start-button"].tap()
         let input = app.textFields["review-recall-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 5))
@@ -262,6 +285,7 @@ final class OboeAdaptiveUITests: XCTestCase {
             app.buttons["review-question-speech-button"].exists,
             "中文→日文问题面不得提供朗读答案的按钮"
         )
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("うける")
         app.buttons["review-confirm-input-button"].tap()
         XCTAssertTrue(
@@ -364,7 +388,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertEqual(toggle.value as? String, "1", "听力输入自 v0.5.5 起默认开启")
         setSwitch(toggle, enabled: true, in: app)
 
-        app.tabBars.buttons["今日"].tap()
+        app.selectPrimarySection("今日")
         app.buttons["today-start-button"].tap()
 
         let input = app.textFields["review-recall-input"]
@@ -375,6 +399,7 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         // T18: 确认需等播放完成（自动播放默认开启）。
         XCTAssertTrue(app.staticTexts["review-listening-status"].waitForExistence(timeout: 5))
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("きく")
         app.buttons["review-confirm-input-button"].tap()
         XCTAssertTrue(
@@ -667,6 +692,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         )
 
         // 用户自输非答案文本：树中出现的是输入值，不是卡片答案。
+        input.tap()  // iPad：先显式聚焦再输入（typeText 内部合成点击不一定拿到键盘焦点）
         input.typeText("あいう")
         assertListeningQuestionFaceFreeOfAnswerContent(app)
 
@@ -694,26 +720,35 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         enterScopedReview(deckNamed: "错开牌组", in: app)
 
+        // regular：复习以 sheet 呈现，背景列里的牌组列表仍含同名
+        // 词条文本——卡面断言必须限定在 sheet 内。
+        let review = reviewSheetScope(in: app)
+
         // A-ja2zh first (queue order), then the sibling A-zh2ja yields to B.
-        XCTAssertTrue(app.staticTexts["読む"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["習う"].exists, "干扰牌组的卡不得出现在 scoped 会话")
+        XCTAssertTrue(review.staticTexts["読む"].waitForExistence(timeout: 8))
+        XCTAssertFalse(review.staticTexts["習う"].exists, "干扰牌组的卡不得出现在 scoped 会话")
         showReviewAnswer(in: app)
         app.buttons["review-rating-easy"].tap()
 
-        XCTAssertTrue(app.staticTexts["書く"].waitForExistence(timeout: 8))
-        XCTAssertFalse(
-            app.staticTexts["读"].exists,
+        XCTAssertTrue(review.staticTexts["書く"].waitForExistence(timeout: 8))
+        // 切卡转场期间上一张卡的文本会在无障碍树里残留一瞬——
+        // 用 waitForNonExistence 代替瞬断 exists，语义不变。
+        // iPad：复习以 sheet 呈现，旧子树退场比 compact 慢——放宽窗口。
+        XCTAssertTrue(
+            review.staticTexts["读"].waitForNonExistence(
+                timeout: app.isRegularShell ? 8 : 3
+            ),
             "同 Note 的 zh→ja 应让位给不同 Note 的间隔卡"
         )
         showReviewAnswer(in: app)
         app.buttons["review-rating-easy"].tap()
 
         // 债务清偿：A-zh2ja 回到队列首位并展示。
-        XCTAssertTrue(app.staticTexts["读"].waitForExistence(timeout: 8))
+        XCTAssertTrue(review.staticTexts["读"].waitForExistence(timeout: 8))
         showReviewAnswer(in: app)
         app.buttons["review-rating-easy"].tap()
 
-        XCTAssertFalse(app.staticTexts["習う"].exists)
+        XCTAssertFalse(review.staticTexts["習う"].exists)
     }
 
     /// T21 (设计 §9.2): undo re-presents the undone card ahead of the
@@ -731,20 +766,29 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         enterScopedReview(deckNamed: "错开牌组", in: app)
 
-        XCTAssertTrue(app.staticTexts["読む"].waitForExistence(timeout: 8))
+        // regular：复习以 sheet 呈现，卡面断言限定在 sheet 内，
+        // 避免背景列牌组列表的同名文本干扰。
+        let review = reviewSheetScope(in: app)
+
+        XCTAssertTrue(review.staticTexts["読む"].waitForExistence(timeout: 8))
         showReviewAnswer(in: app)
         app.buttons["review-rating-easy"].tap()
 
-        XCTAssertTrue(app.staticTexts["書く"].waitForExistence(timeout: 8))
+        XCTAssertTrue(review.staticTexts["書く"].waitForExistence(timeout: 8))
         showReviewAnswer(in: app)
         app.buttons["review-rating-easy"].tap()
 
         // Now showing A-zh2ja. Undo reverts B's rating — B must re-present
         // (undo preference), not stay on A2 or advance elsewhere.
-        XCTAssertTrue(app.staticTexts["读"].waitForExistence(timeout: 8))
+        XCTAssertTrue(review.staticTexts["读"].waitForExistence(timeout: 8))
         app.buttons["review-undo-button"].tap()
-        XCTAssertTrue(app.staticTexts["書く"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.staticTexts["读"].exists, "撤销后应优先重现被撤销的 B 卡")
+        XCTAssertTrue(review.staticTexts["書く"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            review.staticTexts["读"].waitForNonExistence(
+                timeout: app.isRegularShell ? 8 : 3
+            ),
+            "撤销后应优先重现被撤销的 B 卡"
+        )
     }
 
     /// T21 (设计 §9.2): a listening card whose audio fails never produced a
@@ -768,9 +812,15 @@ final class OboeAdaptiveUITests: XCTestCase {
         // must not treat note A as "just presented". Polluted memory would
         // defer A-ja2zh and show 書く; correct rollback shows 読む.
         _ = app.staticTexts["review-listening-skip-notice"].waitForExistence(timeout: 5)
-        XCTAssertTrue(app.staticTexts["読む"].waitForExistence(timeout: 8))
-        XCTAssertFalse(
-            app.staticTexts["書く"].exists,
+        // regular：复习以 sheet 呈现，卡面断言限定在 sheet 内，
+        // 避免背景列牌组列表的同名文本干扰。
+        let review = reviewSheetScope(in: app)
+        XCTAssertTrue(review.staticTexts["読む"].waitForExistence(timeout: 8))
+        // iPad：跳卡转场中上一候选文本可能比 compact 残留更久——放宽窗口。
+        XCTAssertTrue(
+            review.staticTexts["書く"].waitForNonExistence(
+                timeout: app.isRegularShell ? 8 : 3
+            ),
             "失败的听力卡不应污染 lastPresentedNoteID——同 Note 卡不应被延期"
         )
     }
@@ -907,13 +957,10 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(lapseValue.exists, "详情页必须显示累计遗忘 6 次")
         // 近期复习记录 section 在 SE 首屏之下——先滚动使其挂载进无障碍树。
         let historySection = app.descendants(matching: .any)["adaptive-detail-history"]
-        let detailContent = app.collectionViews.firstMatch
-        for _ in 0..<8 where !historySection.exists {
-            detailContent.swipeUp()
-        }
+        app.revealElement(historySection, requireHittable: false, passes: 8)
         XCTAssertTrue(historySection.exists)
-        app.navigationBars.buttons.element(boundBy: 0).tap()
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
+        app.popBackIfNeeded()
 
         // 问题面不得出现任何易错暗示；答案面显示轻提示。
         let start = app.buttons["today-start-button"]
@@ -957,10 +1004,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         row.tap()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
         // 操作区在历史记录下方，先滚动使其进入无障碍树。
-        let detailList = app.collectionViews.firstMatch
-        for _ in 0..<6 where !app.staticTexts["编辑会更新同一知识点的其他学习方向。"].exists {
-            detailList.swipeUp()
-        }
+        app.revealElement(
+            app.staticTexts["编辑会更新同一知识点的其他学习方向。"],
+            requireHittable: false,
+            passes: 6
+        )
         XCTAssertTrue(app.staticTexts["编辑会更新同一知识点的其他学习方向。"].exists)
         XCTAssertTrue(
             app.staticTexts["编辑卡片"].exists,
@@ -975,13 +1023,15 @@ final class OboeAdaptiveUITests: XCTestCase {
             "暂停后按钮必须变为重新启用"
         )
         // “已暂停”徽标在页首——先滚回顶部让它进入无障碍树。
-        for _ in 0..<6 where !app.staticTexts["已暂停"].exists {
-            detailList.swipeDown()
-        }
+        app.revealElementBySwipingDown(
+            app.staticTexts["已暂停"],
+            requireHittable: false,
+            passes: 6
+        )
         XCTAssertTrue(app.staticTexts["已暂停"].exists)
 
         // 返回列表：leech 筛选空态，已暂停=1，预警不受影响。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(
             app.descendants(matching: .any)["adaptive-empty-leech"]
                 .waitForExistence(timeout: 5),
@@ -997,13 +1047,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         suspendedRow.tap()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
         let resumeToggle = app.buttons["重新启用这张卡"]
-        for _ in 0..<6 where !resumeToggle.isHittable {
-            detailList.swipeUp()
-        }
+        app.revealElement(resumeToggle, passes: 6)
         XCTAssertTrue(resumeToggle.waitForExistence(timeout: 3))
         resumeToggle.tap()
         XCTAssertTrue(app.staticTexts["暂停这张卡"].waitForExistence(timeout: 5))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
 
         // 列表仍停留在已暂停筛选：此时应为空态；切回易错筛选找回该卡。
         XCTAssertTrue(
@@ -1019,13 +1067,11 @@ final class OboeAdaptiveUITests: XCTestCase {
         leechRow.tap()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
         let editEntry = app.buttons["编辑卡片"]
-        for _ in 0..<6 where !editEntry.isHittable {
-            detailList.swipeUp()
-        }
+        app.revealElement(editEntry, passes: 6)
         XCTAssertTrue(editEntry.waitForExistence(timeout: 3))
         editEntry.tap()
         XCTAssertTrue(app.staticTexts["词形"].waitForExistence(timeout: 5), "编辑必须打开现有笔记编辑器")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
     }
 
@@ -1127,15 +1173,13 @@ final class OboeAdaptiveUITests: XCTestCase {
         // T09 起拆卡预览有「采用拆分」按钮，但原卡处置未选前必须禁用——
         // 采用始终需要显式确认，预览本身不写任何东西。
         let splitAdopt = app.buttons["ai-repair-split-adopt"]
-        for _ in 0..<6 where !splitAdopt.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(splitAdopt, requireHittable: false, passes: 6)
         XCTAssertTrue(splitAdopt.waitForExistence(timeout: 3))
         XCTAssertFalse(splitAdopt.isEnabled, "未选择原卡处置时采用必须禁用")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
 
         // 返回详情再进入：说明仍在（草稿持久化）。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
         openRepairFromDetail(in: app)
         XCTAssertTrue(app.navigationBars["AI 修卡"].waitForExistence(timeout: 5))
@@ -1172,11 +1216,8 @@ final class OboeAdaptiveUITests: XCTestCase {
             app.staticTexts["请先保存并启用 AI。"].waitForExistence(timeout: 5),
             "关闭 AI 时必须显示可理解错误"
         )
-        let manualEdit = app.staticTexts["手动编辑卡片"]
         let manualButton = app.buttons["手动编辑卡片"]
-        for _ in 0..<6 where !(manualEdit.exists || manualButton.exists) {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(manualButton, requireHittable: false, passes: 6)
         XCTAssertTrue(manualButton.waitForExistence(timeout: 3), "AI 不可用时手动编辑必须可用")
         manualButton.tap()
         XCTAssertTrue(
@@ -1238,7 +1279,7 @@ final class OboeAdaptiveUITests: XCTestCase {
             "取消后不得展示晚到的结果"
         )
         // 关闭回到学习流，卡片仍在。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(
             app.descendants(matching: .any)["review-answer"].waitForExistence(timeout: 5),
             "关闭修卡后必须能继续学习"
@@ -1274,9 +1315,7 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         // 取消确认：不产生任何写入，仍在预览页。
         let adopt = app.buttons["ai-repair-adopt"]
-        for _ in 0..<6 where !adopt.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(adopt, passes: 6)
         XCTAssertTrue(adopt.waitForExistence(timeout: 3), "预览页必须有采用按钮")
         adopt.tap()
         let cancelConfirm = app.alerts.firstMatch.buttons["取消"].firstMatch
@@ -1300,7 +1339,7 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         // 返回列表：已提交会话终结，prepareDraft 跳过 committed 草稿开启
         // 新会话——分析按钮回到可重试状态，已采用横幅不再显示。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(
             app.buttons["ai-repair-analyze"].waitForExistence(timeout: 5),
             "已提交后回到主页必须是可重新开始的新会话"
@@ -1308,9 +1347,7 @@ final class OboeAdaptiveUITests: XCTestCase {
 
         // 打开手动编辑：建议的说明字段已写入笔记。
         let manualButton = app.buttons["手动编辑卡片"]
-        for _ in 0..<8 where !manualButton.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(manualButton, passes: 8)
         XCTAssertTrue(manualButton.waitForExistence(timeout: 3))
         manualButton.tap()
         XCTAssertTrue(
@@ -1343,9 +1380,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["建议预览"].waitForExistence(timeout: 5))
 
         let editAdopt = app.buttons["ai-repair-edit-adopt"]
-        for _ in 0..<6 where !editAdopt.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(editAdopt, passes: 6)
         XCTAssertTrue(editAdopt.waitForExistence(timeout: 3), "预览页必须有编辑后采用入口")
         editAdopt.tap()
         XCTAssertTrue(app.navigationBars["编辑后采用"].waitForExistence(timeout: 5))
@@ -1369,11 +1404,9 @@ final class OboeAdaptiveUITests: XCTestCase {
             "编辑后采用必须成功提交"
         )
 
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         let manualButton = app.buttons["手动编辑卡片"]
-        for _ in 0..<8 where !manualButton.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(manualButton, passes: 8)
         XCTAssertTrue(manualButton.waitForExistence(timeout: 3))
         manualButton.tap()
         XCTAssertTrue(
@@ -1413,9 +1446,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         row.tap()
 
         let adopt = app.buttons["ai-repair-adopt"]
-        for _ in 0..<6 where !adopt.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(adopt, passes: 6)
         XCTAssertTrue(adopt.waitForExistence(timeout: 3))
         adopt.tap()
         let confirm = app.buttons["ai-repair-adopt-confirm"].firstMatch
@@ -1426,7 +1457,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         )
 
         // 关闭修卡页：学习卡回到问题面，旧输入/答案不再保留。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(
             app.descendants(matching: .any)["review-question"].waitForExistence(timeout: 8),
             "采用后学习卡必须重新呈现问题面"
@@ -1455,9 +1486,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         analyze.tap()
         // 建议列表在 AI 分析 section 下方，SE 首屏之外——先滚动挂载。
         let splitTitle = app.staticTexts["拆为两张卡"]
-        for _ in 0..<10 where !splitTitle.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(splitTitle, requireHittable: false, passes: 10)
         XCTAssertTrue(splitTitle.waitForExistence(timeout: 10))
         let row = app.cells.containing(.staticText, identifier: "拆为两张卡").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 3))
@@ -1481,16 +1510,20 @@ final class OboeAdaptiveUITests: XCTestCase {
         reveal(firstJaZh, in: app)
         XCTAssertTrue(firstJaZh.waitForExistence(timeout: 3))
         // 第二个候选在视口外时开关未挂载——滚动至两个都进入无障碍树。
-        for _ in 0..<8 where jaZhSwitches.count < 2 {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(
+            jaZhSwitches.element(boundBy: 1),
+            requireHittable: false,
+            passes: 8
+        )
         XCTAssertEqual(jaZhSwitches.count, 2, "两个候选各有「日语 → 中文」开关")
         let zhJaSwitches = app.switches.matching(
             NSPredicate(format: "label == '中文 → 日语'")
         )
-        for _ in 0..<8 where zhJaSwitches.count < 2 {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(
+            zhJaSwitches.element(boundBy: 1),
+            requireHittable: false,
+            passes: 8
+        )
         XCTAssertEqual(zhJaSwitches.count, 2, "两个候选各有「中文 → 日语」开关")
         // 方向默认沿用原笔记快照（受影响的两个方向全开）。
         XCTAssertEqual(firstJaZh.value as? String, "1", "方向必须默认沿用原笔记快照")
@@ -1515,9 +1548,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         reveal(pauseLabel, in: app)
         XCTAssertTrue(pauseLabel.waitForExistence(timeout: 3))
         let adopt = app.buttons["ai-repair-split-adopt"]
-        for _ in 0..<6 where !adopt.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(adopt, requireHittable: false, passes: 6)
         XCTAssertTrue(adopt.waitForExistence(timeout: 3))
         XCTAssertFalse(adopt.isEnabled, "未选择原卡处置时采用必须禁用")
         (pauseOption.exists ? pauseOption : pauseLabel).tap()
@@ -1554,18 +1585,20 @@ final class OboeAdaptiveUITests: XCTestCase {
         )
 
         // 详情页：原卡暂停徽标；列表：已暂停=1、兄弟预警方向不受影响。
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(
             app.buttons["ai-repair-analyze"].waitForExistence(timeout: 5),
             "已提交后回到主页必须是新会话"
         )
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(app.navigationBars["卡片详情"].waitForExistence(timeout: 5))
-        for _ in 0..<6 where !app.staticTexts["已暂停"].exists {
-            app.collectionViews.firstMatch.swipeDown()
-        }
+        app.revealElementBySwipingDown(
+            app.staticTexts["已暂停"],
+            requireHittable: false,
+            passes: 6
+        )
         XCTAssertTrue(app.staticTexts["已暂停"].exists, "原卡必须显示已暂停")
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.popBackIfNeeded()
         XCTAssertTrue(app.buttons["已暂停 1"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["预警 1"].exists, "兄弟方向不得被处置")
     }
@@ -1607,9 +1640,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(keepLabel.waitForExistence(timeout: 3))
         keepLabel.tap()
         let adopt = app.buttons["ai-repair-split-adopt"]
-        for _ in 0..<6 where !adopt.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(adopt, requireHittable: false, passes: 6)
         XCTAssertTrue(adopt.waitForExistence(timeout: 3))
         XCTAssertTrue(adopt.isEnabled)
         adopt.tap()
@@ -1674,10 +1705,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         assertTrendMetric("adaptive-trend-suspended", equals: "0", in: app)
         // 页脚在视口外——滚动到它进入无障碍树。
         let footer = app.descendants(matching: .any)["adaptive-trend-footer"]
-        let list = app.collectionViews.firstMatch
-        for _ in 0..<6 where !footer.exists {
-            list.swipeUp()
-        }
+        app.revealElement(footer, requireHittable: false, passes: 6)
         XCTAssertTrue(footer.waitForExistence(timeout: 3))
     }
 
@@ -1707,11 +1735,8 @@ final class OboeAdaptiveUITests: XCTestCase {
         let explanation = app.descendants(matching: .any)["adaptive-trend-explanation"]
         XCTAssertTrue(explanation.waitForExistence(timeout: 5))
         // 大字号下其余指标行可能被推出视口——滚动后仍须可达。
-        let list = app.collectionViews.firstMatch
         let newly = app.descendants(matching: .any)["adaptive-trend-newly-appeared"]
-        for _ in 0..<8 where !newly.exists {
-            list.swipeUp()
-        }
+        app.revealElement(newly, requireHittable: false, passes: 8)
         XCTAssertTrue(newly.waitForExistence(timeout: 3), "大字号下指标行必须可达")
     }
 
@@ -1724,10 +1749,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         line: UInt = #line
     ) {
         let metric = app.descendants(matching: .any)[identifier]
-        let list = app.collectionViews.firstMatch
-        for _ in 0..<10 where !metric.exists {
-            list.swipeUp()
-        }
+        app.revealElement(metric, requireHittable: false, passes: 10)
         XCTAssertTrue(
             metric.waitForExistence(timeout: 5),
             "缺少指标 \(identifier)",
@@ -1747,15 +1769,15 @@ final class OboeAdaptiveUITests: XCTestCase {
     @MainActor
     private func revealRepairSuggestion(_ title: String, in app: XCUIApplication) {
         let text = app.staticTexts[title]
-        for _ in 0..<10 where !text.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(text, requireHittable: false, passes: 10)
     }
 
     @MainActor
     private func openRepairFromAdaptiveDetail(in app: XCUIApplication) {
         let entry = app.descendants(matching: .any)["today-adaptive-entry"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 5))
+        // regular 今日页瓷贴可能在折叠线以下——先按列显露再点。
+        app.revealElement(entry, passes: 8)
+        XCTAssertTrue(entry.waitForExistence(timeout: 3))
         entry.tap()
         XCTAssertTrue(app.navigationBars["易错卡"].waitForExistence(timeout: 5))
         let row = app.cells.containing(.staticText, identifier: "受ける").firstMatch
@@ -1770,24 +1792,31 @@ final class OboeAdaptiveUITests: XCTestCase {
     @MainActor
     private func openRepairFromDetail(in app: XCUIApplication) {
         let repair = app.buttons["AI 修卡"]
-        for _ in 0..<8 where !repair.isHittable {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(repair, passes: 8)
         XCTAssertTrue(repair.waitForExistence(timeout: 3), "详情页必须有 AI 修卡入口")
         repair.tap()
     }
 
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
-        guard app.keyboards.firstMatch.exists else { return }
-        for name in ["done", "Done", "完成", "return", "换行"] {
-            let key = app.keyboards.buttons[name]
-            if key.exists {
-                key.tap()
-                return
-            }
+        app.dismissOnscreenKeyboard()
+    }
+
+    /// regular 下复习以 sheet 呈现，但 iOS 26 的 form sheet 不产生
+    /// `.sheet` 类型元素（app.sheets 为空、内容并入主窗口子树），
+    /// 背景列的牌组卡列表仍在无障碍树里——卡面断言若查全 app 会被
+    /// 背景同名词条污染。复习内容的可靠宿主是 `review-content-scroll`
+    /// 滚动容器（卡片面在其内）。返回该容器；尚未挂载时短暂等待，
+    /// compact 与兜底取窗口根。
+    @MainActor
+    private func reviewSheetScope(in app: XCUIApplication) -> XCUIElement {
+        if app.isRegularShell {
+            let scroll = app.scrollViews["review-content-scroll"].firstMatch
+            _ = scroll.waitForExistence(timeout: 5)
+            if scroll.exists { return scroll }
+            if app.sheets.firstMatch.exists { return app.sheets.firstMatch }
         }
-        app.keyboards.firstMatch.swipeDown()
+        return app.windows.firstMatch
     }
 
     @MainActor
@@ -1796,7 +1825,7 @@ final class OboeAdaptiveUITests: XCTestCase {
         XCTAssertTrue(button.waitForExistence(timeout: 5))
         let scroll = app.scrollViews["review-content-scroll"]
         for _ in 0..<8 where !button.isHittable {
-            scroll.swipeUp()
+            app.swipeContainerUp(scroll)
         }
         XCTAssertTrue(button.isHittable, "显示答案按钮不可达")
         button.tap()
@@ -1806,47 +1835,24 @@ final class OboeAdaptiveUITests: XCTestCase {
     /// 「学习此牌组」进入（设计 §4.7 预留的恢复位置）。
     @MainActor
     private func enterScopedReview(deckNamed name: String, in app: XCUIApplication) {
-        let decksTab = app.tabBars.buttons["牌组"]
-        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
-        decksTab.tap()
-
-        let deckRow = app.buttons
-            .matching(NSPredicate(format: "label CONTAINS %@", name))
-            .firstMatch
-        XCTAssertTrue(deckRow.waitForExistence(timeout: 8))
-        deckRow.tap()
+        app.openDeck(named: name)
 
         // 「学习此牌组」在牌组详情「今日」分区里——内容列表较长时在视口外。
         let studyButton = app.descendants(matching: .any)["deck-study-button"]
-        for _ in 0..<8 where !studyButton.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(studyButton, requireHittable: false, passes: 8)
         XCTAssertTrue(studyButton.waitForExistence(timeout: 5))
         studyButton.tap()
     }
 
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<12 {
-            if element.exists, element.isHittable {
-                return
-            }
-            form.swipeUp()
-        }
-        // 若向上滚到底仍未命中，元素可能在首屏上方——回滚复查。
-        for _ in 0..<12 {
-            if element.exists, element.isHittable {
-                return
-            }
-            form.swipeDown()
-        }
+        app.revealElement(element)
     }
 
     @MainActor
     private func setSwitch(_ element: XCUIElement, enabled: Bool, in app: XCUIApplication) {
         let expectedValue = enabled ? "1" : "0"
-        let list = app.collectionViews.firstMatch
+        let list = app.scrollContainerHosting(element)
         let tabBar = app.tabBars.firstMatch
         for _ in 0..<3 {
             // A row recycled off-viewport loses its identifier entirely —
@@ -1859,7 +1865,7 @@ final class OboeAdaptiveUITests: XCTestCase {
             for _ in 0..<4
             where element.isHittable
                     && tabBar.exists && element.frame.maxY > tabBar.frame.minY - 4 {
-                list.swipeUp()
+                app.swipeContainerUp(list)
             }
             guard element.isHittable else { continue }
             // SwiftUI exposes a Toggle as TWO elements: the row (identifier +

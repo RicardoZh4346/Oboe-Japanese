@@ -271,7 +271,9 @@ public struct GRDBKnowledgePointRepository: KnowledgePointRepository, Sendable {
             }
             let headword: String = row["headword"]
             let reading: String? = row["reading"]
-            let meaningZH: String = row["meaning_zh"]
+            // v19 起 meaning_zh 可空（sentence Note 可无整句翻译）；
+            // summary 投影仍为非空类型，NULL 归一为空串。
+            let meaningZH: String = (row["meaning_zh"] as String?) ?? ""
             let usage: String? = row["usage"]
             let favorite: Int = row["is_favorite"]
             let deckIDs = try Set(

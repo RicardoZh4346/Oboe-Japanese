@@ -445,7 +445,7 @@ public struct PortableBackupPackageReader: Sendable {
         }
         // 版本号先探：比当前新的格式在字段契约未知的情况下直接拒绝。
         if let version = object["formatVersion"] as? Int,
-           version > PortableBackupPackageFormat.formatVersion {
+           version > PortableBackupPackageFormat.maximumSupportedFormatVersion {
             throw PortableBackupPackageError.futurePackageVersion(version)
         }
         guard Set(object.keys) == manifestKeys else {
@@ -462,7 +462,8 @@ public struct PortableBackupPackageReader: Sendable {
         let version = try PortableBackupPackageFormat.packageInteger(
             object["formatVersion"], field: "formatVersion", context: "manifest"
         )
-        guard version == PortableBackupPackageFormat.formatVersion else {
+        guard PortableBackupPackageFormat.supportedFormatVersions
+            .contains(version) else {
             throw PortableBackupPackageError.unsupportedPackageVersion(version)
         }
         guard let appVersion = object["appVersion"] as? String, !appVersion.isEmpty,
@@ -475,12 +476,18 @@ public struct PortableBackupPackageReader: Sendable {
             field: "recordFormatVersion",
             context: "manifest"
         )
-        // 外层包格式恒为 7；内嵌记录协议 v6（旧版导出）与 v7 都可恢复。
-        let expectedRecordTypes: [String]
-        switch recordFormatVersion {
-        case 6: expectedRecordTypes = PortableBackupFormatV6.recordTypes
-        case 7: expectedRecordTypes = PortableBackupFormatV7.recordTypes
-        default:
+        // 版本对契约（§14.1）：(包,记录) 只允许 (7,6)/(7,7)/(8,8)——
+        // 未知组合明确拒绝，不猜测不降级。
+        guard PortableBackupPackageFormat.isSupportedVersionPair(
+            packageVersion: version,
+            recordVersion: recordFormatVersion
+        ) else {
+            throw PortableBackupPackageError.invalidManifest(
+                "包版本 \(version) 与记录版本 \(recordFormatVersion) 的组合不受支持。"
+            )
+        }
+        guard let expectedRecordTypes = PortableBackupFormatRegistry
+            .recordTypes(forVersion: recordFormatVersion) else {
             throw PortableBackupPackageError.invalidManifest(
                 "内嵌记录流版本 \(recordFormatVersion) 不受支持。"
             )

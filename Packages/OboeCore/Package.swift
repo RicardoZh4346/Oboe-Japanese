@@ -44,7 +44,10 @@ let package = Package(
             dependencies: [
                 "OboeInfrastructure",
                 "OboeSharedCapture",
-                .product(name: "GRDB", package: "GRDB.swift")
+                .product(name: "GRDB", package: "GRDB.swift"),
+                // S21：RetentionCurveMath vs 引擎 getRetrievability 的
+                // 逐位对照断言需要直接构造 FSRS 实例。
+                .product(name: "FSRS", package: "swift-fsrs")
             ],
             resources: [.copy("Fixtures")]
         )

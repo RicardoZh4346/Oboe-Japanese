@@ -21,6 +21,14 @@ public struct JapaneseDeinflector: Deinflecting {
     public static let defaultMaxDepth = 8
     public static let defaultMaxStates = 128
 
+    /// 规则表语义版本（v0.7.0 S07 新增；token cache 键 morphologyVersion
+    /// 的组成部分——任一规则增删改必须 bump）。
+    /// - 1.0.0：S03 初版规则表（隐含，S07 前未显式声明）。
+    /// - 1.1.0：S07 增补——样态そう系（v5/v1/adj）、なさい命令系、
+    ///   くなった系（い形容词连用形+なる）、すぎて/すぎた等い形容词侧
+    ///   直接规则、例外 よさそう→よい / なさそう→ない。纯增量。
+    public static let deinflectorRulesVersion = "1.1.0"
+
     private let maxDepth: Int
     private let maxStates: Int
     private let rules: [DeinflectionRule]
@@ -222,42 +230,10 @@ public struct JapaneseDeinflector: Deinflecting {
         let vsPOS: Set<JapanesePartOfSpeech> = [.vs, .vsI, .vsS]
 
         // MARK: 五段九行
-        // 活用形表：a=未然 i=連用 e=仮定/命令 o=推量 stem=音便干(て・た前)
-        struct Row {
-            let id: String      // "u" "k" ...
-            let lemma: String   // う く ...
-            let pos: Set<JapanesePartOfSpeech>
-            let a, i, e, o, stem, teEnd, taEnd, contract: String
-        }
-        let rows: [Row] = [
-            Row(id: "u", lemma: "う", pos: [.v5u, .v5uS],
-                a: "わ", i: "い", e: "え", o: "お",
-                stem: "っ", teEnd: "て", taEnd: "た", contract: "ちゃ"),
-            Row(id: "t", lemma: "つ", pos: [.v5t],
-                a: "た", i: "ち", e: "て", o: "と",
-                stem: "っ", teEnd: "て", taEnd: "た", contract: "ちゃ"),
-            Row(id: "r", lemma: "る", pos: [.v5r, .v5rI],
-                a: "ら", i: "り", e: "れ", o: "ろ",
-                stem: "っ", teEnd: "て", taEnd: "た", contract: "ちゃ"),
-            Row(id: "n", lemma: "ぬ", pos: [.v5n],
-                a: "な", i: "に", e: "ね", o: "の",
-                stem: "ん", teEnd: "で", taEnd: "だ", contract: "じゃ"),
-            Row(id: "b", lemma: "ぶ", pos: [.v5b],
-                a: "ば", i: "び", e: "べ", o: "ぼ",
-                stem: "ん", teEnd: "で", taEnd: "だ", contract: "じゃ"),
-            Row(id: "m", lemma: "む", pos: [.v5m],
-                a: "ま", i: "み", e: "め", o: "も",
-                stem: "ん", teEnd: "で", taEnd: "だ", contract: "じゃ"),
-            Row(id: "k", lemma: "く", pos: [.v5k, .v5kS],
-                a: "か", i: "き", e: "け", o: "こ",
-                stem: "い", teEnd: "て", taEnd: "た", contract: "ちゃ"),
-            Row(id: "g", lemma: "ぐ", pos: [.v5g],
-                a: "が", i: "ぎ", e: "げ", o: "ご",
-                stem: "い", teEnd: "で", taEnd: "だ", contract: "じゃ"),
-            Row(id: "s", lemma: "す", pos: [.v5s],
-                a: "さ", i: "し", e: "せ", o: "そ",
-                stem: "し", teEnd: "て", taEnd: "た", contract: "ちゃ"),
-        ]
+        // 活用形表：a=未然 i=連用 e=仮定/命令 o=推量 stem=音便干(て・た前)。
+        // 行数据与 S15 正向活用器共享 `GodanConjugationTable.rows`
+        // （同一份审查过的元数据，非复制）。
+        let rows = GodanConjugationTable.rows
         for row in rows {
             let pos = row.pos
             let char = row.lemma
@@ -529,6 +505,121 @@ public struct JapaneseDeinflector: Deinflecting {
         add("exc.iku.chatta", "行っちゃった", "行く", all, ikuPOS, "例外·行っちゃった", cost: 0)
         // いい→よい：wholeForm 防止误伤 かわいい 等以「いい」结尾的合法词
         add("exc.ii", "いい", "よい", adjOnly, adjOnly, "例外·いい→よい", cost: 0, wholeForm: true)
+
+        // MARK: S07 增补（deinflectorRulesVersion 1.1.0，纯增量；
+        // 补齐 S01 spike §3.3 定位的规则洞——样态そう／なさい命令／
+        // くなった系／すぎて系，及 よさそう・なさそう 例外）
+
+        // 样态そう：连用形+そう（降りそう→降る／食べそう→食べる／高そう→高い）。
+        // 动词五段逐行给出；一段/其他动词走 v1.sou（そう→る）。
+        for row in rows {
+            add("v5\(row.id).sou", row.i + "そう", row.lemma, row.pos, row.pos, "样态（そう）")
+            add("v5\(row.id).souda", row.i + "そうだ", row.lemma, row.pos, row.pos, "样态·断定（そうだ）")
+            add("v5\(row.id).soudesu", row.i + "そうです", row.lemma, row.pos, row.pos, "样态·礼貌断定（そうです）")
+            add("v5\(row.id).soudatta", row.i + "そうだった", row.lemma, row.pos, row.pos, "样态·过去（そうだった）")
+            // なさい命令：连用形+なさい（休みなさい→休む）
+            add("v5\(row.id).nasai", row.i + "なさい", row.lemma, row.pos, row.pos, "命令（なさい）")
+            // てしまう／てもらう／ておく／てみる 补助动词链（S01 spike 只有
+            // v1/vs/缩约，五段行级长链全部缺失——散ってしまった→散る 等）
+            let te = row.stem + row.teEnd
+            add("v5\(row.id).teshimau", te + "しまう", row.lemma, row.pos, row.pos, "てしまう")
+            add("v5\(row.id).teshimatta", te + "しまった", row.lemma, row.pos, row.pos, "てしまう·过去")
+            add("v5\(row.id).teshimatte", te + "しまって", row.lemma, row.pos, row.pos, "てしまう·て形")
+            add("v5\(row.id).temorau", te + "もらう", row.lemma, row.pos, row.pos, "てもらう")
+            add("v5\(row.id).temoratta", te + "もらった", row.lemma, row.pos, row.pos, "てもらう·过去")
+            add("v5\(row.id).temoratte", te + "もらって", row.lemma, row.pos, row.pos, "てもらう·て形")
+            add("v5\(row.id).teoku", te + "おく", row.lemma, row.pos, row.pos, "ておく")
+            add("v5\(row.id).teoita", te + "おいた", row.lemma, row.pos, row.pos, "ておく·过去")
+            add("v5\(row.id).teoite", te + "おいて", row.lemma, row.pos, row.pos, "ておく·て形")
+            add("v5\(row.id).temiru", te + "みる", row.lemma, row.pos, row.pos, "てみる")
+            add("v5\(row.id).temita", te + "みた", row.lemma, row.pos, row.pos, "てみる·过去")
+            add("v5\(row.id).temite", te + "みて", row.lemma, row.pos, row.pos, "てみる·て形")
+            add("v5\(row.id).temitai", te + "みたい", row.lemma, row.pos, row.pos, "てみる·愿望（てみたい）")
+            // 使役て形+もらう：帰らせてもらった→帰る
+            add("v5\(row.id).seteMorau", row.a + "せてもらう", row.lemma, row.pos, row.pos, "使役て形+もらう")
+            add("v5\(row.id).seteMoratta", row.a + "せてもらった", row.lemma, row.pos, row.pos, "使役て形+もらう·过去")
+            // 第三人称愿望（たがる）：買いたがっている→買う
+            add("v5\(row.id).tagaru", row.i + "たがる", row.lemma, row.pos, row.pos, "第三人称愿望（たがる）")
+            add("v5\(row.id).tagatta", row.i + "たがった", row.lemma, row.pos, row.pos, "第三人称愿望·过去（たがった）")
+            add("v5\(row.id).tagatte", row.i + "たがって", row.lemma, row.pos, row.pos, "第三人称愿望·て形（たがって）")
+            add("v5\(row.id).tagatteiru", row.i + "たがっている", row.lemma, row.pos, row.pos, "第三人称愿望·进行（たがっている）")
+            add("v5\(row.id).tagatteita", row.i + "たがっていた", row.lemma, row.pos, row.pos, "第三人称愿望·过去进行（たがっていた）")
+        }
+        add("v1.sou", "そう", "る", verbs, verbs, "样态（そう）")
+        add("v1.souda", "そうだ", "る", verbs, verbs, "样态·断定（そうだ）")
+        add("v1.soudesu", "そうです", "る", verbs, verbs, "样态·礼貌断定（そうです）")
+        add("v1.soudatta", "そうだった", "る", verbs, verbs, "样态·过去（そうだった）")
+        add("v1.nasai", "なさい", "る", verbs, verbs, "命令（なさい）")
+        // v1 补助动词链增量（てしまって／てもらう／ておく／てみる／ら抜き否定）
+        add("v1.teshimatte", "てしまって", "る", verbs, verbs, "てしまう·て形")
+        add("v1.temorau", "てもらう", "る", verbs, verbs, "てもらう")
+        add("v1.temoratta", "てもらった", "る", verbs, verbs, "てもらう·过去")
+        add("v1.temoratte", "てもらって", "る", verbs, verbs, "てもらう·て形")
+        add("v1.teoku", "ておく", "る", verbs, verbs, "ておく")
+        add("v1.teoita", "ておいた", "る", verbs, verbs, "ておく·过去")
+        add("v1.teoite", "ておいて", "る", verbs, verbs, "ておく·て形")
+        add("v1.temiru", "てみる", "る", verbs, verbs, "てみる")
+        add("v1.temita", "てみた", "る", verbs, verbs, "てみる·过去")
+        add("v1.temite", "てみて", "る", verbs, verbs, "てみる·て形")
+        add("v1.temitai", "てみたい", "る", verbs, verbs, "てみる·愿望（てみたい）")
+        add("v1.rarenai", "られない", "る", verbs, verbs, "可能/被动·否定（られない）")
+        add("v1.rarenakatta", "られなかった", "る", verbs, verbs, "可能/被动·过去否定（られなかった）")
+        // する系なさい：しなさい→する（なさい→る 只能给出 しる 垃圾形）
+        add("vs.nasai", "しなさい", "する", vsPOS, vsPOS, "命令（なさい）")
+        add("vs.sou", "しそう", "する", vsPOS, vsPOS, "样态（そう）")
+        add("vs.souda", "しそうだ", "する", vsPOS, vsPOS, "样态·断定（そうだ）")
+        add("vs.teshimau", "してしまう", "する", vsPOS, vsPOS, "てしまう")
+        add("vs.teshimatta", "してしまった", "する", vsPOS, vsPOS, "てしまう·过去")
+        add("vs.teshimatte", "してしまって", "する", vsPOS, vsPOS, "てしまう·て形")
+        add("vs.temorau", "してもらう", "する", vsPOS, vsPOS, "てもらう")
+        add("vs.temoratta", "してもらった", "する", vsPOS, vsPOS, "てもらう·过去")
+        add("vs.teoku", "しておく", "する", vsPOS, vsPOS, "ておく")
+        add("vs.teoita", "しておいた", "する", vsPOS, vsPOS, "ておく·过去")
+        add("vs.teoite", "しておいて", "する", vsPOS, vsPOS, "ておく·て形")
+        add("vs.temiru", "してみる", "する", vsPOS, vsPOS, "てみる")
+        add("vs.temita", "してみた", "する", vsPOS, vsPOS, "てみる·过去")
+        add("vs.temitai", "してみたい", "する", vsPOS, vsPOS, "てみる·愿望（てみたい）")
+        add("vs.seteMorau", "させてもらう", "する", vsPOS, vsPOS, "使役て形+もらう")
+        add("vs.seteMoratta", "させてもらった", "する", vsPOS, vsPOS, "使役て形+もらう·过去")
+        add("adj.sou", "そう", "い", adjOnly, adjOnly, "样态（そう）")
+        add("adj.souda", "そうだ", "い", adjOnly, adjOnly, "样态·断定（そうだ）")
+        add("adj.soudesu", "そうです", "い", adjOnly, adjOnly, "样态·礼貌断定（そうです）")
+        add("adj.soudatta", "そうだった", "い", adjOnly, adjOnly, "样态·过去（そうだった）")
+
+        // くなる系：い形容词连用形く+なる（寒くなった→寒い）。く+なっ…整段
+        // 直接规则——「寒く|なった」中间态 寒くなる{adjI} 本可经 v5r 链再
+        // 还原，但 くなる 实体候选更直接、成本更低，用于 span 排序更稳。
+        add("adj.kunaru", "くなる", "い", adjOnly, adjOnly, "变化（くなる）")
+        add("adj.kunatta", "くなった", "い", adjOnly, adjOnly, "变化·过去（くなった）")
+        add("adj.kunatte", "くなって", "い", adjOnly, adjOnly, "变化·て形（くなって）")
+        add("adj.kunetara", "くなったら", "い", adjOnly, adjOnly, "变化·条件（くなったら）")
+        add("adj.kunarou", "くなろう", "い", adjOnly, adjOnly, "变化·意志（くなろう）")
+        add("adj.kunaranai", "くならない", "い", adjOnly, adjOnly, "变化·否定（くならない）")
+        add("adj.kunaranakatta", "くならなかった", "い", adjOnly, adjOnly, "变化·过去否定（くならなかった）")
+        add("adj.kunarimasu", "くなります", "い", adjOnly, adjOnly, "变化·礼貌（くなります）")
+        add("adj.kunarimashita", "くなりました", "い", adjOnly, adjOnly, "变化·礼貌过去（くなりました）")
+        add("adj.kunarimasen", "くなりません", "い", adjOnly, adjOnly, "变化·礼貌否定（くなりません）")
+
+        // 连用形く（副词形）：大きく→大きい／良く→良い／髙く→髙い(→高い)。
+        // 动词连用形 く（書く/行く）会产生虚候选——靠 sense_pos 门控
+        // (admissible={adj-i}) 与合并选择规则天然过滤。
+        add("adj.ku", "く", "い", adjOnly, adjOnly, "连用形·副词（く）")
+
+        // すぎて系：い形容词直接补——中间态「高すぎる」经 v1.te 得到
+        // {verbs} 词性集，与 adj.sugiru 的 fromPOS={adj-i} 不相交（spike
+        // §3.3 行 4）。动词侧（食べすぎて）经 v1.te→v1.sugiru 链已覆盖。
+        add("adj.sugite", "すぎて", "い", adjOnly, adjOnly, "过量·て形（すぎて）")
+        add("adj.sugita", "すぎた", "い", adjOnly, adjOnly, "过量·过去（すぎた）")
+        add("adj.sugitara", "すぎたら", "い", adjOnly, adjOnly, "过量·条件（すぎたら）")
+        add("adj.sugitemo", "すぎても", "い", adjOnly, adjOnly, "过量·让步（すぎても）")
+        add("adj.suginai", "すぎない", "い", adjOnly, adjOnly, "过量·否定（すぎない）")
+        add("adj.suginakatta", "すぎなかった", "い", adjOnly, adjOnly, "过量·过去否定（すぎなかった）")
+        add("adj.sugimasu", "すぎます", "い", adjOnly, adjOnly, "过量·礼貌（すぎます）")
+        add("adj.sugimashita", "すぎました", "い", adjOnly, adjOnly, "过量·礼貌过去（すぎました）")
+
+        // 明示例外增补：样态不规则形（wholeForm 防误伤 なさい 等普通词）
+        add("exc.ii.sou", "よさそう", "よい", all, adjOnly, "例外·よさそう→よい", cost: 1, wholeForm: true)
+        add("exc.nai.sou", "なさそう", "ない", all, adjOnly, "例外·なさそう→ない", cost: 1, wholeForm: true)
 
         return rules
     }

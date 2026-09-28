@@ -67,6 +67,7 @@ extension CardTemplateKind {
         case .vocabularyJapaneseToChinese: "日语 → 中文"
         case .vocabularyChineseToJapanese: "中文 → 日语"
         case .vocabularyListening: "听力"
+        case .sentenceCloze: "句子挖空"
         case .grammarFormToExplanation: "语法形式 → 解释"
         }
     }

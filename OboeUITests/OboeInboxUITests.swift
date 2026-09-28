@@ -56,14 +56,69 @@ final class OboeInboxUITests: XCTestCase {
         )
         XCTAssertTrue(detailText.label.contains("パン"))
 
-        app.buttons["inbox-detail-archive-button"].tap()
-        XCTAssertTrue(
-            waitForLabel(app.staticTexts["inbox-detail-status"], containing: "已归档")
-        )
-        app.buttons["inbox-detail-archive-button"].tap()
-        XCTAssertTrue(
-            waitForLabel(app.staticTexts["inbox-detail-status"], containing: "未处理")
-        )
+        let archiveButton = app.buttons["inbox-detail-archive-button"]
+        let statusText = app.staticTexts["inbox-detail-status"]
+        if app.isRegularShell {
+            // regular：归档把条目移出「未处理」列表并清空 detail 选择——
+            // 状态断言改经筛选器切到「已归档」分段重选行验证。
+            app.tapUntil(archiveButton) {
+                app.staticTexts["inbox-detail-empty"].exists
+            }
+            XCTAssertTrue(
+                app.staticTexts["inbox-detail-empty"].waitForExistence(timeout: 5)
+            )
+            let archivedSegment = app.segmentedControls.buttons["已归档"]
+            XCTAssertTrue(archivedSegment.waitForExistence(timeout: 5))
+            archivedSegment.tap()
+            // 行文本已含编辑追加的「（追记）」——用 CONTAINS 匹配。
+            let archivedRow = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "毎朝パンを食べます")
+            ).firstMatch
+            XCTAssertTrue(archivedRow.waitForExistence(timeout: 5))
+            archivedRow.tap()
+            XCTAssertTrue(
+                waitForLabel(
+                    app.staticTexts["inbox-detail-status"],
+                    containing: "已归档"
+                )
+            )
+            // 取消归档后行离开「已归档」筛选、detail 再次清空。
+            app.tapUntil(archiveButton) {
+                app.staticTexts["inbox-detail-empty"].exists
+            }
+            XCTAssertTrue(
+                app.staticTexts["inbox-detail-empty"].waitForExistence(timeout: 5)
+            )
+            let unprocessedSegment = app.segmentedControls.buttons["未处理"]
+            unprocessedSegment.tap()
+            let restoredRow = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "毎朝パンを食べます")
+            ).firstMatch
+            XCTAssertTrue(restoredRow.waitForExistence(timeout: 5))
+            restoredRow.tap()
+            XCTAssertTrue(
+                waitForLabel(
+                    app.staticTexts["inbox-detail-status"],
+                    containing: "未处理"
+                )
+            )
+        } else {
+            // compact：保存触发的 onChanged 会驱动页面重载——
+            // 若点击落在重建间隙会丢事件；以状态翻转为后置条件重试。
+            app.tapUntil(archiveButton) {
+                statusText.exists && statusText.label.contains("已归档")
+            }
+            XCTAssertTrue(
+                waitForLabel(statusText, containing: "已归档")
+            )
+            app.tapUntil(archiveButton) {
+                let s = app.staticTexts["inbox-detail-status"]
+                return s.exists && s.label.contains("未处理")
+            }
+            XCTAssertTrue(
+                waitForLabel(app.staticTexts["inbox-detail-status"], containing: "未处理")
+            )
+        }
 
         app.buttons["inbox-detail-delete-button"].tap()
         let confirmDelete = app.buttons["inbox-detail-delete-confirm-button"]
@@ -128,7 +183,7 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["二つ目"].exists)
 
         popToPrimaryPageIfNeeded(in: app)
-        app.tabBars.buttons["今日"].tap()
+        app.selectPrimarySection("今日")
         let entry = app.buttons["today-inbox-entry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
         XCTAssertTrue(entry.label.contains("收集箱"))
@@ -169,16 +224,18 @@ final class OboeInboxUITests: XCTestCase {
         let app = launchApp(databaseID: databaseID)
 
         // A deck is required for the formal save at the end of this test.
-        let decksTab = app.tabBars.buttons["牌组"]
-        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
-        decksTab.tap()
-        app.buttons["deck-create-empty-button"].tap()
+        if !app.isRegularShell {
+            let decksTab = app.tabBars.buttons["牌组"]
+            XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
+            decksTab.tap()
+        }
+        app.openDeckCreateEditor()
         let deckName = app.textFields["deck-name-field"]
         XCTAssertTrue(deckName.waitForExistence(timeout: 5))
         deckName.tap()
         deckName.typeText("收集入库")
         app.buttons["deck-name-save-button"].tap()
-        XCTAssertTrue(app.staticTexts["收集入库"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.deckRow(named: "收集入库").waitForExistence(timeout: 5))
 
         openInbox(in: app)
         captureText("食べる", in: app)
@@ -206,14 +263,13 @@ final class OboeInboxUITests: XCTestCase {
         dismissKeyboard(in: app)
         app.buttons["vocabulary-save-draft-button"].tap()
         let draftStatus = app.staticTexts["vocabulary-draft-status"]
-        for _ in 0..<12 where !draftStatus.exists {
-            app.collectionViews.firstMatch.swipeDown()
-        }
+        app.revealElementBySwipingDown(draftStatus, requireHittable: false)
         XCTAssertTrue(draftStatus.waitForExistence(timeout: 5))
 
-        // Back to the list: the item moved to 处理中.
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
+        // Back to the list: the item moved to 处理中. regular 下第二
+        // 次返回是 no-op——列表列始终可见。
+        app.popBackIfNeeded()
+        app.popBackIfNeeded()
         app.buttons["处理中"].tap()
         XCTAssertTrue(app.staticTexts["食べる"].waitForExistence(timeout: 5))
 
@@ -237,34 +293,32 @@ final class OboeInboxUITests: XCTestCase {
         revealInEitherDirection(restoredMeaning, in: relaunched)
         XCTAssertEqual(restoredMeaning.value as? String, "吃")
         let resumeStatus = relaunched.staticTexts["vocabulary-draft-status"]
-        for _ in 0..<12 where !resumeStatus.exists {
-            relaunched.collectionViews.firstMatch.swipeDown()
-        }
+        relaunched.revealElementBySwipingDown(resumeStatus, requireHittable: false)
         XCTAssertTrue(resumeStatus.waitForExistence(timeout: 5))
         XCTAssertTrue(resumeStatus.label.contains("已恢复"))
         // T15: the capture commit is live — same persisted operationID makes a
         // retry idempotent even after relaunch.
-        let formalSave = relaunched.buttons["vocabulary-formal-save-button"]
-        for _ in 0..<12 where !formalSave.exists {
-            relaunched.collectionViews.firstMatch.swipeUp()
-        }
+        let formalSave = relaunched.formControl("vocabulary-formal-save-button")
+        relaunched.revealElement(formalSave, requireHittable: false)
         XCTAssertTrue(formalSave.exists)
         XCTAssertTrue(formalSave.isEnabled)
-        formalSave.tap()
+        relaunched.tapUntil(formalSave) {
+            relaunched.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS %@", "已正式保存")
+            ).firstMatch.exists
+        }
 
         // The status strip renders near the top of the form — scroll up first.
         let savedStatus = relaunched.staticTexts["vocabulary-draft-status"]
-        for _ in 0..<12 where !savedStatus.exists {
-            relaunched.collectionViews.firstMatch.swipeDown()
-        }
+        relaunched.revealElementBySwipingDown(savedStatus, requireHittable: false)
         XCTAssertTrue(savedStatus.waitForExistence(timeout: 5))
         XCTAssertTrue(
             waitForLabel(savedStatus, containing: "已正式保存")
         )
 
         // Back to the list: the item moved to 已处理 atomically with the commit.
-        relaunched.navigationBars.buttons.firstMatch.tap()
-        relaunched.navigationBars.buttons.firstMatch.tap()
+        relaunched.popBackIfNeeded()
+        relaunched.popBackIfNeeded()
         relaunched.buttons["已处理"].tap()
         XCTAssertTrue(relaunched.staticTexts["食べる"].waitForExistence(timeout: 5))
 
@@ -304,16 +358,12 @@ final class OboeInboxUITests: XCTestCase {
         reveal(analyzeButton, in: app)
         analyzeButton.tap()
         let selectVocabulary = app.switches["sentence-card-select-vocabulary-1"]
-        for _ in 0..<15 where !selectVocabulary.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(selectVocabulary, requireHittable: false, passes: 15)
         XCTAssertTrue(selectVocabulary.waitForExistence(timeout: 10))
         selectVocabulary.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         XCTAssertEqual(selectVocabulary.value as? String, "1")
         let selectionStatus = app.staticTexts["sentence-card-status"]
-        for _ in 0..<12 where !selectionStatus.exists {
-            app.collectionViews.firstMatch.swipeUp()
-        }
+        app.revealElement(selectionStatus, requireHittable: false)
         XCTAssertTrue(selectionStatus.waitForExistence(timeout: 5))
         XCTAssertTrue(selectionStatus.label.contains("已选择 1 项"))
 
@@ -328,14 +378,12 @@ final class OboeInboxUITests: XCTestCase {
         relaunched.staticTexts["日本に行ったことがありますか。"].firstMatch.tap()
         relaunched.buttons["继续处理"].tap()
         let restoredStatus = relaunched.staticTexts["sentence-card-status"]
-        for _ in 0..<12 where !restoredStatus.exists {
-            relaunched.collectionViews.firstMatch.swipeUp()
-        }
+        relaunched.revealElement(restoredStatus, requireHittable: false)
         XCTAssertTrue(restoredStatus.waitForExistence(timeout: 10))
         XCTAssertTrue(restoredStatus.label.contains("已恢复 1 项选择"))
 
         // Editing the source invalidates the old analysis on next entry.
-        relaunched.navigationBars.buttons.firstMatch.tap()
+        relaunched.popBackIfNeeded()
         relaunched.buttons["inbox-detail-edit-button"].tap()
         let editor = relaunched.textViews["inbox-edit-text-editor"]
         XCTAssertTrue(editor.waitForExistence(timeout: 5))
@@ -344,9 +392,7 @@ final class OboeInboxUITests: XCTestCase {
         relaunched.buttons["inbox-edit-save-button"].tap()
         relaunched.buttons["继续处理"].tap()
         let staleNotice = relaunched.staticTexts["capture-stale-notice"]
-        for _ in 0..<12 where !staleNotice.exists {
-            relaunched.collectionViews.firstMatch.swipeDown()
-        }
+        relaunched.revealElementBySwipingDown(staleNotice, requireHittable: false)
         XCTAssertTrue(staleNotice.waitForExistence(timeout: 10))
         XCTAssertFalse(relaunched.switches["sentence-card-select-vocabulary-1"].exists)
     }
@@ -366,8 +412,8 @@ final class OboeInboxUITests: XCTestCase {
         revealInEitherDirection(headwordA, in: app)
         XCTAssertTrue(headwordA.waitForExistence(timeout: 5))
         XCTAssertEqual(headwordA.value as? String, "林檎")
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
+        app.popBackIfNeeded()
+        app.popBackIfNeeded()
 
         // Switch to B: must not inherit A's form.
         app.staticTexts["蜜柑"].firstMatch.tap()
@@ -379,8 +425,8 @@ final class OboeInboxUITests: XCTestCase {
         XCTAssertEqual(headwordB.value as? String, "蜜柑")
 
         // Back to A via the 处理中 filter — still shows A's content.
-        app.navigationBars.buttons.firstMatch.tap()
-        app.navigationBars.buttons.firstMatch.tap()
+        app.popBackIfNeeded()
+        app.popBackIfNeeded()
         app.buttons["处理中"].tap()
         app.staticTexts["林檎"].firstMatch.tap()
         app.buttons["继续处理"].tap()
@@ -393,39 +439,21 @@ final class OboeInboxUITests: XCTestCase {
 
     @MainActor
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<12 {
-            if element.exists, element.isHittable { return }
-            form.swipeUp()
-        }
+        app.revealElement(element)
     }
 
     /// 续编恢复的表单可能已略微滚动（目标恰在视口上沿之外），
     /// 单方向滑动会越推越远——先扫回顶部，再向下扫。
+    /// regular 下自动挑选承载目标的列容器。
     @MainActor
     private func revealInEitherDirection(_ element: XCUIElement, in app: XCUIApplication) {
-        let form = app.collectionViews.firstMatch
-        for _ in 0..<8 {
-            if element.exists { return }
-            form.swipeDown()
-        }
-        for _ in 0..<12 {
-            if element.exists { return }
-            form.swipeUp()
-        }
+        app.revealElementBySwipingDown(element, requireHittable: false, passes: 8)
+        app.revealElement(element, requireHittable: false)
     }
 
     @MainActor
     private func dismissKeyboard(in app: XCUIApplication) {
-        guard app.keyboards.firstMatch.exists else { return }
-        for name in ["done", "Done", "完成", "return", "换行"] {
-            let key = app.keyboards.buttons[name]
-            if key.exists {
-                key.tap()
-                return
-            }
-        }
-        app.keyboards.firstMatch.swipeDown()
+        app.dismissOnscreenKeyboard()
     }
 
     @MainActor
@@ -442,20 +470,30 @@ final class OboeInboxUITests: XCTestCase {
 
     /// v0.5.5 起二级页隐藏 Tab Bar：若当前在收集箱/详情/编辑器等
     /// 深层页，先逐层返回直到 Tab Bar 重新出现，再允许点 tab。
+    /// regular 下 sidebar 常驻，无需返回。
     @MainActor
     private func popToPrimaryPageIfNeeded(in app: XCUIApplication) {
-        for _ in 0..<5 {
-            if app.tabBars.buttons["今日"].exists { return }
-            let back = app.navigationBars.buttons.element(boundBy: 0)
-            guard back.exists, back.isHittable else { return }
-            back.tap()
-        }
+        app.popToPrimaryIfNeeded()
     }
 
-    /// v0.5.5：收集箱入口在「今日」页（添加 Tab 已移除）。
+    /// 收集箱入口：compact 走「今日」页磁贴；regular 走 sidebar
+    /// 一级入口（行选中即把收集箱列表装进 content 列）。
     @MainActor
     private func openInbox(in app: XCUIApplication) {
         popToPrimaryPageIfNeeded(in: app)
+        if app.isRegularShell {
+            app.tapSidebarRow("sidebar-inbox")
+            // sheet 关闭过渡中首次 sidebar 点击可能被吞——
+            // content 列未落「收集箱」时补点一次。
+            if !app.navigationBars["收集箱"].waitForExistence(timeout: 3) {
+                app.tapSidebarRow("sidebar-inbox")
+            }
+            XCTAssertTrue(
+                app.navigationBars["收集箱"].waitForExistence(timeout: 5),
+                "sidebar 收集箱选中后 content 列未显示收集箱"
+            )
+            return
+        }
         let todayTab = app.tabBars.buttons["今日"]
         XCTAssertTrue(todayTab.waitForExistence(timeout: 5))
         todayTab.tap()
@@ -464,8 +502,8 @@ final class OboeInboxUITests: XCTestCase {
         // 入口磁贴就在首屏；保留守卫兼容辅助字号备用布局。
         var attempts = 0
         while !entry.exists, attempts < 8 {
-            let scroll = app.scrollViews.firstMatch
-            if scroll.exists { scroll.swipeUp() }
+            let scroll = app.scrollContainerHosting(entry)
+            if scroll.exists { app.swipeContainerUp(scroll) }
             attempts += 1
         }
         XCTAssertTrue(entry.waitForExistence(timeout: 5))
@@ -474,19 +512,11 @@ final class OboeInboxUITests: XCTestCase {
     }
 
     /// v0.5.5：普通添加入口在牌组详情工具栏。
+    /// regular：sidebar 牌组行 → content 列详情 → 「添加」。
     @MainActor
     private func openDeckAddFlow(in app: XCUIApplication, deckName: String) {
         popToPrimaryPageIfNeeded(in: app)
-        let decksTab = app.tabBars.buttons["牌组"]
-        XCTAssertTrue(decksTab.waitForExistence(timeout: 5))
-        decksTab.tap()
-        let row = app.staticTexts[deckName]
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
-        row.tap()
-        let addButton = app.buttons["deck-add-button"]
-        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
-        addButton.tap()
-        XCTAssertTrue(app.navigationBars["添加"].waitForExistence(timeout: 5))
+        app.openDeckAddFlow(deckName: deckName)
     }
 
     @MainActor
@@ -523,9 +553,14 @@ final class OboeInboxUITests: XCTestCase {
         let entry = app.buttons["today-continue-capture-link"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
         entry.tap()
-        XCTAssertTrue(
-            app.staticTexts["inbox-detail-text"].waitForExistence(timeout: 5)
-        )
+        let detailText = app.staticTexts["inbox-detail-text"]
+        // regular：横幅入场动画期间首次点击可能被吞——detail 未
+        // push 出来时重试一次（入口仍在原处）。
+        if app.isRegularShell, !detailText.waitForExistence(timeout: 3),
+           entry.exists, entry.isHittable {
+            entry.tap()
+        }
+        XCTAssertTrue(detailText.waitForExistence(timeout: 5))
         XCTAssertTrue(
             app.staticTexts["共有されたメモです。"].waitForExistence(timeout: 5)
         )
@@ -792,7 +827,16 @@ final class OboeInboxUITests: XCTestCase {
             )
         )
 
-        app.buttons["ocr-save-button"].tap()
+        // regular：编辑器持有键盘焦点时首次 save tap 会被键盘/滚动
+        // 事件吞掉——以 sheet 真正关闭（背景入口恢复可命中）为后置
+        // 条件重试。
+        let ocrSave = app.buttons["ocr-save-button"]
+        XCTAssertTrue(ocrSave.waitForExistence(timeout: 5))
+        let closed = app.tapUntil(ocrSave, retries: 5) {
+            !ocrSave.exists
+                && app.buttons["inbox-image-capture-entry"].isHittable
+        }
+        XCTAssertTrue(closed, "OCR 保存 sheet 未关闭")
         XCTAssertTrue(
             app.buttons["inbox-image-capture-entry"].waitForExistence(timeout: 5)
         )
@@ -806,10 +850,15 @@ final class OboeInboxUITests: XCTestCase {
         let row = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS %@", "今日はいい天気です")
         ).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        app.revealElement(row, requireHittable: true, passes: 8)
+        XCTAssertTrue(row.waitForExistence(timeout: 3))
         row.tap()
+        // regular：详情在 detail 列，图片可能在折叠线下未挂载——
+        // 按列显露后再断。
+        let detailImage = app.images["inbox-detail-image"]
+        app.revealElement(detailImage, requireHittable: false, passes: 6)
         XCTAssertTrue(
-            app.images["inbox-detail-image"].waitForExistence(timeout: 5)
+            detailImage.waitForExistence(timeout: 5)
         )
         XCTAssertTrue(
             waitForLabel(
@@ -889,12 +938,15 @@ final class OboeInboxUITests: XCTestCase {
         editor.tap()
         editor.typeText("手動入力テキスト")
         XCTAssertTrue(saveButton.isEnabled)
-        saveButton.tap()
+        // regular：sheet 内 tap 可能被滚动减速吞掉——以 sheet 关闭
+        // （saveButton 消失）为后置条件重试。
+        app.tapUntil(saveButton) { !saveButton.exists }
 
         openInbox(in: app)
-        XCTAssertTrue(
-            app.staticTexts["手動入力テキスト"].waitForExistence(timeout: 5)
-        )
+        // 收集箱列表行可能未挂载（折叠线下）——按列显露后再断。
+        let savedRow = app.staticTexts["手動入力テキスト"]
+        app.revealElement(savedRow, requireHittable: false, passes: 8)
+        XCTAssertTrue(savedRow.waitForExistence(timeout: 5))
     }
 
     /// A tiny valid PNG produced at runtime — no bundled fixture needed.

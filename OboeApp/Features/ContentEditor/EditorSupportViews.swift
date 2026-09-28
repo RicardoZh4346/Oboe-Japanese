@@ -10,6 +10,8 @@ struct KnowledgePointDetailDestination: View {
     let contentCardService: ContentCardService
     let historyService: StudyHistoryService
     let speechService: any SpeechService
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    var clozeRepository: (any ClozeRepository)? = nil
     let onChanged: () async -> Void
 
     var body: some View {
@@ -35,6 +37,16 @@ struct KnowledgePointDetailDestination: View {
                 contentCardService: contentCardService,
                 historyService: historyService,
                 speechService: speechService
+            ) {
+                await onChanged()
+            }
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: item.id,
+                headword: item.headword,
+                meaningZH: item.meaningZH,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgePointService
             ) {
                 await onChanged()
             }

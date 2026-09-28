@@ -1354,6 +1354,13 @@ private actor StubContentCardRepository: ContentCardRepository {
         fatalError("unused")
     }
 
+    func commitSentence(
+        _ commit: SentenceContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult {
+        fatalError("unused")
+    }
+
     func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState] {
         directions
     }

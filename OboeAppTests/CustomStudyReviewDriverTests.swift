@@ -54,7 +54,8 @@ final class CustomStudyReviewDriverTests: XCTestCase {
             generation: 1,
             baseURL: baseURL,
             bootstrap: AppBootstrapEnvironment(),
-            adaptiveInvalidationCenter: AdaptiveInvalidationCenter()
+            adaptiveInvalidationCenter: AdaptiveInvalidationCenter(),
+            generationSource: DatabaseGenerationSource()
         ) else {
             throw XCTSkip("容器构建失败（内置词库缺失时跳过）。")
         }

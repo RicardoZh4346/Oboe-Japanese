@@ -5,9 +5,10 @@ import SwiftUI
 private enum PrimaryTab: Hashable {
     case today
     case decks
+    case reader
 }
 
-/// compact 壳层：两 Tab `TabView`（今日 + 牌组）。v0.5.8 起设置收进
+/// compact 壳层：三 Tab `TabView`（今日 + 牌组 + 阅读）。v0.5.8 起设置收进
 /// 今日页右上角齿轮，以 sheet 呈现。只在 `.ready` 分支出现——服务依赖
 /// 从 `AppFeatureContainer` 整体取到，不再有逐个 Optional 展开。
 struct CompactShell: View {
@@ -59,7 +60,9 @@ struct CompactShell: View {
                 },
                 sharedCapturesAwaitingImport: sharedCapturesAwaitingImport,
                 importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
-                openSettings: { isSettingsPresented = true }
+                openSettings: { isSettingsPresented = true },
+                statisticsSource: today.statisticsSource,
+                readerAnalyticsSource: today.readerAnalyticsSource
             )
                 .id(container.generation)
                 .tabItem {
@@ -91,6 +94,7 @@ struct CompactShell: View {
                 sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService,
                 dictionaryQueryService: container.dictionary.queryService,
                 sourceContextRepository: container.shared.sourceContextRepository,
+                clozeRepository: container.shared.clozeRepository,
                 inboxImageStore: container.shared.inboxImageStore,
                 customStudyRepository: container.shared.customStudyRepository,
                 customStudyService: container.shared.customStudyService
@@ -100,6 +104,13 @@ struct CompactShell: View {
                     Label("牌组", systemImage: "rectangle.stack")
                 }
                 .tag(PrimaryTab.decks)
+
+            ReaderRootView(dependencies: container.readerWithEditorFactory)
+                .id(container.generation)
+                .tabItem {
+                    Label("阅读", systemImage: "book")
+                }
+                .tag(PrimaryTab.reader)
         }
         .sheet(isPresented: $isSettingsPresented) {
             SettingsView(

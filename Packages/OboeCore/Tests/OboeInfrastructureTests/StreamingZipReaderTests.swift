@@ -709,7 +709,7 @@ final class StreamingZipReaderTests: XCTestCase {
     ) throws -> Data {
         try PortableBackupPackageManifest(
             format: PortableBackupFormat.identifier,
-            formatVersion: PortableBackupPackageFormat.formatVersion,
+            formatVersion: PortableBackupPackageFormat.formatVersionV7,
             container: PortableBackupPackageFormat.container,
             appVersion: "test",
             exportedAt: PortableBackupPackageFormat.iso8601String(

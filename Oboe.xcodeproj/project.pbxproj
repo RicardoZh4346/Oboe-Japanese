@@ -96,12 +96,16 @@
 		A00100000000000000000066 /* ReadableContentContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000066 /* ReadableContentContainer.swift */; };
 		A00100000000000000000067 /* LayoutPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000067 /* LayoutPolicyTests.swift */; };
 		A00100000000000000000068 /* AdaptivePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000068 /* AdaptivePresentationTests.swift */; };
+		A0010000000000000000006A /* StatisticsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000006B /* StatisticsViewModelTests.swift */; };
+		A0010000000000000000006B /* ReaderAnalyticsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000006C /* ReaderAnalyticsViewModelTests.swift */; };
+		C0DE00000000000000B001 /* ReaderTextViewComposeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE00000000000000B002 /* ReaderTextViewComposeTests.swift */; };
 		A00100000000000000000069 /* SceneNavigationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000069 /* SceneNavigationStateTests.swift */; };
 		A00100000000000000000072 /* AttachmentRestoreWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */; };
 		A00100000000000000000043 /* DeckNameEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000043 /* DeckNameEditor.swift */; };
 		EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD40144146D14359888E78DD /* SecondaryPage.swift */; };
 		167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */; };
 		7775AE95FA9F47FE8457891D /* OboeSettingsAIUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */; };
+		C0DE00000000000000A003 /* XCUIApplication+RegularShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE00000000000000A004 /* XCUIApplication+RegularShell.swift */; };
 		A0010000000000000000004F /* DeckListModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000004F /* DeckListModel.swift */; };
 		A00100000000000000000050 /* DeckRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000050 /* DeckRow.swift */; };
 		A00100000000000000000051 /* DeckDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000051 /* DeckDetailView.swift */; };
@@ -120,6 +124,9 @@
 		A0010000000000000000009B /* CustomStudySetupModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009B /* CustomStudySetupModel.swift */; };
 		A0010000000000000000009C /* CustomStudySetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009C /* CustomStudySetupView.swift */; };
 		A001000000000000000000A1 /* BackupImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A1 /* BackupImportCoordinator.swift */; };
+		A001000000000000000000B1 /* ImportWizardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000B1 /* ImportWizardViewModel.swift */; };
+		A001000000000000000000B2 /* ImportWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000B2 /* ImportWizardView.swift */; };
+		A001000000000000000000B3 /* VocabularyExportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000B3 /* VocabularyExportView.swift */; };
 		A001000000000000000000A2 /* RestorationImpactPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A2 /* RestorationImpactPreviewView.swift */; };
 		A001000000000000000000A3 /* ShareSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A3 /* ShareSheet.swift */; };
 		A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */; };
@@ -144,6 +151,26 @@
 		A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */; };
 		A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */; };
 		A00100000000000000000087 /* RuntimeSplitWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000087 /* RuntimeSplitWiringTests.swift */; };
+		A01100000000000000000101 /* ReaderFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000101 /* ReaderFeatureDependencies.swift */; };
+		A01100000000000000000102 /* ReaderLibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000102 /* ReaderLibraryViewModel.swift */; };
+		A01100000000000000000103 /* ReaderDocumentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000103 /* ReaderDocumentViewModel.swift */; };
+		A01100000000000000000104 /* ReaderTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000104 /* ReaderTextView.swift */; };
+		A01100000000000000000105 /* ReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000105 /* ReaderView.swift */; };
+		A01100000000000000000106 /* ReaderLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000106 /* ReaderLibraryView.swift */; };
+		A01100000000000000000107 /* ReaderRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000107 /* ReaderRootView.swift */; };
+		A01100000000000000000108 /* SentenceNoteDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000108 /* SentenceNoteDetailView.swift */; };
+		A01100000000000000000109 /* ReaderInspectorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000109 /* ReaderInspectorViewModel.swift */; };
+		A01100000000000000000110 /* ReaderInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000110 /* ReaderInspectorView.swift */; };
+		A01100000000000000000111 /* DatabaseGenerationSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000111 /* DatabaseGenerationSource.swift */; };
+		A01100000000000000000112 /* StatisticsInsightSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000112 /* StatisticsInsightSource.swift */; };
+		A01100000000000000000113 /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000113 /* StatisticsView.swift */; };
+		A01100000000000000000114 /* StatisticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000114 /* StatisticsViewModel.swift */; };
+		A01100000000000000000115 /* SentenceNoteEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000115 /* SentenceNoteEditView.swift */; };
+		A01100000000000000000116 /* ReaderClozeCreateViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000116 /* ReaderClozeCreateViewModel.swift */; };
+		A01100000000000000000117 /* ReaderClozeCreateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000117 /* ReaderClozeCreateView.swift */; };
+		A01100000000000000000118 /* ReaderAnalyticsSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000118 /* ReaderAnalyticsSource.swift */; };
+		A01100000000000000000119 /* ReaderAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000119 /* ReaderAnalyticsView.swift */; };
+		A01100000000000000000120 /* ReaderAnalyticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -260,6 +287,9 @@
 		A00200000000000000000066 /* ReadableContentContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadableContentContainer.swift; sourceTree = "<group>"; };
 		A00200000000000000000067 /* LayoutPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutPolicyTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000068 /* AdaptivePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptivePresentationTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000006B /* StatisticsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsViewModelTests.swift; sourceTree = "<group>"; };
+		A0020000000000000000006C /* ReaderAnalyticsViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsViewModelTests.swift; sourceTree = "<group>"; };
+		C0DE00000000000000B002 /* ReaderTextViewComposeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTextViewComposeTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000069 /* SceneNavigationStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneNavigationStateTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000072 /* AttachmentRestoreWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentRestoreWiringTests.swift; sourceTree = "<group>"; };
 		A0020000000000000000006A /* OboeAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OboeAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -267,6 +297,7 @@
 		BD40144146D14359888E78DD /* SecondaryPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecondaryPage.swift; sourceTree = "<group>"; };
 		EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelPickerView.swift; sourceTree = "<group>"; };
 		250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OboeSettingsAIUITests.swift; sourceTree = "<group>"; };
+		C0DE00000000000000A004 /* XCUIApplication+RegularShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "XCUIApplication+RegularShell.swift"; sourceTree = "<group>"; };
 		A0020000000000000000004F /* DeckListModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckListModel.swift; sourceTree = "<group>"; };
 		A00200000000000000000050 /* DeckRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckRow.swift; sourceTree = "<group>"; };
 		A00200000000000000000051 /* DeckDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckDetailView.swift; sourceTree = "<group>"; };
@@ -285,6 +316,9 @@
 		A0020000000000000000009B /* CustomStudySetupModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudySetupModel.swift; sourceTree = "<group>"; };
 		A0020000000000000000009C /* CustomStudySetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudySetupView.swift; sourceTree = "<group>"; };
 		A002000000000000000000A1 /* BackupImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupImportCoordinator.swift; sourceTree = "<group>"; };
+		A002000000000000000000B1 /* ImportWizardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportWizardViewModel.swift; sourceTree = "<group>"; };
+		A002000000000000000000B2 /* ImportWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportWizardView.swift; sourceTree = "<group>"; };
+		A002000000000000000000B3 /* VocabularyExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VocabularyExportView.swift; sourceTree = "<group>"; };
 		A002000000000000000000A2 /* RestorationImpactPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestorationImpactPreviewView.swift; sourceTree = "<group>"; };
 		A002000000000000000000A3 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
 		A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSubmissionCoordinator.swift; sourceTree = "<group>"; };
@@ -309,6 +343,26 @@
 		A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudyReviewDriverTests.swift; sourceTree = "<group>"; };
 		A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupImportCoordinatorTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000087 /* RuntimeSplitWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeSplitWiringTests.swift; sourceTree = "<group>"; };
+		A01200000000000000000101 /* ReaderFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderFeatureDependencies.swift; sourceTree = "<group>"; };
+		A01200000000000000000102 /* ReaderLibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderLibraryViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000103 /* ReaderDocumentViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderDocumentViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000104 /* ReaderTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTextView.swift; sourceTree = "<group>"; };
+		A01200000000000000000105 /* ReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderView.swift; sourceTree = "<group>"; };
+		A01200000000000000000106 /* ReaderLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderLibraryView.swift; sourceTree = "<group>"; };
+		A01200000000000000000107 /* ReaderRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderRootView.swift; sourceTree = "<group>"; };
+		A01200000000000000000108 /* SentenceNoteDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceNoteDetailView.swift; sourceTree = "<group>"; };
+		A01200000000000000000115 /* SentenceNoteEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentenceNoteEditView.swift; sourceTree = "<group>"; };
+		A01200000000000000000109 /* ReaderInspectorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderInspectorViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000110 /* ReaderInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderInspectorView.swift; sourceTree = "<group>"; };
+		A01200000000000000000111 /* DatabaseGenerationSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseGenerationSource.swift; sourceTree = "<group>"; };
+		A01200000000000000000112 /* StatisticsInsightSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsInsightSource.swift; sourceTree = "<group>"; };
+		A01200000000000000000113 /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		A01200000000000000000114 /* StatisticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000116 /* ReaderClozeCreateViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderClozeCreateViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000117 /* ReaderClozeCreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderClozeCreateView.swift; sourceTree = "<group>"; };
+		A01200000000000000000118 /* ReaderAnalyticsSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsSource.swift; sourceTree = "<group>"; };
+		A01200000000000000000119 /* ReaderAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsView.swift; sourceTree = "<group>"; };
+		A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -417,6 +471,7 @@
 				A00200000000000000000084 /* EnrichmentRuntime.swift */,
 				A00200000000000000000085 /* AppearanceRuntime.swift */,
 				A00200000000000000000086 /* AppFeatureContainerFactory.swift */,
+				A01200000000000000000111 /* DatabaseGenerationSource.swift */,
 			);
 			path = Runtime;
 			sourceTree = "<group>";
@@ -452,20 +507,23 @@
 				A00500000000000000000016 /* AIRepair */,
 				A0050000000000000000009D /* CustomStudy */,
 				A005000000000000000000A4 /* Backup */,
+				A005000000000000000000B0 /* ImportExport */,
+				A01300000000000000000101 /* Reader */,
+				A01300000000000000000103 /* Statistics */,
 			);
 			path = Features;
 			sourceTree = "<group>";
 		};
 		A00500000000000000000005 /* Today */ = {isa = PBXGroup; children = (A00200000000000000000003 /* TodayView.swift */, A00200000000000000000041 /* DailyStatisticsView.swift */,); path = Today; sourceTree = "<group>"; };
 		A00500000000000000000006 /* Decks */ = {isa = PBXGroup; children = (A00200000000000000000004 /* DecksView.swift */, A0020000000000000000004F /* DeckListModel.swift */, A00200000000000000000050 /* DeckRow.swift */, A00200000000000000000051 /* DeckDetailView.swift */, A00200000000000000000052 /* DeckContentModel.swift */, A00200000000000000000053 /* KnowledgePointRow.swift */, A00200000000000000000054 /* KnowledgeSearchView.swift */, A00200000000000000000055 /* FavoritesView.swift */, A00200000000000000000056 /* DeckMoveBeforeDeletionSheet.swift */, A00200000000000000000040 /* DeckMembershipPicker.swift */,); path = Decks; sourceTree = "<group>"; };
-		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
+		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */, A01200000000000000000108 /* SentenceNoteDetailView.swift */, A01200000000000000000115 /* SentenceNoteEditView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
 		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (A00200000000000000000026 /* SentenceAnalysisSections.swift */,); path = SentenceAnalysis; sourceTree = "<group>"; };
 		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000057 /* AddContentFormState.swift */, A00200000000000000000058 /* AddContentAISession.swift */, A00200000000000000000059 /* SentenceAnalysisSession.swift */, A0020000000000000000005A /* CaptureDraftCoordinator.swift */, A0020000000000000000005B /* AddContentCommitCoordinator.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
 		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000009A /* CustomStudyReviewDriver.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
 		A0050000000000000000009D /* CustomStudy */ = {isa = PBXGroup; children = (A0020000000000000000009B /* CustomStudySetupModel.swift */, A0020000000000000000009C /* CustomStudySetupView.swift */,); path = CustomStudy; sourceTree = "<group>"; };
 		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */, BD40144146D14359888E78DD /* SecondaryPage.swift */,); path = SharedUI; sourceTree = "<group>"; };
 		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */, A00200000000000000000090 /* Dictionary */,); path = Resources; sourceTree = "<group>"; };
-		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A002000000000000000000A6 /* OboeV060UITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */, A00200000000000000000073 /* XCUIApplication+SettingsEntry.swift */,); path = OboeUITests; sourceTree = "<group>"; };
+		A0050000000000000000000C /* OboeUITests */ = {isa = PBXGroup; children = (A00200000000000000000009 /* OboeNavigationUITests.swift */, A0020000000000000000001F /* OboeInboxUITests.swift */, A002000000000000000000A6 /* OboeV060UITests.swift */, A00200000000000000000035 /* OboeAdaptiveUITests.swift */, ED2927F3549349A4B4E3D077 /* OboeTabBarUITests.swift */, 250E1077BE0B4D9F9B14A79B /* OboeSettingsAIUITests.swift */, A00200000000000000000073 /* XCUIApplication+SettingsEntry.swift */, C0DE00000000000000A004 /* XCUIApplication+RegularShell.swift */); path = OboeUITests; sourceTree = "<group>"; };
 		A00500000000000000000018 /* Navigation */ = {
 			isa = PBXGroup;
 			children = (
@@ -499,6 +557,9 @@
 				A00200000000000000000099 /* DictionaryCardPrefillTests.swift */,
 				A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */,
 				A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */,
+				A0020000000000000000006B /* StatisticsViewModelTests.swift */,
+				A0020000000000000000006C /* ReaderAnalyticsViewModelTests.swift */,
+				C0DE00000000000000B002 /* ReaderTextViewComposeTests.swift */,
 			);
 			path = OboeAppTests;
 			sourceTree = "<group>";
@@ -507,6 +568,7 @@
 		A0050000000000000000000E /* Search */ = {isa = PBXGroup; children = (A00200000000000000000092 /* DictionarySearchViewModel.swift */, A00200000000000000000093 /* DictionarySearchView.swift */, A00200000000000000000094 /* DictionaryEntryDetailView.swift */, A00200000000000000000095 /* DictionarySourcesView.swift */, A00200000000000000000097 /* GlobalSearchView.swift */, A00200000000000000000098 /* DictionaryCardPrefill.swift */,); path = Search; sourceTree = "<group>"; };
 		A00500000000000000000011 /* Inbox */ = {isa = PBXGroup; children = (A0020000000000000000001C /* InboxView.swift */, A0020000000000000000001D /* InboxItemDetailView.swift */, A0020000000000000000001E /* InboxCaptureView.swift */, A00200000000000000000027 /* InboxProcessingView.swift */,); path = Inbox; sourceTree = "<group>"; };
 		A005000000000000000000A4 /* Backup */ = {isa = PBXGroup; children = (A002000000000000000000A1 /* BackupImportCoordinator.swift */, A002000000000000000000A2 /* RestorationImpactPreviewView.swift */, A002000000000000000000A3 /* ShareSheet.swift */,); path = Backup; sourceTree = "<group>"; };
+		A005000000000000000000B0 /* ImportExport */ = {isa = PBXGroup; children = (A002000000000000000000B1 /* ImportWizardViewModel.swift */, A002000000000000000000B2 /* ImportWizardView.swift */, A002000000000000000000B3 /* VocabularyExportView.swift */,); path = ImportExport; sourceTree = "<group>"; };
 		A0050000000000000000000F /* Settings */ = {isa = PBXGroup; children = (A00200000000000000000006 /* SettingsView.swift */, A00200000000000000000071 /* SettingsCategoryListView.swift */, EB5F5634382D47A4980D9EC4 /* AIModelPickerView.swift */,); path = Settings; sourceTree = "<group>"; };
 		A00500000000000000000014 /* ImageCapture */ = {isa = PBXGroup; children = (A0020000000000000000002E /* ImageCaptureView.swift */,); path = ImageCapture; sourceTree = "<group>"; };
 		A00500000000000000000010 /* JLPTLibrary */ = {isa = PBXGroup; children = (A0020000000000000000000E /* JLPTLibraryView.swift */, B02400000000000000000002 /* JLPTDashboardView.swift */,); path = JLPTLibrary; sourceTree = "<group>"; };
@@ -524,6 +586,8 @@
 			path = OboeShareExtension;
 			sourceTree = "<group>";
 		};
+		A01300000000000000000101 /* Reader */ = {isa = PBXGroup; children = (A01200000000000000000101 /* ReaderFeatureDependencies.swift */, A01200000000000000000102 /* ReaderLibraryViewModel.swift */, A01200000000000000000103 /* ReaderDocumentViewModel.swift */, A01200000000000000000104 /* ReaderTextView.swift */, A01200000000000000000105 /* ReaderView.swift */, A01200000000000000000106 /* ReaderLibraryView.swift */, A01200000000000000000107 /* ReaderRootView.swift */, A01200000000000000000109 /* ReaderInspectorViewModel.swift */, A01200000000000000000110 /* ReaderInspectorView.swift */, A01200000000000000000116 /* ReaderClozeCreateViewModel.swift */, A01200000000000000000117 /* ReaderClozeCreateView.swift */,); path = Reader; sourceTree = "<group>"; };
+		A01300000000000000000103 /* Statistics */ = {isa = PBXGroup; children = (A01200000000000000000112 /* StatisticsInsightSource.swift */, A01200000000000000000113 /* StatisticsView.swift */, A01200000000000000000114 /* StatisticsViewModel.swift */, A01200000000000000000118 /* ReaderAnalyticsSource.swift */, A01200000000000000000119 /* ReaderAnalyticsView.swift */, A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */,); path = Statistics; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -769,12 +833,35 @@
 				A001000000000000000000A1 /* BackupImportCoordinator.swift in Sources */,
 				A001000000000000000000A2 /* RestorationImpactPreviewView.swift in Sources */,
 				A001000000000000000000A3 /* ShareSheet.swift in Sources */,
+				A001000000000000000000B1 /* ImportWizardViewModel.swift in Sources */,
+				A001000000000000000000B2 /* ImportWizardView.swift in Sources */,
+				A001000000000000000000B3 /* VocabularyExportView.swift in Sources */,
 				A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */,
 				A0010000000000000000005E /* ReviewAudioController.swift in Sources */,
 				A0010000000000000000005F /* ReviewPresentationState.swift in Sources */,
 				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 				EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */,
 				167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */,
+				A01100000000000000000101 /* ReaderFeatureDependencies.swift in Sources */,
+				A01100000000000000000102 /* ReaderLibraryViewModel.swift in Sources */,
+				A01100000000000000000103 /* ReaderDocumentViewModel.swift in Sources */,
+				A01100000000000000000104 /* ReaderTextView.swift in Sources */,
+				A01100000000000000000105 /* ReaderView.swift in Sources */,
+				A01100000000000000000106 /* ReaderLibraryView.swift in Sources */,
+				A01100000000000000000107 /* ReaderRootView.swift in Sources */,
+				A01100000000000000000108 /* SentenceNoteDetailView.swift in Sources */,
+				A01100000000000000000115 /* SentenceNoteEditView.swift in Sources */,
+				A01100000000000000000109 /* ReaderInspectorViewModel.swift in Sources */,
+				A01100000000000000000110 /* ReaderInspectorView.swift in Sources */,
+				A01100000000000000000111 /* DatabaseGenerationSource.swift in Sources */,
+				A01100000000000000000112 /* StatisticsInsightSource.swift in Sources */,
+				A01100000000000000000113 /* StatisticsView.swift in Sources */,
+				A01100000000000000000114 /* StatisticsViewModel.swift in Sources */,
+				A01100000000000000000116 /* ReaderClozeCreateViewModel.swift in Sources */,
+				A01100000000000000000117 /* ReaderClozeCreateView.swift in Sources */,
+				A01100000000000000000118 /* ReaderAnalyticsSource.swift in Sources */,
+				A01100000000000000000119 /* ReaderAnalyticsView.swift in Sources */,
+				A01100000000000000000120 /* ReaderAnalyticsViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -789,6 +876,7 @@
 				3D7C3FA3072145EDA7413284 /* OboeTabBarUITests.swift in Sources */,
 				A00100000000000000000073 /* XCUIApplication+SettingsEntry.swift in Sources */,
 				7775AE95FA9F47FE8457891D /* OboeSettingsAIUITests.swift in Sources */,
+				C0DE00000000000000A003 /* XCUIApplication+RegularShell.swift in Sources */,
                 B01200000000000000000003 /* RecallTextInput.swift in Tests */,
                 B01200000000000000000006 /* LanguageHintField.swift in Tests */,
 			);
@@ -817,6 +905,9 @@
 				A00100000000000000000099 /* DictionaryCardPrefillTests.swift in Sources */,
 				A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */,
 				A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */,
+				A0010000000000000000006A /* StatisticsViewModelTests.swift in Sources */,
+				A0010000000000000000006B /* ReaderAnalyticsViewModelTests.swift in Sources */,
+				C0DE00000000000000B001 /* ReaderTextViewComposeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -831,14 +922,14 @@
 /* Begin XCBuildConfiguration section */
 		A00C00000000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; GCC_OPTIMIZATION_LEVEL = 0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)",); IPHONEOS_DEPLOYMENT_TARGET = 17.0; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
 		A00C00000000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_NO_COMMON_BLOCKS = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; VALIDATE_PRODUCT = YES; }; name = Release; };
-		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
-		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Release; };
-		A00C00000000000000000007 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
-		A00C00000000000000000008 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.6.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
-		A00C00000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
-		A00C0000000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 50; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Release; };
+		A00C00000000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.7.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A00C00000000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = OboeApp/Oboe.entitlements; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Oboe; INFOPLIST_FILE = OboeApp/Info.plist; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.7.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A00C00000000000000000005 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
+		A00C00000000000000000006 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Oboe; }; name = Release; };
+		A00C00000000000000000007 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.7.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A00C00000000000000000008 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {APPLICATION_EXTENSION_API_ONLY = YES; CODE_SIGN_ENTITLEMENTS = OboeShareExtension/OboeShareExtension.entitlements; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = OboeShareExtension/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks", ); MARKETING_VERSION = 0.7.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.Oboe.ShareExtension; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A00C00000000000000000009 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Debug; };
+		A00C0000000000000000000A /* Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = "$(TEST_HOST)"; CURRENT_PROJECT_VERSION = 51; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.example.OboeAppTests; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Oboe.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Oboe"; TEST_TARGET_NAME = Oboe; }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

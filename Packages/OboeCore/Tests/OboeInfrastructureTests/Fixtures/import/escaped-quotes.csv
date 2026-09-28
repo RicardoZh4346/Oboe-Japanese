@@ -1,0 +1,3 @@
+"say ""hi""",plain
+"""leading and trailing""",2
+"a""b""c",3

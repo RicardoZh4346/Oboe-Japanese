@@ -45,6 +45,7 @@ struct RegularShell: View {
     private enum SidebarItem: Hashable {
         case today
         case inbox
+        case reader
         case settings
         case decks(DeckSidebarSelection)
     }
@@ -79,7 +80,8 @@ struct RegularShell: View {
     var body: some View {
         @Bindable var navigation = navigation
         Group {
-            if navigation.section == .today {
+            if navigation.section == .today
+                || navigation.section == .reader {
                 NavigationSplitView(
                     columnVisibility: $navigation.splitVisibility,
                     preferredCompactColumn: $navigation.preferredCompactColumn
@@ -162,6 +164,8 @@ struct RegularShell: View {
                     .keyboardShortcut("3", modifiers: .command)
                 Button("") { navigation.selectTab(.settings) }
                     .keyboardShortcut("4", modifiers: .command)
+                Button("") { navigation.selectTab(.reader) }
+                    .keyboardShortcut("5", modifiers: .command)
                 Button("") { navigation.selectDeckSidebar(.search) }
                     .keyboardShortcut("f", modifiers: .command)
                 Button("") {
@@ -170,7 +174,7 @@ struct RegularShell: View {
                         isPresentingCreateDeck = true
                     case .inbox:
                         isInboxCapturePresented = true
-                    case .today, .settings:
+                    case .today, .settings, .reader:
                         break
                     }
                 }
@@ -193,6 +197,8 @@ struct RegularShell: View {
                     return .today
                 case .inbox:
                     return .inbox
+                case .reader:
+                    return .reader
                 case .settings:
                     return .settings
                 case .decks:
@@ -207,6 +213,8 @@ struct RegularShell: View {
                     navigation.selectTab(.today)
                 case .inbox:
                     navigation.selectTab(.inbox)
+                case .reader:
+                    navigation.selectTab(.reader)
                 case .settings:
                     navigation.selectTab(.settings)
                 case .decks(let selection):
@@ -225,6 +233,9 @@ struct RegularShell: View {
                 Label("收集箱", systemImage: "tray")
                     .tag(SidebarItem.inbox)
                     .accessibilityIdentifier("sidebar-inbox")
+                Label("阅读", systemImage: "book")
+                    .tag(SidebarItem.reader)
+                    .accessibilityIdentifier("sidebar-reader")
                 Label("设置", systemImage: "gearshape")
                     .tag(SidebarItem.settings)
                     .accessibilityIdentifier("sidebar-settings")
@@ -287,8 +298,8 @@ struct RegularShell: View {
                     }
                 )
             )
-        case .today:
-            // 不可达：today 走两栏分支。
+        case .today, .reader:
+            // 不可达：这两区走两栏分支。
             EmptyView()
         }
     }
@@ -304,7 +315,7 @@ struct RegularShell: View {
             inboxDetail
         case .settings:
             settingsDetail
-        case .today:
+        case .today, .reader:
             EmptyView()
         }
     }
@@ -337,6 +348,7 @@ struct RegularShell: View {
                     sentenceAnalysisService: decks.sentenceAnalysisService,
                     sentenceAnalysisCardCreationService: decks.sentenceAnalysisCardCreationService,
                     sourceContextRepository: container.shared.sourceContextRepository,
+                    clozeRepository: container.shared.clozeRepository,
                     inboxImageStore: container.shared.inboxImageStore,
                     dictionaryQueryService: container.dictionary.queryService,
                     customStudyRepository: container.shared.customStudyRepository,
@@ -391,7 +403,8 @@ struct RegularShell: View {
                     grammarService: decks.grammarService,
                     contentCardService: decks.contentCardService,
                     historyService: decks.historyService,
-                    speechService: container.shared.speechService
+                    speechService: container.shared.speechService,
+                    clozeRepository: container.shared.clozeRepository
                 )
             }
         case .search:
@@ -406,6 +419,7 @@ struct RegularShell: View {
                     historyService: decks.historyService,
                     speechService: container.shared.speechService,
                     dictionaryQueryService: container.dictionary.queryService,
+                    clozeRepository: container.shared.clozeRepository,
                     onCreateCard: { entry in
                         Task {
                             let version = try? await container.dictionary
@@ -562,8 +576,15 @@ struct RegularShell: View {
                 importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
                 // regular 下设置是一级 sidebar section——今日页齿轮等价于
                 // 选中该 section，与 compact 的 sheet 入口同一触发点。
-                openSettings: { navigation.selectTab(.settings) }
+                openSettings: { navigation.selectTab(.settings) },
+                statisticsSource: today.statisticsSource,
+                readerAnalyticsSource: today.readerAnalyticsSource
             )
+        case .reader:
+            // S10 Reader：内部两栏 split（库列表 → 阅读页），与
+            // compact 的 ReaderRootView 同一实现；S11 挖词编辑器
+            // 服务集由容器闭包注入（readerWithEditorFactory）。
+            ReaderRootView(dependencies: container.readerWithEditorFactory)
         case .settings, .inbox, .decks:
             // 不可达：这三个区走三栏分支。
             EmptyView()
@@ -602,6 +623,13 @@ struct RegularShell: View {
                 speechService: container.shared.speechService,
                 onUpdated: onUpdated
             )
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: noteID,
+                clozeRepository: container.shared.clozeRepository,
+                knowledgeService: decks.knowledgePointService,
+                onUpdated: onUpdated
+            )
         }
     }
 
@@ -609,6 +637,7 @@ struct RegularShell: View {
     /// `.doubleColumn`。reducer 已同批归一化，这里兜底——三栏语义下
     /// `.doubleColumn` 折叠的是 sidebar 而非 content。
     private func updateColumnVisibility(for section: AppSection) {
-        navigation.splitVisibility = section == .today ? .doubleColumn : .all
+        navigation.splitVisibility =
+            (section == .today || section == .reader) ? .doubleColumn : .all
     }
 }

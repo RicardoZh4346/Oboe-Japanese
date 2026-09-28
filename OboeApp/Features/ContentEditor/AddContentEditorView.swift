@@ -65,6 +65,9 @@ struct AddContentEditorView: View {
         sourceContextDraft: SourceContextDraft? = nil,
         dictionaryQueryService: DictionaryQueryService? = nil,
         sourceContextRepository: (any SourceContextRepository)? = nil,
+        /// S11：词汇正式提交成功后回调新 Note id（Reader 挖词补
+        /// lexeme 关联用）；nil = 无后续动作。
+        onVocabularyCommitted: (@MainActor (UUID) -> Void)? = nil,
         title: String = "添加"
     ) {
         self.deckService = deckService
@@ -87,24 +90,24 @@ struct AddContentEditorView: View {
         self.dictionaryQueryService = dictionaryQueryService
         self.sourceContextRepository = sourceContextRepository
         self.title = title
-        _model = State(
-            initialValue: AddContentViewModel(
-                deckService: deckService,
-                vocabularyService: vocabularyService,
-                grammarService: grammarService,
-                knowledgePointService: knowledgePointService,
-                contentCardService: contentCardService,
-                aiCardGenerationService: aiCardGenerationService,
-                sentenceAnalysisService: sentenceAnalysisService,
-                sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
-                studyService: studyService,
-                requiredDeckID: requiredDeckID,
-                capture: captureSession,
-                vocabularyPrefill: vocabularyPrefill,
-                sourceContextDraft: sourceContextDraft,
-                sourceContextRepository: sourceContextRepository
-            )
+        let viewModel = AddContentViewModel(
+            deckService: deckService,
+            vocabularyService: vocabularyService,
+            grammarService: grammarService,
+            knowledgePointService: knowledgePointService,
+            contentCardService: contentCardService,
+            aiCardGenerationService: aiCardGenerationService,
+            sentenceAnalysisService: sentenceAnalysisService,
+            sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
+            studyService: studyService,
+            requiredDeckID: requiredDeckID,
+            capture: captureSession,
+            vocabularyPrefill: vocabularyPrefill,
+            sourceContextDraft: sourceContextDraft,
+            sourceContextRepository: sourceContextRepository
         )
+        viewModel.onVocabularyCommitted = onVocabularyCommitted
+        _model = State(initialValue: viewModel)
     }
 
     var body: some View {

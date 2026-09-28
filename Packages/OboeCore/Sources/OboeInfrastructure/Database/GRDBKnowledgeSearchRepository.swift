@@ -108,7 +108,8 @@ public struct GRDBKnowledgeSearchRepository: KnowledgeSearchRepository, Sendable
             kind: kind,
             headword: row["headword"],
             reading: row["reading"],
-            meaningZH: row["meaning_zh"],
+            // v19 起 meaning_zh 可空（sentence）——归一为空串。
+            meaningZH: (row["meaning_zh"] as String?) ?? "",
             usage: row["usage"],
             isFavorite: (row["is_favorite"] as Int) != 0,
             deckIDs: deckIDs

@@ -112,7 +112,8 @@ final class JapaneseSpeechTests: XCTestCase {
         for template in [
             CardTemplateKind.vocabularyJapaneseToChinese,
             .vocabularyChineseToJapanese,
-            .grammarFormToExplanation
+            .grammarFormToExplanation,
+            .sentenceCloze
         ] {
             let policy = ReviewSpeechPolicy(
                 content: content(
@@ -124,6 +125,34 @@ final class JapaneseSpeechTests: XCTestCase {
             )
             XCTAssertNil(policy.listeningPromptText, "\(template.rawValue) 不得走听力提示音频通道")
         }
+    }
+
+    /// S14（设计 §9.3）：cloze 的 primaryText 是含答案的原句快照——
+    /// 问题面朗读等于泄题，恒为关（偏好全开也一样）；背面允许整句
+    /// TTS。听力提示通道对 sentenceCloze 恒为 nil。
+    func testSentenceClozeNeverSpeaksOnQuestionButSpeaksSentenceAfterReveal() {
+        let policy = ReviewSpeechPolicy(
+            content: content(
+                template: .sentenceCloze,
+                headword: "彼は昨日映画を見た。",
+                reading: nil,
+                example: nil
+            )
+        )
+        let preferences = SpeechPreferences(
+            autoPlayWordAudio: true,
+            autoPlayExampleAudio: true
+        )
+
+        XCTAssertFalse(policy.exposesJapaneseOnQuestion)
+        XCTAssertTrue(policy.automaticQuestionTexts(preferences: preferences).isEmpty)
+        XCTAssertNil(policy.listeningPromptText)
+        XCTAssertEqual(policy.primaryText, "彼は昨日映画を見た。")
+        XCTAssertTrue(policy.exposesPrimaryOnAnswer)
+        XCTAssertEqual(
+            policy.automaticAnswerTexts(preferences: preferences),
+            ["彼は昨日映画を見た。"]
+        )
     }
 
     func testDefaultsDisableAutomaticSpeechAndMissingReadingFallsBackToForm() {

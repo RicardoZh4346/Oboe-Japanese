@@ -22,7 +22,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         try await fixture.seedDeck(into: source)
 
         let export = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         XCTAssertTrue(PortableBackupPackageReader.isPackage(fileURL: export.url))
         let files = try fixture.unzip(export.url)
@@ -88,7 +88,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         try await fixture.seedInboxItem(into: source, imageReference: image.id)
 
         let export = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         XCTAssertEqual(export.unresolvedAttachmentIDs, [])
         XCTAssertEqual(export.attachments.count, 1)
@@ -125,7 +125,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         }
 
         let export = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         XCTAssertEqual(Set(export.attachments.map(\.id)), Set(ids))
         let files = try fixture.unzip(export.url)
@@ -144,7 +144,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         try await fixture.seedInboxItem(into: source, imageReference: image.id)
 
         let export = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         XCTAssertEqual(export.attachments.map(\.id), [image.id])
         let files = try fixture.unzip(export.url)
@@ -168,7 +168,7 @@ final class PortableBackupV7PackageTests: XCTestCase {
         )
 
         let export = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         XCTAssertEqual(export.unresolvedAttachmentIDs, ["missing-image-id"])
         XCTAssertEqual(export.attachments, [])
@@ -227,12 +227,23 @@ final class PortableBackupV7PackageTests: XCTestCase {
         await fixture.assertFails(
             older, equals: .unsupportedPackageVersion(5)
         )
+        // S23：v8 已登记为已知包版本（opt-in）。探针须越过
+        // maximumSupportedFormatVersion 才算未来版本；(8, 记录v7)
+        // 这类非法版本对的拒绝由 v8 测试专门覆盖。
         let newer = try fixture.repackaging(package.url) { files in
             files["manifest.json"] = try fixture.rewritingManifest(
                 files["manifest.json"]!
-            ) { $0["formatVersion"] = 8 }
+            ) {
+                $0["formatVersion"] =
+                    PortableBackupPackageFormat.maximumSupportedFormatVersion + 1
+            }
         }
-        await fixture.assertFails(newer, equals: .futurePackageVersion(8))
+        await fixture.assertFails(
+            newer,
+            equals: .futurePackageVersion(
+                PortableBackupPackageFormat.maximumSupportedFormatVersion + 1
+            )
+        )
     }
 
     /// manifest 声明了附件但包内缺文件 → attachmentMissing。
@@ -566,7 +577,10 @@ try fixture.unzip(package.url).keys
         let prepared = try await preparer.preparePackage(fileURL: package.url)
 
         XCTAssertEqual(prepared.sourceFormatVersion, 7)
-        XCTAssertEqual(prepared.preparedFormatVersion, 7)
+        XCTAssertEqual(
+            prepared.preparedFormatVersion,
+            PortableBackupFormat.currentVersion
+        )
         XCTAssertTrue(prepared.restoresInboxData)
         XCTAssertEqual(prepared.attachmentDescriptors.count, 2)
         XCTAssertEqual(
@@ -630,7 +644,7 @@ try fixture.unzip(package.url).keys
             imageReference: "not-in-package"
         )
         let package = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         defer { try? current.close() }
@@ -724,7 +738,7 @@ try fixture.unzip(package.url).keys
         defer { try? source.close() }
         try await fixture.seedDeck(into: source)
         let package = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
         let ndjson = try await PortableBackupExporter(
             database: source,
             workingDirectoryURL: fixture.exportsURL
@@ -742,7 +756,7 @@ try fixture.unzip(package.url).keys
         try await preparer.discard(fromPackage)
 
         let fromNDJSON = try await preparer.prepareAutomatically(fileURL: ndjson.url)
-        XCTAssertEqual(fromNDJSON.sourceFormatVersion, 7)
+        XCTAssertEqual(fromNDJSON.sourceFormatVersion, PortableBackupFormat.currentVersion)
         XCTAssertNil(fromNDJSON.stagedAttachmentsDirectoryURL)
         try await preparer.discard(fromNDJSON)
 
@@ -779,7 +793,7 @@ try fixture.unzip(package.url).keys
             )
         }
         let package = try await fixture.makePackageExporter(database: source)
-            .export(appVersion: "7.0-test", at: fixture.exportedAt)
+            .export(appVersion: "7.0-test", at: fixture.exportedAt, formatVersion: 7)
 
         let wholePackage = try Data(contentsOf: package.url)
         XCTAssertNil(wholePackage.range(of: Data("secret".utf8)))
@@ -938,7 +952,7 @@ private extension PortableBackupV7PackageTests {
                 try await seedInboxItem(into: source, imageReference: image.id)
             }
             return try await makePackageExporter(database: source)
-                .export(appVersion: "7.0-test", at: exportedAt)
+                .export(appVersion: "7.0-test", at: exportedAt, formatVersion: 7)
         }
 
         func seedDeck(

@@ -80,6 +80,9 @@ public enum SentenceAnalysisCardCreationError: Error, Equatable, Sendable {
     case tooManyItems(maximum: Int)
     case deckRequired
     case duplicateSourceItem
+    /// v0.7.0 S12：句析批量制卡只产出 vocabulary/grammar；sentence 草稿
+    /// 不进入本通道（Cloze 走 `SentenceContentCommit` 独立提交）。
+    case unsupportedDraftKind
 }
 
 extension SentenceAnalysisCardCreationError: LocalizedError {
@@ -95,6 +98,8 @@ extension SentenceAnalysisCardCreationError: LocalizedError {
             "请选择目标牌组。"
         case .duplicateSourceItem:
             "同一分析项目不能在一个批次中重复保存。"
+        case .unsupportedDraftKind:
+            "该分析项目类型不支持批量制卡。"
         }
     }
 }
@@ -215,6 +220,8 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                 _ = try draft.vocabularyForm.validatedContent()
             case .grammar:
                 _ = try draft.grammarForm.validatedContent()
+            case .sentence:
+                throw SentenceAnalysisCardCreationError.unsupportedDraftKind
             }
         }
     }
@@ -295,6 +302,8 @@ public struct SentenceAnalysisCardCreationService: Sendable {
                         sourceContext: makeContext(noteID: noteID)
                     )
                 )
+            case .sentence:
+                throw SentenceAnalysisCardCreationError.unsupportedDraftKind
             }
         }
         return try await repository.commitSentenceAnalysisCards(

@@ -30,6 +30,12 @@ struct TodayView: View {
     /// sheet 呈现闭包，regular 壳层给 sidebar section 切换闭包——
     /// 呈现策略仍归壳层，页面不感知壳层形态。
     let openSettings: (() -> Void)?
+    /// S21：「学习统计」页数据源；nil 时隐藏入口磁贴（增量接入。
+    /// 装配见 AppFeatureContainerFactory → AppStatisticsInsightSource）。
+    let statisticsSource: (any StatisticsInsightFetching)?
+    /// S22：「阅读分析」页数据源；nil 时统计页不显示入口。
+    /// 装配见 AppFeatureContainerFactory → AppReaderAnalyticsSource）。
+    let readerAnalyticsSource: (any ReaderAnalyticsFetching)?
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -59,7 +65,9 @@ struct TodayView: View {
         clearPendingContinueItem: @escaping @Sendable () -> Void = {},
         sharedCapturesAwaitingImport: Int? = nil,
         importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
-        openSettings: (() -> Void)? = nil
+        openSettings: (() -> Void)? = nil,
+        statisticsSource: (any StatisticsInsightFetching)? = nil,
+        readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil
     ) {
         self.studyService = studyService
         self.historyService = historyService
@@ -82,6 +90,8 @@ struct TodayView: View {
         self.sharedCapturesAwaitingImport = sharedCapturesAwaitingImport
         self.importAwaitingSharedCaptures = importAwaitingSharedCaptures
         self.openSettings = openSettings
+        self.statisticsSource = statisticsSource
+        self.readerAnalyticsSource = readerAnalyticsSource
         _model = State(
             initialValue: TodayViewModel(
                 studyService: studyService,
@@ -114,9 +124,8 @@ struct TodayView: View {
             }
             .navigationTitle(streakTitle)
             // 二级页（收集箱/每日统计等）经 secondaryPage() 隐藏 Tab
-            // Bar；这里显式钉住一级页的可见性，pop 返回时 Tab Bar 跟随
-            // 转场同步恢复，消除「bar 晚到 → 内容整体上移」的跳动。
-            .toolbar(.visible, for: .tabBar)
+            // Bar；一级页不钉 .visible——钉住会盖住二级页的 .hidden，
+            // pop 返回时由系统自动恢复。
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     if let openSettings {
@@ -356,8 +365,26 @@ struct TodayView: View {
         }
     }
 
-    /// 两枚等宽入口磁贴：每日统计 + 收集箱。辅助字号下纵向堆叠。
+    /// 等宽入口磁贴：学习统计（S21，源未接时隐藏）+ 每日统计 +
+    /// 收集箱。辅助字号下纵向堆叠。
     private func shortcutTiles(plan: TodayPlan, density: HomeDensity) -> some View {
+        let insightTile = statisticsSource.map { source in
+            NavigationLink {
+                StatisticsView(
+                    studyDay: plan.studyDay, source: source,
+                    readerAnalyticsSource: readerAnalyticsSource
+                )
+            } label: {
+                HomeShortcutTile(
+                    title: "学习统计",
+                    systemImage: "chart.line.uptrend.xyaxis",
+                    detail: "保持率·趋势·到期预测"
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("today-insights-entry")
+        }
+
         let statisticsTile = NavigationLink {
             DailyStatisticsView(
                 studyDay: plan.studyDay,
@@ -405,11 +432,13 @@ struct TodayView: View {
         return Group {
             if density.isAccessibility {
                 VStack(spacing: OboeTheme.Spacing.sm) {
+                    insightTile
                     statisticsTile
                     inboxTile
                 }
             } else {
                 HStack(alignment: .top, spacing: OboeTheme.Spacing.sm) {
+                    insightTile
                     statisticsTile
                     inboxTile
                 }
@@ -453,6 +482,9 @@ struct TodayView: View {
                         .foregroundStyle(.tertiary)
                         .accessibilityHidden(true)
                 }
+                // plain 样式只有内容区响应点击——宽布局下 banner 中部
+                // 的 Spacer 空白必须整行可点（iPad 实测命中区 bug）。
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("today-continue-capture-link")
@@ -596,6 +628,13 @@ struct TodayView: View {
                 speechService: speechService,
                 onUpdated: onUpdated
             )
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: noteID,
+                clozeRepository: processingServices.clozeRepository,
+                knowledgeService: processingServices.knowledgePointService,
+                onUpdated: onUpdated
+            )
         }
     }
 
@@ -620,7 +659,7 @@ struct TodayView: View {
         if model.decks.isEmpty {
             return HeroPresentation(
                 icon: "rectangle.stack.badge.plus",
-                title: "还没有学习内容",
+                title: "暂无学习内容",
                 statusText: "先到「牌组」创建牌组",
                 isActionable: false,
                 statusIdentifier: "today-no-decks",
@@ -630,7 +669,7 @@ struct TodayView: View {
         if let primary = model.primaryDeck, primary.isEmpty {
             return HeroPresentation(
                 icon: "rectangle.stack",
-                title: "还没有卡片",
+                title: "暂无卡片",
                 statusText: "这个牌组还没有卡片",
                 isActionable: false,
                 statusIdentifier: "today-empty-deck",
@@ -792,6 +831,9 @@ private struct TodayStudyButton: View {
                 .font(circleTitleFont)
                 .fontWeight(.bold)
                 .foregroundStyle(foreground)
+                // 圆盘内标题不折行——宽度不足时缩字适配。
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
             Text(hero.statusText)
                 .font(density == .regular ? .caption : .caption2)
                 .foregroundStyle(secondaryForeground)

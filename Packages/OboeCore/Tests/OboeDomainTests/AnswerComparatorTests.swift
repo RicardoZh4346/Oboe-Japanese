@@ -96,6 +96,51 @@ final class AnswerComparatorTests: XCTestCase {
         XCTAssertEqual(compare("食べる。", headword: "食べる", reading: "たべる"), .different)
     }
 
+    /// S14（设计 §9.3）：sentence_cloze 的判分集是
+    /// `cloze.acceptedAnswers`——表记与已确认读音/写法都在集内；
+    /// 词元 lemma 不会被隐式接受；整句快照（headword）永远不是
+    /// 判分基准，输入原句也判 different。
+    func testClozeAcceptedAnswerSetSemantics() {
+        let answers = ["見た", "みた"]
+        XCTAssertEqual(AnswerComparator.compare(input: "見た", acceptedAnswers: answers), .matched)
+        XCTAssertEqual(AnswerComparator.compare(input: "みた", acceptedAnswers: answers), .matched)
+        XCTAssertEqual(AnswerComparator.compare(input: "ミタ", acceptedAnswers: answers), .matched)
+        XCTAssertEqual(AnswerComparator.compare(input: " 見た ", acceptedAnswers: answers), .matched)
+        // lemma「見る」不在集内——编辑时作者可自行加入，但比较器不扩展。
+        XCTAssertEqual(AnswerComparator.compare(input: "見る", acceptedAnswers: answers), .different)
+        // 整句原句也是 different：句子承载答案语境，不是答案本身。
+        XCTAssertEqual(
+            AnswerComparator.compare(
+                input: "彼は昨日映画を見た。",
+                acceptedAnswers: answers
+            ),
+            .different
+        )
+        XCTAssertNil(AnswerComparator.compare(input: "   ", acceptedAnswers: answers))
+        XCTAssertNil(AnswerComparator.compare(input: "見た", acceptedAnswers: []))
+        XCTAssertNil(AnswerComparator.compare(input: "見た", acceptedAnswers: [" ", ""]))
+    }
+
+    /// cloze 集同样过保守 close 规则：≥4 纯假名、编辑距离 1。
+    /// 含汉字的输入不参与 close——挖空目标常含汉字，误标"接近"
+    /// 比漏标更误导。
+    func testClozeCloseRuleRequiresPureKanaOfLengthFour() {
+        let kanaAnswers = ["みました"]
+        XCTAssertEqual(
+            AnswerComparator.compare(input: "みまちた", acceptedAnswers: kanaAnswers),
+            .close
+        )
+        let surfaceAnswers = ["食べました"]
+        XCTAssertEqual(
+            AnswerComparator.compare(input: "食べまちた", acceptedAnswers: surfaceAnswers),
+            .different
+        )
+        XCTAssertEqual(
+            AnswerComparator.compare(input: "みまし", acceptedAnswers: kanaAnswers),
+            .different
+        )
+    }
+
     func testBlankInputAndEmptyAcceptedSetReturnNil() {
         for input in ["", "   ", "　", "\n"] {
             XCTAssertNil(compare(input, headword: "食べる", reading: "たべる"))

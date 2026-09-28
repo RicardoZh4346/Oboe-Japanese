@@ -19,6 +19,11 @@ public struct ReviewCardContent: Equatable, Sendable {
     public let notes: String?
     public let pitchAccent: PitchAccent?
     public let contentVersion: Int
+    /// v0.7.0 S12：`sentence_cloze` 卡的挖空定义（其 Note 的 headword 即
+    /// `sentenceSnapshot` 原句——正面渲染必须经
+    /// `ClozeValidator.maskedSentence` 遮罩，绝不直接展示 headword）。
+    /// 非 cloze 模板恒为 nil。
+    public let cloze: ClozeDefinition?
 
     public init(
         cardID: UUID,
@@ -36,7 +41,8 @@ public struct ReviewCardContent: Equatable, Sendable {
         notes: String?,
         contentVersion: Int = 1,
         pitchAccent: PitchAccent? = nil,
-        deckIDs: Set<UUID>? = nil
+        deckIDs: Set<UUID>? = nil,
+        cloze: ClozeDefinition? = nil
     ) {
         self.cardID = cardID
         self.noteID = noteID
@@ -54,6 +60,7 @@ public struct ReviewCardContent: Equatable, Sendable {
         self.notes = notes
         self.pitchAccent = pitchAccent
         self.contentVersion = contentVersion
+        self.cloze = cloze
     }
 }
 

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+@testable import OboeInfrastructure
 import XCTest
 
 /// Parses an export into ordered JSON objects, applies `transform`, then
@@ -41,14 +42,43 @@ func rewriteBackup(
 }
 
 /// Reshapes a current export into a restorable older format for fixture
-/// tests. v6 loses `sourceContext` 与三张 Custom Study 记录；v5 再丢
+/// tests. v7 loses the v8-only record types 与 `sourceContext` 的 Reader
+/// 定位列；v6 loses `sourceContext` 与三张 Custom Study 记录；v5 再丢
 /// `pitch_accent`/`noteDeck`；v4 additionally loses
 /// `primary_deck_id`; v3 loses the four Adaptive settings keys; v1/v2
 /// additionally lose the Inbox records, `excludedScopes`, and (for v1) the
 /// note `source_ref` column.
 func downgradeBackupToLegacyFormat(_ objects: inout [[String: Any]], version: Int) {
-    precondition((1...6).contains(version), "downgrade only produces v1–v6 files")
+    precondition((1...7).contains(version), "downgrade only produces v1–v7 files")
+
+    // v8 → v7：剥离 v8 新增记录类型与 sourceContext 的 Reader 定位列，
+    // manifest 的 recordOrder/counts/excludedScopes 一并回退到 v7 口径。
+    let v8OnlyTypes = Set(PortableBackupFormatV8.recordTypes)
+        .subtracting(PortableBackupFormatV7.recordTypes)
+    for index in objects.indices where objects[index]["recordType"] as? String == "manifest" {
+        if var recordOrder = objects[index]["recordOrder"] as? [String] {
+            recordOrder.removeAll { v8OnlyTypes.contains($0) }
+            objects[index]["recordOrder"] = recordOrder
+        }
+        if var counts = objects[index]["counts"] as? [String: Any] {
+            for key in v8OnlyTypes { counts.removeValue(forKey: key) }
+            objects[index]["counts"] = counts
+        }
+        objects[index]["excludedScopes"] = PortableBackupFormat.excludedScopes
+    }
+    objects.removeAll {
+        v8OnlyTypes.contains($0["recordType"] as? String ?? "")
+    }
+    let v8SourceContextColumns =
+        PortableBackupFormatV8.sourceContextColumnsAddedInV8
+    for index in objects.indices where objects[index]["recordType"] as? String == "sourceContext" {
+        for key in v8SourceContextColumns {
+            objects[index].removeValue(forKey: key)
+        }
+    }
+
     objects[0]["formatVersion"] = version
+    if version == 7 { return }
 
     // v7 → v1…v6: 无 sourceContext 与 Custom Study 记录。
     let v7Types = [

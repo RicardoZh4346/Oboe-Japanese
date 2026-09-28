@@ -15,6 +15,9 @@ public enum RecallMode: Equatable, Sendable {
             preferences.typedAnswerListening ? .typedJapanese : .revealOnly
         case .vocabularyJapaneseToChinese, .grammarFormToExplanation:
             .revealOnly
+        case .sentenceCloze:
+            // v0.7.0 S12：挖空作答天然是输入型，不受词汇 typed 开关控制。
+            .typedJapanese
         }
     }
 }

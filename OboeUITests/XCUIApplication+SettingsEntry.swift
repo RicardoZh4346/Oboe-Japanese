@@ -1,16 +1,31 @@
 import XCTest
 
-/// v0.5.8：compact 壳层的设置入口从底部 Tab 收进今日页右上角齿轮，
-/// 以 sheet 呈现。所有需要进入设置页的用例统一走这里——入口形态
-/// 再变时只改这一处。
+/// 设置入口统一封装——入口形态随壳层不同：
+/// - compact：今日页齿轮 → 设置 sheet（v0.5.8）；
+/// - regular：sidebar「设置」行 → 三栏（分类列 + detail 列）。
+/// 所有需要进入设置页的用例统一走这里。
 extension XCUIApplication {
 
-    /// 今日页齿轮 → 设置 sheet。若当前停在其它 Tab 先回今日页。
+    /// 进入设置区。compact=今日页齿轮开 sheet；regular=点
+    /// sidebar-settings（若正停在今日页也可走齿轮——两条路径
+    /// 都落到同一个设置 section，这里统一走 sidebar，与当前
+    /// section 无关）。
     @MainActor
     func openSettingsFromTodayGear(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if isRegularShell {
+            tapSidebarRow("sidebar-settings", file: file, line: line)
+            XCTAssertTrue(
+                collectionViews["settings-category-list"]
+                    .waitForExistence(timeout: 5),
+                "设置分类列未出现",
+                file: file,
+                line: line
+            )
+            return
+        }
         let todayTab = tabBars.buttons["今日"]
         if todayTab.exists {
             todayTab.tap()
@@ -31,12 +46,17 @@ extension XCUIApplication {
         )
     }
 
-    /// 关闭设置 sheet（右上角「完成」）。
+    /// 离开设置区。compact=点「完成」关 sheet；regular 无
+    /// sheet——设置是三栏 section，直接返回，由调用方经
+    /// `selectPrimarySection` 切走。
     @MainActor
     func dismissSettingsSheet(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        if isRegularShell {
+            return
+        }
         let done = buttons["settings-done-button"].firstMatch
         XCTAssertTrue(
             done.waitForExistence(timeout: 5),

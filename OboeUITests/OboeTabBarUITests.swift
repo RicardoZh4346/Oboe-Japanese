@@ -11,6 +11,13 @@ import XCTest
 final class OboeTabBarUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+        // 整套件只验证 compact 壳层的 Tab Bar 行为；iPad regular
+        // 走三栏 NavigationSplitView，无 Tab Bar——整体跳过。
+        // （应用未启动时 isRegularShell 退回设备族判定，等价 iPad。）
+        try XCTSkipIf(
+            XCUIApplication().isRegularShell,
+            "Tab Bar 属 compact 壳层，regular 壳层不适用"
+        )
     }
 
     // MARK: - 工具
@@ -275,7 +282,7 @@ final class OboeTabBarUITests: XCTestCase {
 
         let about = app.buttons["about-navigation-link"]
         for _ in 0..<12 where !(about.exists && about.isHittable) {
-            app.collectionViews.firstMatch.swipeUp()
+            app.swipeContainerUp(app.collectionViews.firstMatch)
         }
         XCTAssertTrue(about.waitForExistence(timeout: 5))
         about.tap()
@@ -476,9 +483,7 @@ final class OboeTabBarUITests: XCTestCase {
         )
 
         let inbox = app.descendants(matching: .any)["today-inbox-entry"]
-        for _ in 0..<10 where !(inbox.exists && inbox.isHittable) {
-            app.swipeUp()
-        }
+        app.revealElement(inbox, passes: 10)
         XCTAssertTrue(inbox.isHittable, "ax5 下收集箱磁贴必须滚动可达")
     }
 

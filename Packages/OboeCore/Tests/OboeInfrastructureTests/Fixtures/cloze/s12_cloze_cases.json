@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "generatedFor": "v0.7.0 S12 — synthetic cloze cases; consumed by ClozeFixtureTests now and by the S23 backup/restore round-trip suite later",
+  "conventions": {
+    "sentenceSHA256": "SHA-256 of the sentence's UTF-8 byte stream, lowercase hex — identical to cloze_definitions.sentence_sha256",
+    "rangeUtf16Start/Length": "UTF-16 code-unit offsets into sentenceSnapshot (never String.Index)",
+    "rangeVersion": "absent means ClozeRange.currentVersion (1); non-1 values must be rejected by the persisted replay path",
+    "blank": "the literal used by tests when checking masked output"
+  },
+  "blank": "____",
+  "validCases": [
+    {
+      "id": "basic-kanji-target",
+      "notes": "baseline: contiguous BMP text",
+      "sentence": "私は昨日映画を見た。",
+      "sentenceSHA256": "2b2de942e32d25fdad26ce16a510651a223645ddd6d25bf08bf286ebfac90302",
+      "targetSurface": "見た",
+      "targetLemma": "見る",
+      "targetReading": "みた",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["見た", "みた"],
+      "hint": "動詞・過去形",
+      "meaningZh": "我昨天看了电影。",
+      "expectedMasked": "私は昨日映画を____。"
+    },
+    {
+      "id": "target-after-surrogate-pair",
+      "notes": "target sits after an astral emoji — UTF-16 offsets must count both surrogate units",
+      "sentence": "彼女は🎬を見に行った。",
+      "sentenceSHA256": "3b3f352b0da3009a8964be6990a66c8ce0533167ab58421003c076ba82ad60f9",
+      "targetSurface": "行った",
+      "targetLemma": "行く",
+      "targetReading": "いった",
+      "rangeUtf16Start": 8,
+      "rangeUtf16Length": 3,
+      "acceptedAnswers": ["行った", "いった"],
+      "hint": null,
+      "meaningZh": "她去看电影了。",
+      "expectedMasked": "彼女は🎬を見に____。"
+    },
+    {
+      "id": "emoji-target",
+      "notes": "the blank itself is an astral-plane emoji (range length 2)",
+      "sentence": "答えは🎯だ。",
+      "sentenceSHA256": "53dfae1c362673aa6edc1ec6d256fdc7871f68219000d3e3046fbb2d726409ac",
+      "targetSurface": "🎯",
+      "targetLemma": null,
+      "targetReading": null,
+      "rangeUtf16Start": 3,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["🎯"],
+      "hint": "target symbol",
+      "meaningZh": null,
+      "expectedMasked": "答えは____だ。"
+    },
+    {
+      "id": "decomposed-kana-target",
+      "notes": "target is a combining sequence (か + U+3099): 2 UTF-16 units, 1 grapheme; precomposed が dedupes to the decomposed entry under canonical equivalence",
+      "sentence": "彼は「が」と言った。",
+      "sentenceSHA256": "fe39f52bb56d664c939dbcb8a658109277ddb2c9e0d8f6a63919f6b0f8a32eb1",
+      "targetSurface": "が",
+      "targetLemma": null,
+      "targetReading": null,
+      "rangeUtf16Start": 3,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["が", "が"],
+      "expectedNormalizedAnswers": ["が"],
+      "hint": null,
+      "meaningZh": "他说了「が」。",
+      "expectedMasked": "彼は「____」と言った。"
+    },
+    {
+      "id": "target-after-zwj-sequence",
+      "notes": "family emoji (8 UTF-16 units, 1 grapheme) precedes the target",
+      "sentence": "家族は👨‍👩‍👧と旅行した。",
+      "sentenceSHA256": "f99092f49b36b57d8a514a58b3e699991e60a0b4d7664fa3c7fdca3dbbb04729",
+      "targetSurface": "旅行",
+      "targetLemma": null,
+      "targetReading": "りょこう",
+      "rangeUtf16Start": 12,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["旅行", "りょこう"],
+      "hint": null,
+      "meaningZh": "和家人一起旅行了。",
+      "expectedMasked": "家族は👨‍👩‍👧と____した。"
+    },
+    {
+      "id": "duplicate-surface-second-occurrence",
+      "notes": "target surface appears twice; only the ranged occurrence is masked (no global replace)",
+      "sentence": "彼が言ったことは彼が言った通りだ",
+      "sentenceSHA256": "8e3ed6c2feda7504500a7527e693911da2b54390f224619765d3b66d85e1bf38",
+      "targetSurface": "言った",
+      "targetLemma": "言う",
+      "targetReading": "いった",
+      "rangeUtf16Start": 10,
+      "rangeUtf16Length": 3,
+      "acceptedAnswers": ["言った", "いった"],
+      "hint": null,
+      "meaningZh": "正如他所说",
+      "expectedMasked": "彼が言ったことは彼が____通りだ"
+    },
+    {
+      "id": "whitespace-answers-normalized",
+      "notes": "accepted answers are trimmed, empties dropped, order preserved, duplicates removed",
+      "sentence": "私は昨日映画を見た。",
+      "sentenceSHA256": "2b2de942e32d25fdad26ce16a510651a223645ddd6d25bf08bf286ebfac90302",
+      "targetSurface": "見た",
+      "targetLemma": "見る",
+      "targetReading": "みた",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": [" 見た ", "みた", "", "みた", "　"],
+      "expectedNormalizedAnswers": ["見た", "みた"],
+      "hint": null,
+      "meaningZh": null,
+      "expectedMasked": "私は昨日映画を____。"
+    },
+    {
+      "id": "minimal-fields",
+      "notes": "no lemma/reading/hint/meaning — sentence meaning is nullable since v19",
+      "sentence": "毎朝本を読む。",
+      "sentenceSHA256": "4a74d1c4986b41754aaa0bc2fe21f5637bd0c49d01c86a1f165d03cef5893ca2",
+      "targetSurface": "読む",
+      "targetLemma": null,
+      "targetReading": null,
+      "rangeUtf16Start": 4,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["読む"],
+      "hint": null,
+      "meaningZh": null,
+      "expectedMasked": "毎朝本を____。"
+    }
+  ],
+  "invalidCases": [
+    {
+      "id": "empty-sentence",
+      "sentence": "",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 0,
+      "rangeUtf16Length": 1,
+      "acceptedAnswers": ["見た"],
+      "expectedError": "emptySentence"
+    },
+    {
+      "id": "empty-accepted-answers",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": [],
+      "expectedError": "emptyAcceptedAnswers"
+    },
+    {
+      "id": "range-out-of-bounds",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 8,
+      "rangeUtf16Length": 5,
+      "acceptedAnswers": ["見た"],
+      "expectedError": "invalidRange"
+    },
+    {
+      "id": "range-zero-length",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 0,
+      "acceptedAnswers": ["見た"],
+      "expectedError": "invalidRange"
+    },
+    {
+      "id": "range-splits-surrogate-pair",
+      "sentence": "答えは🎯だ。",
+      "targetSurface": "🎯",
+      "rangeUtf16Start": 4,
+      "rangeUtf16Length": 1,
+      "acceptedAnswers": ["🎯"],
+      "expectedError": "invalidRange"
+    },
+    {
+      "id": "range-splits-combining-sequence",
+      "sentence": "彼は「が」と言った。",
+      "targetSurface": "か",
+      "rangeUtf16Start": 3,
+      "rangeUtf16Length": 1,
+      "acceptedAnswers": ["か"],
+      "expectedError": "invalidRange"
+    },
+    {
+      "id": "surface-mismatch",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "行った",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["行った"],
+      "expectedError": "rangeSurfaceMismatch"
+    },
+    {
+      "id": "answers-missing-surface",
+      "notes": "reading-only answer set: surface itself must be present (§9.3)",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["みた"],
+      "expectedError": "acceptedAnswersMissingSurface"
+    },
+    {
+      "id": "range-version-unsupported",
+      "notes": "persisted row from a future encoder must be rejected, not misdecoded as v1",
+      "sentence": "私は昨日映画を見た。",
+      "targetSurface": "見た",
+      "rangeVersion": 99,
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["見た"],
+      "expectedError": "unsupportedRangeVersion"
+    },
+    {
+      "id": "snapshot-hash-mismatch",
+      "notes": "restore path: declared hash does not match the snapshot (tampered or corrupt backup row)",
+      "sentence": "私は昨日映画を見た。",
+      "sentenceSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "targetSurface": "見た",
+      "rangeUtf16Start": 7,
+      "rangeUtf16Length": 2,
+      "acceptedAnswers": ["見た"],
+      "expectedError": "snapshotHashMismatch"
+    }
+  ]
+}

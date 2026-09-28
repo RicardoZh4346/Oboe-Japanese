@@ -78,6 +78,9 @@ final class AddContentViewModel {
     /// S07：已有 Note 加牌组时的来源落库通道；nil（旧测试构造）时
     /// 跳过来源保存，成员关系不受影响。
     let sourceContextRepository: (any SourceContextRepository)?
+    /// S11 Reader 挖词：词汇正式提交成功后回调新 Note id——调用方
+    ///（Inspector）用它补 lexeme↔Note 关联。可选，默认 nil。
+    var onVocabularyCommitted: (@MainActor (UUID) -> Void)?
 
     /// S07 编辑器内查词选中词条：表单按词条预填（覆盖当前表单值），
     /// 来源草稿在既有 lookup 事实（OCR 原句/图片等）上叠词典快照。

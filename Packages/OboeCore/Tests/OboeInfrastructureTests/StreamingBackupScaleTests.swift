@@ -540,7 +540,7 @@ final class StreamingBackupScaleTests: XCTestCase {
     ) throws -> Data {
         try PortableBackupPackageManifest(
             format: PortableBackupFormat.identifier,
-            formatVersion: PortableBackupPackageFormat.formatVersion,
+            formatVersion: PortableBackupPackageFormat.formatVersionV7,
             container: PortableBackupPackageFormat.container,
             appVersion: "s04-scale",
             exportedAt: PortableBackupPackageFormat.iso8601String(

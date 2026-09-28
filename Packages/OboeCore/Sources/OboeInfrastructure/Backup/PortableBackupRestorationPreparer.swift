@@ -348,6 +348,19 @@ public actor PortableBackupRestorationPreparer {
                     in: db,
                     restoredAt: manifest.exportedAt
                 )
+                // v8 新表的恢复语义（§14.2）：Reader 文档不得假恢复成
+                // 内容可用态；未终态 import job 标 interrupted；active 活用
+                // 会话无运行态可言，标 abandoned。v1–v7 库中各表为空，
+                // 三调用都是无操作。
+                try Self.finalizeImportedReaderData(in: db)
+                try Self.finalizeImportedImportJobs(
+                    in: db,
+                    restoredAt: manifest.exportedAt
+                )
+                try Self.finalizeImportedConjugationData(
+                    in: db,
+                    restoredAt: manifest.exportedAt
+                )
                 // v7：manifest 声明的附件元数据随恢复一并登记。所有 descriptor
                 // 已通过包校验，这里只做幂等插入（临时库为空表，不会冲突）。
                 if !attachmentDescriptors.isEmpty {
@@ -399,7 +412,13 @@ public actor PortableBackupRestorationPreparer {
                 sourceFilename: sourceFilename,
                 sourceFormatVersion: sourceFormatVersionOverride
                     ?? manifest.sourceFormatVersion,
-                preparedFormatVersion: PortableBackupFormat.currentVersion,
+                // 源是 v8 时报 8（数据已按当前 schema 恢复）；v1–v7 源
+                // 维持既有语义——升级到当前默认版本回报。
+                preparedFormatVersion: max(
+                    sourceFormatVersionOverride
+                        ?? manifest.sourceFormatVersion,
+                    PortableBackupFormat.currentVersion
+                ),
                 sourceAppVersion: manifest.appVersion,
                 exportedAt: manifest.exportedAt,
                 backup: backupSummary,
@@ -567,7 +586,33 @@ private extension PortableBackupRestorationPreparer {
         "practice_attempts.id", "practice_attempts.event_id",
         "practice_attempts.session_id", "practice_attempts.card_key",
         "practice_attempts.note_id",
-        "scheduled_review_origins.event_id", "scheduled_review_origins.session_id"
+        "scheduled_review_origins.event_id", "scheduled_review_origins.session_id",
+        // v8：Reader 元数据 / lexical / Cloze / 历史 / Import / 活用各表的
+        // UUID 形列（含弱引用列——形状检查先于任何存在性裁决）。
+        "reader_documents.id",
+        "reader_chapters.id", "reader_chapters.document_id",
+        "reader_positions.document_id", "reader_positions.chapter_id",
+        "reader_bookmarks.id", "reader_bookmarks.document_id",
+        "reader_bookmarks.chapter_id",
+        "lexemes.id",
+        "lexeme_note_links.lexeme_id", "lexeme_note_links.note_id",
+        "vocabulary_knowledge_overrides.lexeme_id",
+        "source_contexts.reader_document_id", "source_contexts.reader_chapter_id",
+        "cloze_definitions.id", "cloze_definitions.note_id",
+        "cloze_definitions.card_id", "cloze_definitions.source_context_id",
+        "reader_activity_events.id", "reader_activity_events.operation_id",
+        "reader_activity_events.lexeme_id", "reader_activity_events.note_id",
+        "reader_activity_events.document_id",
+        "reader_mining_receipts.operation_id",
+        "reader_coverage_snapshots.id", "reader_coverage_snapshots.document_id",
+        "reader_coverage_snapshots.chapter_id",
+        "reader_coverage_snapshots.study_day_id",
+        "import_jobs.id", "import_jobs.target_deck_id",
+        "import_row_receipts.job_id", "import_row_receipts.target_note_id",
+        "conjugation_sessions.id",
+        "conjugation_practice_attempts.id", "conjugation_practice_attempts.event_id",
+        "conjugation_practice_attempts.session_id",
+        "conjugation_practice_attempts.question_id"
     ]
 
     static func fileSize(at url: URL) throws -> Int64 {
@@ -591,16 +636,10 @@ private extension PortableBackupRestorationPreparer {
         }
         let manifestObject = try jsonObject(from: manifestLine, lineNumber: lineNumber)
         let manifest = try parseManifest(manifestObject, limits: limits)
-        let sourceSpecifications: [PortableBackupTableSpecification]
-        switch manifest.sourceFormatVersion {
-        case 1: sourceSpecifications = PortableBackupFormatV1.tableSpecifications
-        case 2: sourceSpecifications = PortableBackupFormatV2.tableSpecifications
-        case 3: sourceSpecifications = PortableBackupFormatV3.tableSpecifications
-        case 4: sourceSpecifications = PortableBackupFormatV4.tableSpecifications
-        case 5: sourceSpecifications = PortableBackupFormatV5.tableSpecifications
-        case 6: sourceSpecifications = PortableBackupFormatV6.tableSpecifications
-        case 7: sourceSpecifications = PortableBackupFormatV7.tableSpecifications
-        default:
+        // §14.1 registry：源版本 → 该版本冻结的不可变表规格。
+        guard let sourceSpecifications = PortableBackupFormatRegistry
+            .tableSpecifications(forVersion: manifest.sourceFormatVersion)
+        else {
             throw PortableBackupPreparationError.unsupportedFormatVersion(
                 manifest.sourceFormatVersion
             )
@@ -650,8 +689,11 @@ private extension PortableBackupRestorationPreparer {
                 return manifest
             }
 
+            // 未知记录类型一律拒绝（不静默丢弃）：先在源版本规格里查，
+            // 再要求该类型在当前 schema 的目标规格中存在。
             guard let sourceSpecification = sourceSpecificationByType[recordType],
-                  let currentSpecification = PortableBackupFormatV7.specificationByRecordType[recordType],
+                  let currentSpecification = PortableBackupFormatRegistry
+                    .targetSpecificationByRecordType[recordType],
                   let recordIndex = sourceRecordTypes.firstIndex(of: recordType) else {
                 throw PortableBackupPreparationError.unexpectedRecordType(
                     line: lineNumber,
@@ -711,10 +753,11 @@ private extension PortableBackupRestorationPreparer {
         limits: PortableBackupPreparationLimits
     ) throws -> ParsedManifest {
         // A higher-than-current format is rejected on version alone — its field
-        // contract is unknown by definition. At or below currentVersion the key
-        // set must match the declared version exactly (v3+ adds excludedScopes).
+        // contract is unknown by definition. At or below the maximum supported
+        // version the key set must match the declared version exactly
+        // (v3+ adds excludedScopes)。
         if let peeked = object["formatVersion"] as? Int,
-           peeked > PortableBackupFormat.currentVersion {
+           peeked > PortableBackupFormatRegistry.maximumSupportedVersion {
             throw PortableBackupPreparationError.futureFormatVersion(peeked)
         }
         let expectedKeys = (object["formatVersion"] as? Int ?? 0) >= 3
@@ -760,16 +803,8 @@ private extension PortableBackupRestorationPreparer {
         guard let exportedAt = iso8601Date(from: exportedAtString) else {
             throw PortableBackupPreparationError.invalidManifest("exportedAt 不是有效 UTC ISO 8601。")
         }
-        let expectedRecordTypes: [String]
-        switch version {
-        case 1: expectedRecordTypes = PortableBackupFormatV1.recordTypes
-        case 2: expectedRecordTypes = PortableBackupFormatV2.recordTypes
-        case 3: expectedRecordTypes = PortableBackupFormatV3.recordTypes
-        case 4: expectedRecordTypes = PortableBackupFormatV4.recordTypes
-        case 5: expectedRecordTypes = PortableBackupFormatV5.recordTypes
-        case 6: expectedRecordTypes = PortableBackupFormatV6.recordTypes
-        case 7: expectedRecordTypes = PortableBackupFormatV7.recordTypes
-        default:
+        guard let expectedRecordTypes = PortableBackupFormatRegistry
+            .recordTypes(forVersion: version) else {
             throw PortableBackupPreparationError.unsupportedFormatVersion(version)
         }
         guard let recordOrder = object["recordOrder"] as? [String],
@@ -820,7 +855,9 @@ private extension PortableBackupRestorationPreparer {
     }
 
     static func validateMigrationPath(from version: Int) throws {
-        if version > PortableBackupFormat.currentVersion {
+        // v8 是已登记的恢复目标（opt-in 导出）；比 registry 上限新的
+        // 版本字段契约未知，按 future 拒绝。
+        if version > PortableBackupFormatRegistry.maximumSupportedVersion {
             throw PortableBackupPreparationError.futureFormatVersion(version)
         }
         guard version >= 1 else {
@@ -853,6 +890,14 @@ private extension PortableBackupRestorationPreparer {
             migrated["auto_play_listening_audio"] = defaults.autoPlayListeningAudio ? 1 : 0
             migrated["typed_answer_listening"] = defaults.typedAnswerListening ? 1 : 0
             migrated["leech_reminders_enabled"] = defaults.leechRemindersEnabled ? 1 : 0
+        }
+        if sourceVersion < PortableBackupFormatRegistry.v8Version,
+           migrated["recordType"] as? String == "sourceContext" {
+            // v8 起 sourceContext 带 4 个 Reader 定位列（v19 schema 新增）。
+            // 旧备份无 → 填 NULL：弱引用列绝不伪造来源归属。
+            for column in PortableBackupFormatV8.sourceContextColumnsAddedInV8 {
+                migrated[column] = NSNull()
+            }
         }
         return migrated
     }
@@ -903,7 +948,8 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        for specification in PortableBackupFormatV7.tableSpecifications {
+        // 写入目标是当前 schema 对应的记录协议（registry target = v8）。
+        for specification in PortableBackupFormatRegistry.targetSpecifications {
             let rows = try Row.fetchAll(
                 db,
                 sql: "PRAGMA table_info(\(specification.tableName))"
@@ -1047,6 +1093,11 @@ private extension PortableBackupRestorationPreparer {
         try validateCardTemplates(in: db)
         try validateNoteDeckData(in: db)
         try validateCustomStudyData(in: db)
+        // v8 新域的语义校验（§14.2-3/4）。v1–v7 库中各表为空 → 全部无操作。
+        try validateReaderMetadata(in: db)
+        try validateLexemeData(in: db)
+        try validateClozeData(in: db)
+        try validateImportJobData(in: db)
         return try summarizeDatabase(db)
     }
 
@@ -1371,6 +1422,371 @@ private extension PortableBackupRestorationPreparer {
         )
     }
 
+    /// v8 Reader 元数据恢复语义（§14.2-4/6）：备份里没有正文文件，
+    /// 导入后绝不能声称内容可用——`available`/`processing` 一律降为
+    /// `missing`（重关联流程接管）；`failed`/`missing` 原样保留历史事实。
+    static func finalizeImportedReaderData(in db: Database) throws {
+        try db.execute(
+            sql: """
+                UPDATE reader_documents
+                SET availability = 'missing'
+                WHERE availability IN ('available', 'processing')
+                """
+        )
+    }
+
+    /// v8 import job 恢复语义（S17 §10.3）：导出时未终态的 job 在新设备
+    /// 上没有执行体——恢复即标 interrupted。staging 文件不进备份，
+    /// `staging_file_name`/`staging_fingerprint` 保留为历史元数据
+    /// （文件名而非路径；续传因文件缺失自然不成立）。
+    static func finalizeImportedImportJobs(
+        in db: Database,
+        restoredAt: Date
+    ) throws {
+        let restoredAtMilliseconds = try DatabaseValueCodec.encode(restoredAt)
+        try db.execute(
+            sql: """
+                UPDATE import_jobs
+                SET status = 'interrupted', updated_at_ms = ?
+                WHERE status IN ('previewed', 'running')
+                """,
+            arguments: [restoredAtMilliseconds]
+        )
+    }
+
+    /// v8 活用会话恢复语义（与 custom study 的 interrupted 同型）：
+    /// 备份里仍 active 的 session 在新设备上没有运行态——恢复即
+    /// abandoned，finished_at 取导出时刻。attempt 历史行原样保留。
+    static func finalizeImportedConjugationData(
+        in db: Database,
+        restoredAt: Date
+    ) throws {
+        let restoredAtMilliseconds = try DatabaseValueCodec.encode(restoredAt)
+        try db.execute(
+            sql: """
+                UPDATE conjugation_sessions
+                SET status = 'abandoned', finished_at_ms = ?
+                WHERE status = 'active'
+                """,
+            arguments: [restoredAtMilliseconds]
+        )
+    }
+
+    /// v8 Reader 元数据语义校验（§14.2-3/4）：hash 形态、chapter→document
+    /// 归属一致性、locator 结构。无正文时定位只能做结构/数值校验——
+    /// 不声称验证了「位置在原文内」，重关联后才做文本匹配。
+    static func validateReaderMetadata(in db: Database) throws {
+        let documents = try Row.fetchAll(
+            db,
+            sql: "SELECT id, source_sha256 FROM reader_documents"
+        )
+        for row in documents {
+            let id: String = row["id"]
+            let sha: String = row["source_sha256"]
+            guard isLowercaseSHA256Hex(sha) else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "Reader 文档 \(id) 的 source_sha256 不是小写十六进制摘要。"
+                )
+            }
+        }
+        // chapter 引用若存在必须归属同一 document（FK 只保证章节存在；
+        // 跨文档挂接是 FK 看不到的错误形态）。
+        let crossDocumentPositions = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM reader_positions p
+                JOIN reader_chapters c ON c.id = p.chapter_id
+                WHERE c.document_id != p.document_id
+                """
+        ) ?? 0
+        guard crossDocumentPositions == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(crossDocumentPositions) 条阅读位置的章节不属于其文档。"
+            )
+        }
+        let crossDocumentBookmarks = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM reader_bookmarks b
+                JOIN reader_chapters c ON c.id = b.chapter_id
+                WHERE c.document_id != b.document_id
+                """
+        ) ?? 0
+        guard crossDocumentBookmarks == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(crossDocumentBookmarks) 条书签的章节不属于其文档。"
+            )
+        }
+        // locator_json：解码 ReaderLocation + 版本/数值/上下文上限校验。
+        let positionRows = try Row.fetchAll(
+            db,
+            sql: "SELECT document_id, locator_json FROM reader_positions"
+        )
+        for row in positionRows {
+            let documentID: String = row["document_id"]
+            let locatorJSON: String = row["locator_json"]
+            try validateReaderLocation(
+                locatorJSON,
+                context: "阅读位置（文档 \(documentID)）"
+            )
+        }
+        let bookmarkRows = try Row.fetchAll(
+            db,
+            sql: "SELECT id, locator_json FROM reader_bookmarks"
+        )
+        for row in bookmarkRows {
+            let id: String = row["id"]
+            let locatorJSON: String = row["locator_json"]
+            try validateReaderLocation(locatorJSON, context: "书签 \(id)")
+        }
+        // sourceContext 的 Reader 定位列（v8 新增弱引用）按同一规则校验。
+        let contextRows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, reader_location FROM source_contexts
+                WHERE reader_location IS NOT NULL
+                """
+        )
+        for row in contextRows {
+            let id: String = row["id"]
+            let locationJSON: String = row["reader_location"]
+            try validateReaderLocation(
+                locationJSON,
+                context: "来源上下文 \(id)"
+            )
+        }
+        // 弱引用一致性：章节行存在时其 document_id 必须与声明一致。
+        let mismatchedContexts = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM source_contexts sc
+                JOIN reader_chapters c ON c.id = sc.reader_chapter_id
+                WHERE sc.reader_document_id IS NOT NULL
+                  AND c.document_id != sc.reader_document_id
+                """
+        ) ?? 0
+        guard mismatchedContexts == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(mismatchedContexts) 条来源上下文的章节与文档声明不一致。"
+            )
+        }
+    }
+
+    /// ReaderLocation JSON 的结构/数值校验（§14.2-4）：版本已知、序号
+    /// 与偏移非负、prefix/suffix 不超领域层上限、cue 起点非负。
+    /// 不做文本内位置验证——无正文时无法也不应声称已验证。
+    static func validateReaderLocation(_ json: String, context: String) throws {
+        guard let location = try? JSONDecoder().decode(
+            ReaderLocation.self,
+            from: Data(json.utf8)
+        ) else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "\(context) 的 Reader 定位无法解码。"
+            )
+        }
+        guard location.version == ReaderLocation.currentVersion,
+              location.chapterOrdinal >= 0,
+              location.blockOrdinal >= 0,
+              location.utf16Offset >= 0,
+              (location.cueStartMilliseconds ?? 0) >= 0,
+              !location.blockTextHash.isEmpty,
+              location.prefix.count <= ReaderLocation.contextCharacterLimit,
+              location.suffix.count <= ReaderLocation.contextCharacterLimit
+        else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "\(context) 的 Reader 定位结构无效。"
+            )
+        }
+    }
+
+    /// v8 lexical 语义校验（§14.2-3 / D08）：identity_key 必须与
+    /// `LexicalIdentityKey` 的编码约定一致——provider 前缀、jmdict 的
+    /// external_id/entry_id 段、local 的 external_id 重载逐位核对，
+    /// 不按汉字盲合并。
+    static func validateLexemeData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT id, provider, external_id, entry_id, identity_key
+                FROM lexemes
+                """
+        )
+        for row in rows {
+            let id: String = row["id"]
+            let provider: String = row["provider"]
+            let externalID: String = row["external_id"]
+            let entryID: Int64? = row["entry_id"]
+            let identityKey: String = row["identity_key"]
+            guard identityKey.hasPrefix("\(provider)|") else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "lexeme \(id) 的 identity_key 与 provider 不符。"
+                )
+            }
+            switch provider {
+            case "jmdict":
+                guard let entryID,
+                      externalID == String(entryID),
+                      identityKey.hasPrefix("jmdict|\(externalID)|") else {
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "lexeme \(id) 的 identity_key/entry_id 组合不一致。"
+                    )
+                }
+            case "local":
+                guard identityKey == "local|\(externalID)" else {
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "lexeme \(id) 的 identity_key 与 external_id 不符。"
+                    )
+                }
+            default:
+                throw PortableBackupPreparationError.databaseValidation(
+                    "lexeme \(id) 的 provider \(provider) 未知。"
+                )
+            }
+        }
+    }
+
+    /// v8 Cloze 语义校验（§9.1/D07/§14.2-3）：每条定义必须过
+    /// `ClozeValidator.validatePersisted` 同级的 hash/range/surface/
+    /// accepted-answers 全量校验——快照自足，坏记录整包拒绝；
+    /// note/card/source 组合必须一致；每个 sentence Note 恰一条定义、
+    /// 恰一张 sentence_cloze 卡（双向完整性都查）。
+    static func validateClozeData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+                SELECT d.id, d.note_id, d.card_id, d.sentence_snapshot,
+                       d.sentence_sha256, d.range_version, d.range_utf16_start,
+                       d.range_utf16_length, d.target_surface,
+                       d.accepted_answers_json,
+                       n.kind AS note_kind, c.template_kind AS card_template,
+                       c.note_id AS card_note_id,
+                       sc.note_id AS context_note_id
+                FROM cloze_definitions d
+                JOIN notes n ON n.id = d.note_id
+                JOIN cards c ON c.id = d.card_id
+                LEFT JOIN source_contexts sc ON sc.id = d.source_context_id
+                """
+        )
+        let decoder = JSONDecoder()
+        for row in rows {
+            let id: String = row["id"]
+            let noteID: String = row["note_id"]
+            let noteKind: String = row["note_kind"]
+            let cardTemplate: String = row["card_template"]
+            let cardNoteID: String = row["card_note_id"]
+            let contextNoteID: String? = row["context_note_id"]
+            guard noteKind == "sentence",
+                  cardTemplate == "sentence_cloze",
+                  cardNoteID == noteID,
+                  contextNoteID == nil || contextNoteID == noteID else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "Cloze 定义 \(id) 的 note/card/source 组合不一致。"
+                )
+            }
+            let sentence: String = row["sentence_snapshot"]
+            let sha256: String = row["sentence_sha256"]
+            let rangeVersion: Int64 = row["range_version"]
+            let rangeStart: Int64 = row["range_utf16_start"]
+            let rangeLength: Int64 = row["range_utf16_length"]
+            let targetSurface: String = row["target_surface"]
+            let answersJSON: String = row["accepted_answers_json"]
+            guard let start = Int(exactly: rangeStart),
+                  let length = Int(exactly: rangeLength),
+                  let version = Int(exactly: rangeVersion),
+                  let range = try? ClozeRange(
+                    persistedVersion: version,
+                    utf16Start: start,
+                    utf16Length: length
+                  ),
+                  let answers = try? decoder.decode(
+                    [String].self,
+                    from: Data(answersJSON.utf8)
+                  ) else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "Cloze 定义 \(id) 的 range 或答案列表无法解码。"
+                )
+            }
+            do {
+                try ClozeValidator.validatePersisted(
+                    sentence: sentence,
+                    sentenceSHA256: sha256,
+                    range: range,
+                    targetSurface: targetSurface,
+                    acceptedAnswers: answers
+                )
+            } catch {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "Cloze 定义 \(id) 的 hash/range/surface/答案不一致。"
+                )
+            }
+        }
+        // §9.1 完整性：每个 sentence Note 恰一条定义、恰一张卡且必须是
+        // sentence_cloze——缺定义/缺卡/多卡都是坏包。
+        let incompleteNotes = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM notes n
+                WHERE n.kind = 'sentence' AND (
+                    (SELECT COUNT(*) FROM cloze_definitions d
+                     WHERE d.note_id = n.id) != 1
+                    OR (SELECT COUNT(*) FROM cards c
+                        WHERE c.note_id = n.id) != 1
+                    OR NOT EXISTS (
+                        SELECT 1 FROM cards c
+                        WHERE c.note_id = n.id
+                          AND c.template_kind = 'sentence_cloze'
+                    )
+                )
+                """
+        ) ?? 0
+        guard incompleteNotes == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(incompleteNotes) 条 sentence Note 缺少唯一定义或卡。"
+            )
+        }
+        // 反向：sentence_cloze 卡不得挂在非 sentence Note 上。
+        let strayCards = try Int.fetchOne(
+            db,
+            sql: """
+                SELECT COUNT(*) FROM cards c
+                JOIN notes n ON n.id = c.note_id
+                WHERE c.template_kind = 'sentence_cloze'
+                  AND n.kind != 'sentence'
+                """
+        ) ?? 0
+        guard strayCards == 0 else {
+            throw PortableBackupPreparationError.databaseValidation(
+                "存在 \(strayCards) 张 sentence_cloze 卡挂在非 sentence Note 上。"
+            )
+        }
+    }
+
+    /// v8 import 元数据校验：staging_file_name 只能是不带路径分隔符的
+    /// 文件名（schema 约定 `import-staging-<uuid>.sqlite` 形态）——备份
+    /// 不得夹带任何路径；receipt 的 job/note 归属由 FK 保证。
+    static func validateImportJobData(in db: Database) throws {
+        let rows = try Row.fetchAll(
+            db,
+            sql: "SELECT id, staging_file_name FROM import_jobs"
+        )
+        for row in rows {
+            guard let fileName: String = row["staging_file_name"] else {
+                continue
+            }
+            let id: String = row["id"]
+            let isBareFileName = !fileName.isEmpty
+                && !fileName.contains("/")
+                && !fileName.contains("\\")
+                && !fileName.contains("\0")
+                && fileName != "." && fileName != ".."
+            guard isBareFileName else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "导入任务 \(id) 的 staging_file_name 不是纯文件名。"
+                )
+            }
+        }
+    }
+
     /// Attachment references are opaque resource IDs, never filesystem paths —
     /// reject anything that could traverse or address the local file system.
     static func isControlledInboxResourceID(_ value: String) -> Bool {
@@ -1513,7 +1929,8 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        for specification in PortableBackupFormatV7.tableSpecifications {
+        // 汇总按当前 schema 对应的目标规格（registry target = v8）统计。
+        for specification in PortableBackupFormatRegistry.targetSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(specification.tableName)"

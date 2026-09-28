@@ -22,9 +22,20 @@ private struct AdaptivePresentationModifier<SheetContent: View>: ViewModifier {
     let sheetContent: () -> SheetContent
 
     @Environment(\.layoutPolicy) private var layoutPolicy
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// popover 在辅助字号下高度受限、行内容被裁到不可点击——
+    /// ax 字号一律退化为 sheet（多选/短选项行需要完整行宽）。
+    private var presentation: LayoutPolicy.Presentation {
+        let resolved = layoutPolicy.presentation(for: role)
+        if resolved == .popover, dynamicTypeSize.isAccessibilitySize {
+            return .sheet
+        }
+        return resolved
+    }
 
     func body(content: Content) -> some View {
-        switch layoutPolicy.presentation(for: role) {
+        switch presentation {
         case .popover:
             content.popover(
                 isPresented: $isPresented,

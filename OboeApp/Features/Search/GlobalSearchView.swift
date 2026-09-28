@@ -20,6 +20,8 @@ struct GlobalSearchView: View {
     let historyService: StudyHistoryService
     let speechService: any SpeechService
     let dictionaryQueryService: DictionaryQueryService
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    var clozeRepository: (any ClozeRepository)? = nil
     /// S07 查词→制卡预填由宿主注入；nil 时词条详情不显示制卡按钮。
     let onCreateCard: ((DictionaryEntry) -> Void)?
 
@@ -35,7 +37,8 @@ struct GlobalSearchView: View {
                     grammarService: grammarService,
                     contentCardService: contentCardService,
                     historyService: historyService,
-                    speechService: speechService
+                    speechService: speechService,
+                    clozeRepository: clozeRepository
                 )
             case .dictionary:
                 DictionarySearchView(

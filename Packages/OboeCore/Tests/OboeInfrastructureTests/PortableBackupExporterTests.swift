@@ -24,8 +24,18 @@ final class PortableBackupExporterTests: XCTestCase {
 
         XCTAssertEqual(result.url.pathExtension, "oboe-backup")
         XCTAssertEqual(result.exportedAt, exportedAt)
-        XCTAssertEqual(Set(result.recordCounts.keys), Set(Self.recordTypes))
-        XCTAssertTrue(result.recordCounts.values.allSatisfy { $0 == 1 })
+        XCTAssertEqual(
+            Set(result.recordCounts.keys),
+            Set(PortableBackupFormatV8.recordTypes)
+        )
+        // 种子覆盖 v7 的 21 类（各 1 行）；v8 新增类型未播种为 0。
+        for type in Self.recordTypes {
+            XCTAssertEqual(result.recordCounts[type], 1, "\(type) count")
+        }
+        for type in PortableBackupFormatV8.recordTypes
+        where !Self.recordTypes.contains(type) {
+            XCTAssertEqual(result.recordCounts[type], 0, "\(type) count")
+        }
 
         let parsed = try parseIndependently(result.url)
         XCTAssertEqual(parsed.records.first?["recordType"] as? String, "manifest")
@@ -37,13 +47,14 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(manifest["encoding"] as? String, "utf-8")
         XCTAssertEqual(manifest["lineEnding"] as? String, "lf")
         XCTAssertEqual(manifest["checksumAlgorithm"] as? String, "sha256")
-        XCTAssertEqual(manifest["recordOrder"] as? [String], Self.recordTypes)
+        XCTAssertEqual(
+            manifest["recordOrder"] as? [String],
+            PortableBackupFormatV8.recordTypes
+        )
         XCTAssertEqual(
             manifest["excludedScopes"] as? [String],
-            [
-                "credentials", "aiConnectionConfiguration", "sharedTransferFiles",
-                "imageAttachments", "derivedSearchIndex"
-            ]
+            PortableBackupFormat.excludedScopes
+                + PortableBackupFormatV8.additionalExcludedScopes
         )
 
         let bodyRecords = parsed.records.dropFirst().dropLast()
@@ -177,7 +188,10 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(exportedDeck["name"] as? String, "快照前")
         XCTAssertEqual(liveName, "快照后")
         XCTAssertEqual(result.recordCounts["deck"], 1)
-        XCTAssertEqual(Set(result.recordCounts.keys), Set(Self.recordTypes))
+        XCTAssertEqual(
+            Set(result.recordCounts.keys),
+            Set(PortableBackupFormatV8.recordTypes)
+        )
         XCTAssertEqual(result.recordCounts["inboxItem"], 0)
         XCTAssertEqual(result.recordCounts["inboxProcessingContext"], 0)
         XCTAssertEqual(result.recordCounts["captureImportReceipt"], 0)

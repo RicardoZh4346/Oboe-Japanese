@@ -49,11 +49,20 @@ extension ReviewViewModel {
         // rating — the four rating buttons remain the only submission path.
         var comparison: RecallComparison?
         if isTypedRecall {
-            comparison = AnswerComparator.compare(
-                input: recallAttempt?.rawInput ?? "",
-                headword: card.content.headword,
-                reading: card.content.reading
-            )
+            if card.content.templateKind == .sentenceCloze {
+                // S12：cloze 判分集是 acceptedAnswers（surface + 确认读音），
+                // headword 是含答案的整句快照——拿它比对必然全 different。
+                comparison = AnswerComparator.compare(
+                    input: recallAttempt?.rawInput ?? "",
+                    acceptedAnswers: card.content.cloze?.acceptedAnswers ?? []
+                )
+            } else {
+                comparison = AnswerComparator.compare(
+                    input: recallAttempt?.rawInput ?? "",
+                    headword: card.content.headword,
+                    reading: card.content.reading
+                )
+            }
         }
         guard canConfirmRecall, recallAttempt?.confirmInput(comparison: comparison) == true
         else { return }

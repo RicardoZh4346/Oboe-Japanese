@@ -41,6 +41,8 @@ struct DecksView: View {
     private let dictionaryQueryService: DictionaryQueryService
     /// S07：牌组内复习的背面来源区。
     private let sourceContextRepository: (any SourceContextRepository)?
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    private let clozeRepository: (any ClozeRepository)?
     private let inboxImageStore: InboxImageStore?
     /// S09：专项学习驱动（详情页复习/专项入口透传）。
     private let customStudyRepository: (any CustomStudyRepository)?
@@ -70,6 +72,7 @@ struct DecksView: View {
         sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
         dictionaryQueryService: DictionaryQueryService,
         sourceContextRepository: (any SourceContextRepository)? = nil,
+        clozeRepository: (any ClozeRepository)? = nil,
         inboxImageStore: InboxImageStore? = nil,
         customStudyRepository: (any CustomStudyRepository)? = nil,
         customStudyService: CustomStudyService? = nil
@@ -97,6 +100,7 @@ struct DecksView: View {
         self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
         self.dictionaryQueryService = dictionaryQueryService
         self.sourceContextRepository = sourceContextRepository
+        self.clozeRepository = clozeRepository
         self.inboxImageStore = inboxImageStore
         self.customStudyRepository = customStudyRepository
         self.customStudyService = customStudyService
@@ -178,9 +182,9 @@ struct DecksView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("牌组")
-            // 同 TodayView：一级页显式钉住 Tab Bar 可见，pop 返回时
-            // 与转场同步恢复，避免 bar 晚到导致的内容上移。
-            .toolbar(.visible, for: .tabBar)
+            // 一级页不声明 Tab Bar 可见性：钉住 .visible 会在新系统上
+            // 盖住二级页 secondaryPage() 的 .hidden。pop 返回由系统
+            // 自动恢复 Tab Bar。
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink {
@@ -194,6 +198,7 @@ struct DecksView: View {
                             historyService: historyService,
                             speechService: speechService,
                             dictionaryQueryService: dictionaryQueryService,
+                            clozeRepository: clozeRepository,
                             onCreateCard: { entry in
                                 Task {
                                     let version = try? await dictionaryQueryService
@@ -223,7 +228,8 @@ struct DecksView: View {
                             grammarService: grammarService,
                             contentCardService: contentCardService,
                             historyService: historyService,
-                            speechService: speechService
+                            speechService: speechService,
+                            clozeRepository: clozeRepository
                         )
                     } label: {
                         Label("收藏", systemImage: "star")
@@ -259,6 +265,7 @@ struct DecksView: View {
                     sentenceAnalysisService: sentenceAnalysisService,
                     sentenceAnalysisCardCreationService: sentenceAnalysisCardCreationService,
                     sourceContextRepository: sourceContextRepository,
+                    clozeRepository: clozeRepository,
                     inboxImageStore: inboxImageStore,
                     dictionaryQueryService: dictionaryQueryService,
                     customStudyRepository: customStudyRepository,
@@ -348,6 +355,13 @@ struct DecksView: View {
                 contentCardService: contentCardService,
                 historyService: historyService,
                 speechService: speechService,
+                onUpdated: onUpdated
+            )
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: noteID,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgePointService,
                 onUpdated: onUpdated
             )
         }

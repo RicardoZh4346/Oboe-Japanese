@@ -100,7 +100,8 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
         id, note_id, source_type, original_sentence, surrounding_text,
         source_title, source_url, source_app, image_reference,
         dictionary_entry_id, dictionary_version, dictionary_sense_key,
-        selected_gloss_language, is_primary, created_at_ms
+        selected_gloss_language, reader_document_id, reader_chapter_id,
+        reader_location, selected_surface, is_primary, created_at_ms
         """
 
     /// 行级写：在 `db` 事务内执行并把约束失败归一化为
@@ -108,6 +109,17 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
     /// 而不是裸 SQLite 报错。
     static func insert(_ context: SourceContext, in db: Database) throws {
         do {
+            // v19：reader_location 持久化为 `ReaderLocation` 的 JSON 编码；
+            // 编码失败视为非法持久化值而不是写半截字段。
+            let readerLocationJSON: String?
+            if let location = context.readerLocation {
+                readerLocationJSON = String(
+                    decoding: try JSONEncoder().encode(location),
+                    as: UTF8.self
+                )
+            } else {
+                readerLocationJSON = nil
+            }
             try db.execute(
                 sql: """
                     INSERT INTO source_contexts(
@@ -115,8 +127,9 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
                         surrounding_text, source_title, source_url, source_app,
                         image_reference, dictionary_entry_id, dictionary_version,
                         dictionary_sense_key, selected_gloss_language,
-                        is_primary, created_at_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        reader_document_id, reader_chapter_id, reader_location,
+                        selected_surface, is_primary, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(context.id),
@@ -132,6 +145,10 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
                     context.dictionaryVersion,
                     context.dictionarySenseKey,
                     context.selectedGlossLanguage,
+                    context.readerDocumentID.map { DatabaseValueCodec.encode($0) },
+                    context.readerChapterID.map { DatabaseValueCodec.encode($0) },
+                    readerLocationJSON,
+                    context.selectedSurface,
                     context.isPrimary,
                     DatabaseValueCodec.encode(context.createdAt)
                 ]
@@ -226,6 +243,23 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
         }
         let createdAtMilliseconds: Int64 = row["created_at_ms"]
         let isPrimaryValue: Int = row["is_primary"]
+        // v19 Reader 定位列：无 FK 弱引用，document/chapter id 只解码
+        // 不校验存在性；reader_location JSON 损坏是数据损坏信号，抛
+        // invalidPersistedValue 不静默吞掉。
+        let readerDocumentIDValue: String? = row["reader_document_id"]
+        let readerChapterIDValue: String? = row["reader_chapter_id"]
+        let readerLocationJSON: String? = row["reader_location"]
+        let readerLocation: ReaderLocation? = try readerLocationJSON.map { json in
+            guard let location = try? JSONDecoder().decode(
+                ReaderLocation.self,
+                from: Data(json.utf8)
+            ) else {
+                throw SourceContextRepositoryError.invalidPersistedValue(
+                    field: "reader_location"
+                )
+            }
+            return location
+        }
         return SourceContext(
             id: try DatabaseValueCodec.decodeUUID(idValue),
             noteID: try DatabaseValueCodec.decodeUUID(noteIDValue),
@@ -243,7 +277,15 @@ public struct GRDBSourceContextRepository: SourceContextRepository, Sendable {
             isPrimary: isPrimaryValue == 1,
             createdAt: DatabaseValueCodec.decodeDate(
                 milliseconds: createdAtMilliseconds
-            )
+            ),
+            readerDocumentID: try readerDocumentIDValue.map {
+                try DatabaseValueCodec.decodeUUID($0)
+            },
+            readerChapterID: try readerChapterIDValue.map {
+                try DatabaseValueCodec.decodeUUID($0)
+            },
+            readerLocation: readerLocation,
+            selectedSurface: row["selected_surface"]
         )
     }
 }

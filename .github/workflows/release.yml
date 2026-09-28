@@ -1,0 +1,735 @@
+name: Release
+
+# S26 — Tag → Release → Source 发布流水线
+#
+# 链路与门禁（任一环节失败即整体失败）：
+#   plan（解析 tag/版本/URL）
+#   → build（未签名 archive → IPA；Gate A：validate_release_assets 校验 IPA+SHA256SUMS）
+#   → draft-release（建 draft 并挂产物 → Gate B：把已上传 IPA 下载回来复核 sha256/size）
+#   → evidence（release-evidence 环境审批 = 人工证据；生成 evidence 文件附到 release）
+#   → update-source（以默认分支的 distribution/source.json 为合并基线调 S25 生成器
+#      → Gate C：校验合并后 source 与 IPA/sums 一致 → 产出 staging 产物）
+#   → deploy-pages（Pages 原子部署 staging；失败则 staging 不落库、旧源不受损）
+#   → commit-source（部署成功后才把 source.json 回写默认分支并推送；Gate D 落库前终验）
+#   → publish-release（最后一步才把 draft 转正式，下载 URL 自此对外有效）
+#   → cleanup-draft（publish 未成功且 Pages 未更新时删除残留 draft，不留半包）
+#
+# 保护语义：
+#   * workflow 级 concurrency 全仓串行 —— 同 tag 串行，也防不同 tag 交错写源/部署；
+#   * 生成器拒绝同 version+buildVersion 不同 sha256（同 tag 不同 hash 不覆写）、
+#     拒绝低于已发布 buildVersion 的回退（旧任务不能降级 source）；
+#   * 已正式发布的同 tag release 直接拒绝（release 层重跑保护）；
+#   * Pages 部署失败 → commit-source 不执行 → canonical source 不动；
+#   * workflow_dispatch + dry_run=true（默认）只演练到 staging artifact，不发布。
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          目标 tag（vX.Y.Z）。dry-run 演练时可留空（用 v0.0.0）或填任意
+          v* 值；正式补发（dry_run=false）必须填远端已存在的 tag。
+        required: false
+        type: string
+      build_version:
+        description: >-
+          可选：覆盖 CFBundleVersion。默认取 project.pbxproj 的
+          CURRENT_PROJECT_VERSION（正式发版应在打 tag 前于版本提交里 bump）。
+        required: false
+        type: string
+      dry_run:
+        description: >-
+          true=演练：跳过 release 上传、Pages 部署与 source 落库；
+          false=对该 tag 走完整发布。
+        required: true
+        default: true
+        type: boolean
+
+# 全仓串行：同 tag 重跑串行化，不同 tag 也不会交错写 canonical source / 部署 Pages。
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      version: ${{ steps.vars.outputs.version }}
+      publish: ${{ steps.vars.outputs.publish }}
+      checkout_ref: ${{ steps.vars.outputs.checkout_ref }}
+      ipa_name: ${{ steps.vars.outputs.ipa_name }}
+      download_url: ${{ steps.vars.outputs.download_url }}
+      release_url: ${{ steps.vars.outputs.release_url }}
+      pages_base_url: ${{ steps.vars.outputs.pages_base_url }}
+    steps:
+      - name: Resolve release variables
+        id: vars
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          PAGES_BASE_URL_VAR: ${{ vars.PAGES_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            TAG="$REF_NAME"
+            PUBLISH=true
+            CHECKOUT_REF=""
+          else
+            TAG="${INPUT_TAG:-v0.0.0}"
+            if [ "$INPUT_DRY_RUN" = "false" ]; then
+              if [ -z "${INPUT_TAG:-}" ]; then
+                echo "::error::正式补发（dry_run=false）必须提供远端已存在的 tag"
+                exit 1
+              fi
+              PUBLISH=true
+              CHECKOUT_REF="$TAG"
+            else
+              PUBLISH=false
+              CHECKOUT_REF=""
+            fi
+          fi
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::tag 必须形如 vX.Y.Z，收到 '$TAG'"
+            exit 1
+          }
+          VERSION="${TAG#v}"
+          IPA_NAME="Oboe-${TAG}.ipa"
+          DOWNLOAD_URL="${SERVER_URL}/${REPOSITORY}/releases/download/${TAG}/${IPA_NAME}"
+          RELEASE_URL="${SERVER_URL}/${REPOSITORY}/releases/tag/${TAG}"
+          OWNER="${REPOSITORY%%/*}"
+          REPO_NAME="${REPOSITORY##*/}"
+          PAGES_BASE="${PAGES_BASE_URL_VAR:-https://$(echo "$OWNER" | tr '[:upper:]' '[:lower:]').github.io/${REPO_NAME}}"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "publish=$PUBLISH"
+            echo "checkout_ref=$CHECKOUT_REF"
+            echo "ipa_name=$IPA_NAME"
+            echo "download_url=$DOWNLOAD_URL"
+            echo "release_url=$RELEASE_URL"
+            echo "pages_base_url=$PAGES_BASE"
+          } >> "$GITHUB_OUTPUT"
+          echo "plan: tag=$TAG version=$VERSION publish=$PUBLISH ipa=$IPA_NAME"
+
+  build:
+    needs: plan
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      ipa_sha256: ${{ steps.package.outputs.sha256 }}
+      ipa_size: ${{ steps.package.outputs.size }}
+      build_version: ${{ steps.resolve.outputs.build_version }}
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
+      INPUT_BUILD_VERSION: ${{ inputs.build_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.checkout_ref }}
+          lfs: true
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve build version (CFBundleVersion)
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_BUILD_VERSION:-}" ]; then
+            BV="$INPUT_BUILD_VERSION"
+          else
+            BV="$(grep -m1 'CURRENT_PROJECT_VERSION = ' Oboe.xcodeproj/project.pbxproj \
+              | sed -E 's/.*CURRENT_PROJECT_VERSION = ([0-9.]+);.*/\1/')"
+          fi
+          echo "$BV" | grep -Eq '^[0-9]+(\.[0-9]+)*$' || {
+            echo "::error::CFBundleVersion 必须是点分数字（解析得到 '$BV'）"
+            exit 1
+          }
+          echo "build_version=$BV" >> "$GITHUB_OUTPUT"
+          echo "CFBundleVersion=$BV（tag 版本经 MARKETING_VERSION=$VERSION 注入构建）"
+
+      # SideStore 源设计为用户本地重签，因此流水线产出未签名 IPA（arm64 真机构建）。
+      - name: Build unsigned Release archive
+        env:
+          BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Oboe.xcodeproj \
+            -scheme Oboe \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Oboe.xcarchive" \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_VERSION" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            archive 2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"
+
+      - name: Package IPA (Payload zip)
+        id: package
+        env:
+          BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
+        run: |
+          set -euo pipefail
+          APP_DIR="$RUNNER_TEMP/Oboe.xcarchive/Products/Applications/Oboe.app"
+          test -d "$APP_DIR" || {
+            echo "::error::archive 产物缺失 $APP_DIR"
+            exit 1
+          }
+          mkdir -p dist/Payload
+          cp -R "$APP_DIR" dist/Payload/
+          (cd dist && zip -qry "$IPA_NAME" Payload && rm -rf Payload)
+          (cd dist && shasum -a 256 "$IPA_NAME" > SHA256SUMS)
+          SHA="$(cd dist && shasum -a 256 "$IPA_NAME" | awk '{print $1}')"
+          SIZE="$(stat -f%z "dist/$IPA_NAME")"
+          {
+            echo "sha256=$SHA"
+            echo "size=$SIZE"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "buildVersion=$BUILD_VERSION"
+            echo "ipa=$IPA_NAME"
+            echo "size=$SIZE"
+            echo "sha256=$SHA"
+            echo "commit=$GITHUB_SHA"
+            echo "run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > dist/build-info.txt
+
+      # —— 签名占位（当前版本不接真签名）——
+      # 若未来发布已签名 IPA：在此插入 keychain/证书/描述文件导入步骤并去掉 CODE_SIGNING_ALLOWED=NO。
+      # 秘密一律走仓库 secrets —— 仓库内禁止出现证书/私钥/描述文件实值（.gitignore 已挡 *.p12/*.mobileprovision）。
+      - name: Sign IPA (placeholder — disabled until signing secrets are configured)
+        if: false
+        env:
+          APPLE_SIGNING_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_SIGNING_CERTIFICATE_P12_BASE64 }}
+          APPLE_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_SIGNING_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_MAIN_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_MAIN_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_SHARE_EXTENSION_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_SHARE_EXTENSION_BASE64 }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+        run: echo "see docs/v0.7/s26-release-pipeline.md before enabling"
+
+      - name: Gate A — validate IPA + SHA256SUMS before anything is published
+        env:
+          BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
+        run: |
+          python3 Scripts/validate_release_assets.py \
+            --ipa "dist/$IPA_NAME" \
+            --tag "$TAG" \
+            --expect-build-version "$BUILD_VERSION" \
+            --expect-bundle-id org.example.Oboe \
+            --sums dist/SHA256SUMS
+
+      - name: Upload release-assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/*.ipa
+            dist/SHA256SUMS
+            dist/build-info.txt
+          retention-days: 30
+          if-no-files-found: error
+
+  draft-release:
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # 创建/上传/删除 draft release
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
+      IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
+      IPA_SIZE: ${{ needs.build.outputs.ipa_size }}
+      BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.checkout_ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      # 重跑保护（release 层）：同 tag 已正式发布 → 拒绝覆写；已有 draft → 复用。
+      - name: Check release state for this tag
+        id: existing
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --json isDraft --jq .isDraft > /tmp/state 2>/dev/null; then
+            STATE="$(cat /tmp/state)"
+          else
+            STATE=none
+          fi
+          if [ "$STATE" = "false" ]; then
+            echo "::error::$TAG 已是正式 release，拒绝覆写（相同 tag 不覆盖不同内容）"
+            exit 1
+          fi
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"   # none | true(已有 draft)
+
+      - name: Create draft release
+        id: draft
+        if: steps.existing.outputs.state == 'none'
+        run: |
+          set -euo pipefail
+          {
+            echo "## Oboe $TAG"
+            echo
+            echo "- IPA: \`$IPA_NAME\`（未签名，SideStore/AltStore 本地重签安装）"
+            echo "- SHA-256: \`$IPA_SHA256\`"
+            echo "- size: $IPA_SIZE bytes"
+            echo "- buildVersion: $BUILD_VERSION"
+            echo "- commit: $GITHUB_SHA"
+            echo
+            echo "SideStore 源：随本次发布经 GitHub Pages 更新（见 \`SHA256SUMS\` 与 release evidence 附件）。"
+          } > release-notes.md
+          gh release create "$TAG" --draft \
+            --title "Oboe $TAG" --notes-file release-notes.md
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Attach artifacts to the draft
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "dist/$IPA_NAME" dist/SHA256SUMS dist/build-info.txt --clobber
+
+      # Gate B：上传后复核，防止损坏上传/错挂。
+      # 优先比对 GitHub 记录的 asset digest（形如 sha256:<hex>，对 draft 可靠）；
+      # digest 缺失时回退为重新下载 + 完整校验。
+      - name: Gate B — verify the uploaded IPA asset
+        run: |
+          set -euo pipefail
+          DIGEST="$(gh release view "$TAG" --json assets \
+            --jq ".assets[] | select(.name == \"$IPA_NAME\") | .digest // empty" \
+            || true)"
+          if [ -n "$DIGEST" ]; then
+            if [ "$DIGEST" = "sha256:$IPA_SHA256" ]; then
+              echo "uploaded asset digest matches: $DIGEST"
+            else
+              echo "::error::uploaded asset digest $DIGEST != sha256:$IPA_SHA256"
+              exit 1
+            fi
+          else
+            echo "::notice::release asset 无 digest 字段，回退为下载复核"
+            mkdir -p verify
+            gh release download "$TAG" \
+              --pattern "$IPA_NAME" --dir verify --clobber
+            python3 Scripts/validate_release_assets.py \
+              --ipa "verify/$IPA_NAME" \
+              --tag "$TAG" \
+              --expect-build-version "$BUILD_VERSION" \
+              --expect-bundle-id org.example.Oboe \
+              --expect-sha256 "$IPA_SHA256" \
+              --expect-size "$IPA_SIZE" \
+              --sums dist/SHA256SUMS
+          fi
+
+      # 本 job 任一环节失败 → 删除本 run 创建的 draft，不留半包。
+      - name: Cleanup draft on gate failure
+        if: failure() && steps.draft.outputs.created == 'true'
+        run: gh release delete "$TAG" --yes
+
+  evidence:
+    needs: [plan, build, draft-release]
+    # dry-run 时 draft-release 被跳过，证据文件仍照常生成（演练）；正式发布要求 draft 就绪。
+    if: >-
+      ${{
+        always() &&
+        needs.plan.result == 'success' &&
+        needs.build.result == 'success' &&
+        (needs.plan.outputs.publish != 'true' || needs.draft-release.result == 'success')
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # 把 evidence 文件附到 release（dry-run 时该步骤跳过）
+      actions: read     # 复核 environment 审批记录
+    environment:
+      # 正式发布：release-evidence 环境必须配置 Required reviewers，审批 = 人工证据。
+      # dry-run：release-rehearsal 无保护规则，自动通过、不制造审批噪音。
+      name: ${{ needs.plan.outputs.publish == 'true' && 'release-evidence' || 'release-rehearsal' }}
+      url: ${{ needs.plan.outputs.release_url }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
+      IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
+      IPA_SIZE: ${{ needs.build.outputs.ipa_size }}
+      BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+      DOWNLOAD_URL: ${{ needs.plan.outputs.download_url }}
+      PUBLISH: ${{ needs.plan.outputs.publish }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      # 双保险：正式发布时必须有真实审批记录，防止环境未配 reviewer 导致静默放行。
+      - name: Verify a human approval exists for the protected environment
+        if: needs.plan.outputs.publish == 'true'
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          APPROVERS="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/approvals" \
+            --jq '[.[] | select(.state == "approved") | .user.login] | join(", ")')"
+          if [ -z "$APPROVERS" ]; then
+            echo "::error::没有审批记录 —— 请在仓库 Settings → Environments → release-evidence 配置 Required reviewers"
+            exit 1
+          fi
+          echo "approvers=$APPROVERS" >> "$GITHUB_OUTPUT"
+          echo "审批人: $APPROVERS"
+        id: approval
+
+      - name: Write release evidence file
+        env:
+          APPROVERS: ${{ steps.approval.outputs.approvers }}
+        run: |
+          set -euo pipefail
+          {
+            echo "# Release evidence — $TAG"
+            echo
+            echo "- run: $RUN_URL (attempt ${{ github.run_attempt }})"
+            echo "- triggered by: ${{ github.actor }}"
+            echo "- approved by: ${APPROVERS:-(dry-run / 未审批)}"
+            echo "- commit: $GITHUB_SHA"
+            echo "- ipa: $IPA_NAME"
+            echo "- sha256: $IPA_SHA256"
+            echo "- size: $IPA_SIZE bytes"
+            echo "- buildVersion: $BUILD_VERSION"
+            echo "- downloadURL: $DOWNLOAD_URL"
+            echo "- publish mode: $PUBLISH"
+            echo
+            echo "## 人工核对单（批准 release-evidence 环境前逐项确认）"
+            echo "- [ ] IPA sha256 与本地构建/预期一致"
+            echo "- [ ] release notes 与实际变更相符"
+            echo "- [ ] source.json diff 只新增本版本条目、无旧版本被改动"
+            echo "- [ ] 无任何签名材料/秘密进入仓库或产物"
+          } > "release-evidence-$TAG.md"
+
+      - name: Attach evidence to the draft release
+        if: needs.plan.outputs.publish == 'true'
+        run: gh release upload "$TAG" "release-evidence-$TAG.md" --clobber
+
+      - name: Upload evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence
+          path: release-evidence-*.md
+          if-no-files-found: error
+
+  update-source:
+    needs: [plan, build, evidence]
+    if: >-
+      ${{
+        always() &&
+        needs.plan.result == 'success' &&
+        needs.build.result == 'success' &&
+        needs.evidence.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
+      IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
+      IPA_SIZE: ${{ needs.build.outputs.ipa_size }}
+      BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+      DOWNLOAD_URL: ${{ needs.plan.outputs.download_url }}
+    steps:
+      # 生成器/校验脚本/entitlements 按被发布的 ref 冻结（push 即 tag；dry-run 为当前分支）。
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.checkout_ref }}
+
+      # canonical source 永远以默认分支为准 —— tag 可能切在旧提交上，
+      # 用它当合并基线会丢新版本（旧任务降级 source 的攻击面之一）。
+      - name: Checkout canonical distribution/ from the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+          path: canonical
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      # 生成器的合并语义本身即是保护：同 version+build 不同 sha256 → 拒绝覆写；
+      # 新 buildVersion 低于已发布 → 拒绝降级。staging/ 只是产物，尚未落库。
+      - name: Generate merged source into staging/
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          if [ -d canonical/distribution ]; then
+            cp -R canonical/distribution/. staging/   # index.html 等静态文件跟随 canonical
+          fi
+          EXISTING_ARGS=()
+          if [ -f canonical/distribution/source.json ]; then
+            EXISTING_ARGS=(--existing-source canonical/distribution/source.json)
+          else
+            echo "::notice::canonical 无 source.json，按首次发布处理"
+          fi
+          python3 Scripts/generate_sidestore_source.py \
+            --ipa "dist/$IPA_NAME" \
+            --download-url "$DOWNLOAD_URL" \
+            --metadata Scripts/sidestore_source_oboe.json \
+            --entitlements OboeApp/Oboe.entitlements \
+                OboeShareExtension/OboeShareExtension.entitlements \
+            --expect-version "$VERSION" \
+            --expect-build-version "$BUILD_VERSION" \
+            --expect-bundle-id org.example.Oboe \
+            "${EXISTING_ARGS[@]}" \
+            --out-source staging/source.json \
+            --out-sums staging/SHA256SUMS
+
+      - name: Gate C — validate merged source against IPA + sums
+        run: |
+          set -euo pipefail
+          python3 Scripts/validate_release_assets.py \
+            --ipa "dist/$IPA_NAME" \
+            --tag "$TAG" \
+            --expect-build-version "$BUILD_VERSION" \
+            --expect-bundle-id org.example.Oboe \
+            --expect-sha256 "$IPA_SHA256" \
+            --expect-size "$IPA_SIZE" \
+            --source staging/source.json \
+            --require-source-entry \
+            --expect-download-url "$DOWNLOAD_URL" \
+            --sums staging/SHA256SUMS
+
+      - name: Stage summary
+        run: |
+          {
+            echo "### staging for $TAG (publish=$PUBLISH)"
+            echo '```'
+            ls -la staging
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          PUBLISH: ${{ needs.plan.outputs.publish }}
+
+      # 正式发布：Pages 专用 artifact（deploy-pages 原子消费）。
+      - name: Upload Pages artifact
+        if: needs.plan.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: staging
+
+      # dry-run：staging 以普通 artifact 供人工检查，不部署。
+      - name: Upload staging preview (dry-run)
+        if: needs.plan.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-staging-preview
+          path: staging
+          if-no-files-found: error
+
+  deploy-pages:
+    needs: [plan, update-source]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    # 即便未来放开 workflow 级串行，Pages 部署仍全仓串行、不可中断。
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      # deploy-pages 整体发布 staging artifact：要么新站全量生效，要么旧站原样保留。
+      - uses: actions/configure-pages@v5
+      - name: Deploy staging to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+  commit-source:
+    needs: [plan, build, update-source, deploy-pages]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # 把合并后的 canonical source 推回默认分支
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
+      IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
+      IPA_SIZE: ${{ needs.build.outputs.ipa_size }}
+      BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+      DOWNLOAD_URL: ${{ needs.plan.outputs.download_url }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch || 'main' }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+
+      # 只有 deploy-pages 成功才会走到这里 —— Pages 失败则 source 不落库。
+      # 落库前再对默认分支最新 source.json 合并一次（防并发回退的最后防线）。
+      - name: Merge into canonical distribution/source.json
+        run: |
+          set -euo pipefail
+          EXISTING_ARGS=()
+          if [ -f distribution/source.json ]; then
+            EXISTING_ARGS=(--existing-source distribution/source.json)
+          fi
+          python3 Scripts/generate_sidestore_source.py \
+            --ipa "dist/$IPA_NAME" \
+            --download-url "$DOWNLOAD_URL" \
+            --metadata Scripts/sidestore_source_oboe.json \
+            --entitlements OboeApp/Oboe.entitlements \
+                OboeShareExtension/OboeShareExtension.entitlements \
+            --expect-version "$VERSION" \
+            --expect-build-version "$BUILD_VERSION" \
+            --expect-bundle-id org.example.Oboe \
+            "${EXISTING_ARGS[@]}" \
+            --out-source distribution/source.json \
+            --out-sums distribution/SHA256SUMS
+
+      - name: Gate D — final check before the commit
+        run: |
+          set -euo pipefail
+          python3 Scripts/validate_release_assets.py \
+            --ipa "dist/$IPA_NAME" \
+            --tag "$TAG" \
+            --expect-build-version "$BUILD_VERSION" \
+            --expect-bundle-id org.example.Oboe \
+            --expect-sha256 "$IPA_SHA256" \
+            --expect-size "$IPA_SIZE" \
+            --source distribution/source.json \
+            --require-source-entry \
+            --expect-download-url "$DOWNLOAD_URL" \
+            --sums distribution/SHA256SUMS
+
+      - name: Commit & push canonical source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add distribution/source.json distribution/SHA256SUMS
+          if git diff --cached --quiet; then
+            echo "canonical source 已是最新（同 hash 重跑幂等），无需提交"
+            exit 0
+          fi
+          git commit -m "chore(release): update sidestore source for $TAG [skip ci]"
+          git push origin "HEAD:$DEFAULT_BRANCH" || {
+            # 默认分支在我们合并后又前进了 → rebase 后重推一次（本提交只碰 distribution/）
+            git fetch origin "$DEFAULT_BRANCH"
+            git rebase "origin/$DEFAULT_BRANCH"
+            git push origin "HEAD:$DEFAULT_BRANCH"
+          }
+
+  publish-release:
+    needs: [plan, draft-release, commit-source]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      # 最后一步才转正式：此前 draft 的下载 URL 不对外，source/Pages 已就绪。
+      - name: Publish the draft release
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --latest
+          gh release view "$TAG" --json url,isDraft \
+            --jq '"published: " + .url + " (isDraft=" + (.isDraft | tostring) + ")"'
+
+  cleanup-draft:
+    needs: [plan, draft-release, evidence, update-source, deploy-pages, commit-source, publish-release]
+    if: ${{ always() && needs.plan.outputs.publish == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+      REPOSITORY: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+      PAGES_BASE_URL: ${{ needs.plan.outputs.pages_base_url }}
+    steps:
+      # 终点门禁没过（publish 未成功）时清理残留 draft。
+      # 但只有当「没有已发布 source 引用本版本下载地址」时才可删 ——
+      # 分别检查 canonical（默认分支 distribution/source.json）与线上 Pages
+      # 的 source.json；任一侧已含本版本条目则保留 draft 等人工收尾，
+      # 否则删了 draft 会让已上线 source 的 downloadURL 变成死链。
+      - name: Delete leftover draft when nothing was published
+        if: needs.publish-release.result != 'success'
+        run: |
+          set -euo pipefail
+          has_entry() {
+            # $1=source.json 路径；解析失败按"yes"处理（不确定时保守保留 draft）
+            python3 -c 'import json,sys
+          s=json.load(open(sys.argv[1]))
+          hit=any(isinstance(a,dict) and any(isinstance(x,dict) and x.get("version")==sys.argv[2] and x.get("buildVersion")==sys.argv[3] for x in a.get("versions") or []) for a in s.get("apps") or [])
+          print("yes" if hit else "no")' "$1" "$VERSION" "$BUILD_VERSION" || echo yes
+          }
+          CANONICAL_HAS=no
+          if gh api "repos/$REPOSITORY/contents/distribution/source.json?ref=$DEFAULT_BRANCH" \
+              --jq .content > /tmp/src.b64 2>/dev/null; then
+            base64 -d /tmp/src.b64 > /tmp/canonical-source.json
+            CANONICAL_HAS="$(has_entry /tmp/canonical-source.json)"
+          fi
+          LIVE_HAS=no
+          if curl -fsSL --max-time 15 "$PAGES_BASE_URL/source.json" \
+              -o /tmp/live-source.json 2>/dev/null; then
+            LIVE_HAS="$(has_entry /tmp/live-source.json)"
+          fi
+          echo "entry presence: canonical=$CANONICAL_HAS live-pages=$LIVE_HAS"
+          if [ "$CANONICAL_HAS" = "yes" ] || [ "$LIVE_HAS" = "yes" ]; then
+            echo "::warning::$TAG 已被已发布 source 引用，保留 draft 待人工收尾（防死链）"
+            exit 0
+          fi
+          STATE="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo gone)"
+          if [ "$STATE" = "true" ]; then
+            gh release delete "$TAG" --yes
+            echo "deleted leftover draft for $TAG"
+          else
+            echo "nothing to clean (release state: $STATE)"
+          fi

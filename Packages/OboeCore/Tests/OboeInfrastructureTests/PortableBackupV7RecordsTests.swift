@@ -18,9 +18,16 @@ final class PortableBackupV7RecordsTests: XCTestCase {
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source, sessionStatus: "finished")
-        let backup = try await fixture.export(source)
+        // v0.7.0 起默认导出 v8；v7 fixture 由降级助手生成。
+        let exported = try await fixture.export(source)
+        let backupURL = fixture.rootURL.appendingPathComponent(
+            "v7.oboe-backup"
+        )
+        try rewriteBackup(exported.url, to: backupURL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 7)
+        }
 
-        let objects = try fixture.backupObjects(backup.url)
+        let objects = try fixture.backupObjects(backupURL)
         for type in [
             "sourceContext", "customStudySession",
             "practiceAttempt", "scheduledReviewOrigin"
@@ -41,7 +48,7 @@ final class PortableBackupV7RecordsTests: XCTestCase {
 
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         let prepared = try await fixture.preparer(current: current)
-            .prepare(fileURL: backup.url)
+            .prepare(fileURL: backupURL)
         XCTAssertEqual(prepared.sourceFormatVersion, 7)
 
         let queue = try DatabaseQueue(path: prepared.temporaryDatabaseURL.path)

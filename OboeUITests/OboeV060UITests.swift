@@ -17,20 +17,35 @@ final class OboeV060UITests: XCTestCase {
         return app
     }
 
-    /// compact：底部 tab → 牌组列表首行；regular：sidebar deck 行。
+    /// compact：底部 tab → 牌组列表首行；regular：sidebar deck 行
+    /// （identifier 前缀匹配任意已挂载行，点击可命中分支）。
+    @MainActor
     private func openFirstDeckDetail(in app: XCUIApplication) -> Bool {
-        if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
-            app.tabBars.buttons["牌组"].tap()
-            let row = app.buttons.matching(
-                NSPredicate(format: "identifier BEGINSWITH %@", "deck-row-")
-            ).firstMatch
-            guard row.waitForExistence(timeout: 5) else { return false }
-            row.tap()
-            return true
+        guard app.waitForShellReady() else { return false }
+        if app.isRegularShell {
+            // 注意排除 sidebar-deck-create-button（同前缀的工具栏按钮）。
+            let rows = app.descendants(matching: .any).matching(
+                NSPredicate(
+                    format: "identifier BEGINSWITH %@ AND identifier != %@",
+                    "sidebar-deck-", "sidebar-deck-create-button"
+                )
+            )
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
+                for index in 0..<rows.count {
+                    let row = rows.element(boundBy: index)
+                    if row.exists, row.isHittable {
+                        row.tap()
+                        return true
+                    }
+                }
+                usleep(100_000)
+            }
+            return false
         }
-        XCUIDevice.shared.orientation = .landscapeLeft
-        let row = app.staticTexts.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "sidebar-deck-")
+        app.tabBars.buttons["牌组"].tap()
+        let row = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "deck-row-")
         ).firstMatch
         guard row.waitForExistence(timeout: 5) else { return false }
         row.tap()
@@ -51,15 +66,22 @@ final class OboeV060UITests: XCTestCase {
         XCTAssertTrue(entry.waitForExistence(timeout: 5), "详情页缺少专项学习入口")
         entry.tap()
 
-        // setup sheet：preset/deck/预览/开始按钮齐备——start 在表单
-        // 末段，需要先向上滚动让它进入可达性树。
-        let preview = app.staticTexts["custom-study-preview-count"]
+        // setup sheet：preset/deck/预览/开始按钮齐备——预览/开始在表单
+        // 末段，iPad sheet 折线以下懒挂载，先确认 sheet 再滚动显露。
         XCTAssertTrue(
-            preview.waitForExistence(timeout: 8),
+            app.navigationBars["专项学习"].waitForExistence(timeout: 5),
+            "专项 setup sheet 未打开"
+        )
+        // LabeledContent 承载该 identifier——不同壳层下暴露的元素
+        // 类型不同（compact=StaticText，regular sheet=Cell），按 any 查。
+        let preview = app.descendants(matching: .any)["custom-study-preview-count"]
+        app.revealElement(preview, requireHittable: false, passes: 8)
+        XCTAssertTrue(
+            preview.waitForExistence(timeout: 3),
             "专项 setup 未出现预览计数"
         )
-        app.swipeUp()
         let start = app.buttons["custom-study-start-button"]
+        app.revealElement(start, passes: 6)
         XCTAssertTrue(
             start.waitForExistence(timeout: 3),
             "专项 setup 缺少开始按钮"
@@ -87,16 +109,16 @@ final class OboeV060UITests: XCTestCase {
         app.launchEnvironment["OBOE_UI_TEST_DATABASE_ID"] = UUID().uuidString
         app.launch()
 
-        // 全局搜索入口（Decks 工具栏「搜索」）。
-        if app.tabBars.firstMatch.waitForExistence(timeout: 5) {
-            app.tabBars.buttons["牌组"].tap()
+        // 全局搜索入口：compact=牌组 tab 工具栏「搜索」按钮；
+        // regular=sidebar-search 行直达搜索 section（无工具栏按钮）。
+        if app.isRegularShell {
+            app.tapSidebarRow("sidebar-search")
         } else {
-            XCUIDevice.shared.orientation = .landscapeLeft
-            app.staticTexts["sidebar-search"].tap()
-        }
-        let searchEntry = app.buttons["global-search-button"]
-        if searchEntry.waitForExistence(timeout: 5) {
-            searchEntry.tap()
+            app.tabBars.buttons["牌组"].tap()
+            let searchEntry = app.buttons["global-search-button"]
+            if searchEntry.waitForExistence(timeout: 5) {
+                searchEntry.tap()
+            }
         }
 
         // 切到词典 scope 并检索——Picker 渲染为 popup button/segmented

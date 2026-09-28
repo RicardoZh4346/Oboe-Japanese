@@ -31,7 +31,14 @@ final class AppRuntimeController {
     /// 新容器随递增的 `generation` 原子替换。
     private(set) var phase: AppRuntimePhase = .launching
     private(set) var isDatabaseOperationInProgress = false
-    private(set) var databaseGeneration = 0
+    /// 数据库世代。S11 挖词世代屏障：didSet 同步到跨世代共享的
+    /// `generationSource`——旧代服务在写事务内同步复核该值，
+    /// 「先 bump 后换库」的恢复窗口内旧请求一律 staleGeneration。
+    private(set) var databaseGeneration = 0 {
+        didSet { generationSource.set(databaseGeneration) }
+    }
+    /// 活世代读源（任意线程可同步读）——随本属性每次变更更新。
+    let generationSource = DatabaseGenerationSource()
     private(set) var appearancePreference = AppAppearance.system
     private(set) var jlptEnrichmentStatus: JLPTEnrichmentStatus = .idle
 
@@ -404,7 +411,14 @@ final class AppRuntimeController {
     /// tasks bound to the previous services), then pause the shared-queue
     /// importer and wait out its in-flight drain — pending files survive on
     /// disk and the coordinator rebuilt by `publishServices` resumes them.
+    ///
+    /// S24 恢复屏障第一动作是 `workGate.closeAndWait`：关门拒绝新
+    /// Reader 导入/覆盖率分析/CSV 执行登记，取消并逐句柄等已登记
+    /// 任务退出——先于世代 bump，保证 bump 之后的 teardown 窗口里
+    /// 不可能有新任务漏进闸门。闸门单向；新世代容器自带新实例
+    /// （恢复失败路径 publishServices 旧库同样发新闸门）。
     private func suspendBeforeDatabaseReplacement() async {
+        await runtimeServices?.workGate.closeAndWait()
         databaseGeneration &+= 1
         // Epoch bump before the swap: any adaptive snapshot still in flight
         // from the outgoing database is tagged with a dead generation.
@@ -419,13 +433,29 @@ final class AppRuntimeController {
     }
 
     private func replaceDatabase(with sourceURL: URL) async throws -> OboeDatabase {
-        try await databaseRuntime.replaceDatabase(with: sourceURL) { database in
+        // beforeCommit 在 @Sendable 闭包里跑——提前解引用，不捕获 self。
+        let baseURL = self.baseURL
+        return try await databaseRuntime.replaceDatabase(with: sourceURL) { database in
             let service = AppFeatureContainerFactory.makeStudySessionService(
                 database: database
             )
             _ = try await service.buildTodayPlan(
                 defaultTimeZoneID: TimeZone.autoupdatingCurrent.identifier
             )
+            // S24：提交窗口内做 Reader 文件对账——staging/中断 install
+            // 残留先收敛，再把 ReaderFiles/<uuid> 与新库
+            // reader_documents 逐条核对：文件不可证的文档降级
+            // missing，可证在场的 missing 文档自愈回 available。
+            // 对账抛错 → 否决提交，整个恢复回滚旧库。
+            let readerFileStore = LocalReaderFileStore(
+                baseDirectoryURL: baseURL
+            )
+            try await readerFileStore.collectOrphans()
+            let reconciler = ReaderFileReconciler(
+                fileStore: readerFileStore,
+                repository: GRDBReaderRepository(database: database)
+            )
+            _ = try await reconciler.reconcileAfterDatabaseReplacement()
         }
     }
 
@@ -439,7 +469,8 @@ final class AppRuntimeController {
             generation: generation,
             baseURL: baseURL,
             bootstrap: bootstrap,
-            adaptiveInvalidationCenter: adaptiveInvalidationCenter
+            adaptiveInvalidationCenter: adaptiveInvalidationCenter,
+            generationSource: generationSource
         ) else {
             return false
         }

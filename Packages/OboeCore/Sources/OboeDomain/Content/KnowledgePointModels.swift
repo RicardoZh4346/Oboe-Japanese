@@ -3,6 +3,10 @@ import Foundation
 public enum KnowledgePointKind: String, Codable, Hashable, Sendable {
     case vocabulary
     case grammar
+    /// v0.7.0 S12（设计 §9.1）：句子/Cloze 笔记。一张 sentence Note 对应
+    /// 恰好一个 `sentence_cloze` Card 与一条 `cloze_definitions` 行；
+    /// `notes.headword` 存原句快照，`meaning_zh` 可空（条件 CHECK）。
+    case sentence
 }
 
 public struct KnowledgePointSummary: Equatable, Identifiable, Sendable {
@@ -210,7 +214,7 @@ public struct KnowledgePointService: Sendable {
             normalizedReading = (reading ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .precomposedStringWithCanonicalMapping
-        case .grammar:
+        case .grammar, .sentence:
             normalizedReading = nil
         }
         return try await repository.fetchDuplicateSummaries(

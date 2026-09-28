@@ -38,7 +38,11 @@ final class OboeSchemaV15MigrationTests: XCTestCase {
                     "surrounding_text", "source_title", "source_url",
                     "source_app", "image_reference", "dictionary_entry_id",
                     "dictionary_version", "dictionary_sense_key",
-                    "selected_gloss_language", "is_primary", "created_at_ms"
+                    "selected_gloss_language", "is_primary", "created_at_ms",
+                    // v19（S12）新增的 Reader 定位弱引用列——升级链整体
+                    // 跑到最新迁移时一并带上。
+                    "reader_document_id", "reader_chapter_id",
+                    "reader_location", "selected_surface"
                 ]
             )
             // 旧 source_text 原样保留——升级不产生信息退化。

@@ -38,6 +38,15 @@ public struct SourceContext: Equatable, Identifiable, Sendable {
     /// D08：所选释义语言（如 "zho"/"eng"）。英语兜底时保留该标记，
     /// UI 显示语言标签而不是假装是中文。
     public let selectedGlossLanguage: String?
+    /// v0.7.0 S12：Reader 来源的定位字段——`reader_*` 表**无 FK** 弱引用
+    ///（设计 §4.3-5）：文档/章节删除后本行原样保留，定位信息降级为
+    /// 纯快照。`readerLocation` 落库为 JSON（`ReaderLocation` Codable）。
+    public let readerDocumentID: UUID?
+    public let readerChapterID: UUID?
+    public let readerLocation: ReaderLocation?
+    /// 创建时在原文中选中的表记片段（如挖空目标）。只存片段文本，
+    /// 绝不存整篇 Reader 正文。
+    public let selectedSurface: String?
     /// 「有来源时最多一个 primary」由部分唯一索引保证；旧 Note
     /// 零来源合法。
     public let isPrimary: Bool
@@ -58,7 +67,11 @@ public struct SourceContext: Equatable, Identifiable, Sendable {
         dictionarySenseKey: String?,
         selectedGlossLanguage: String?,
         isPrimary: Bool,
-        createdAt: Date
+        createdAt: Date,
+        readerDocumentID: UUID? = nil,
+        readerChapterID: UUID? = nil,
+        readerLocation: ReaderLocation? = nil,
+        selectedSurface: String? = nil
     ) {
         self.id = id
         self.noteID = noteID
@@ -73,6 +86,10 @@ public struct SourceContext: Equatable, Identifiable, Sendable {
         self.dictionaryVersion = dictionaryVersion
         self.dictionarySenseKey = dictionarySenseKey
         self.selectedGlossLanguage = selectedGlossLanguage
+        self.readerDocumentID = readerDocumentID
+        self.readerChapterID = readerChapterID
+        self.readerLocation = readerLocation
+        self.selectedSurface = selectedSurface
         self.isPrimary = isPrimary
         self.createdAt = createdAt
     }
@@ -93,6 +110,11 @@ public struct SourceContextDraft: Equatable, Codable, Sendable {
     public var dictionaryVersion: String?
     public var dictionarySenseKey: String?
     public var selectedGlossLanguage: String?
+    /// v0.7.0 S12：Reader 定位（`SourceContext.readerDocumentID` 同义）。
+    public var readerDocumentID: UUID?
+    public var readerChapterID: UUID?
+    public var readerLocation: ReaderLocation?
+    public var selectedSurface: String?
     /// 默认 true：第一版写一条主来源；向已有 Note 加来源时由提交方
     /// 显式决定（默认不替换现有主来源）。
     public var isPrimary: Bool
@@ -109,6 +131,10 @@ public struct SourceContextDraft: Equatable, Codable, Sendable {
         dictionaryVersion: String? = nil,
         dictionarySenseKey: String? = nil,
         selectedGlossLanguage: String? = nil,
+        readerDocumentID: UUID? = nil,
+        readerChapterID: UUID? = nil,
+        readerLocation: ReaderLocation? = nil,
+        selectedSurface: String? = nil,
         isPrimary: Bool = true
     ) {
         self.sourceType = sourceType
@@ -122,6 +148,10 @@ public struct SourceContextDraft: Equatable, Codable, Sendable {
         self.dictionaryVersion = dictionaryVersion
         self.dictionarySenseKey = dictionarySenseKey
         self.selectedGlossLanguage = selectedGlossLanguage
+        self.readerDocumentID = readerDocumentID
+        self.readerChapterID = readerChapterID
+        self.readerLocation = readerLocation
+        self.selectedSurface = selectedSurface
         self.isPrimary = isPrimary
     }
 
@@ -138,6 +168,7 @@ public struct SourceContextDraft: Equatable, Codable, Sendable {
         draft.dictionaryVersion = Self.trimmed(dictionaryVersion)
         draft.dictionarySenseKey = Self.trimmed(dictionarySenseKey)
         draft.selectedGlossLanguage = Self.trimmed(selectedGlossLanguage)
+        draft.selectedSurface = Self.trimmed(selectedSurface)
         return draft
     }
 

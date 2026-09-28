@@ -129,6 +129,7 @@ final class ContentCardServiceTests: XCTestCase {
 
 private actor ContentCardRepositorySpy: ContentCardRepository {
     private var capturedVocabulary: VocabularyContentCommit?
+    private var capturedSentence: SentenceContentCommit?
     private var capturedToggle: (cardID: UUID, isEnabled: Bool, at: Date)?
     private var capturedDelete: UUID?
 
@@ -145,6 +146,14 @@ private actor ContentCardRepositorySpy: ContentCardRepository {
         capture: CaptureCommitContext?
     ) async throws -> ContentCommitResult {
         ContentCommitResult(noteID: commit.noteID, cardCount: 1)
+    }
+
+    func commitSentence(
+        _ commit: SentenceContentCommit,
+        capture: CaptureCommitContext?
+    ) async throws -> ContentCommitResult {
+        capturedSentence = commit
+        return ContentCommitResult(noteID: commit.noteID, cardCount: 1)
     }
 
     func fetchCardDirections(noteID: UUID) async throws -> [CardDirectionState] {

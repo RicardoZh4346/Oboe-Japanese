@@ -93,7 +93,13 @@ public enum OboeDatabaseSchema {
         "v13_note_deck_membership_and_pitch",
         "v14_attachments",
         "v15_source_context",
-        "v16_custom_study"
+        "v16_custom_study",
+        "v17_reader_foundation",
+        "v18_lexical_knowledge",
+        "v19_cloze",
+        "v20_import_execution",
+        "v21_conjugation_practice",
+        "v22_dictionary_knowledge"
     ]
 
     public static let tableNames: Set<String> = [
@@ -119,7 +125,27 @@ public enum OboeDatabaseSchema {
         "source_contexts",
         "custom_study_sessions",
         "practice_attempts",
-        "scheduled_review_origins"
+        "scheduled_review_origins",
+        "reader_documents",
+        "reader_chapters",
+        "reader_blocks",
+        "reader_positions",
+        "reader_bookmarks",
+        "reader_assets",
+        "reader_token_cache",
+        "lexemes",
+        "lexeme_note_links",
+        "vocabulary_knowledge_overrides",
+        "reader_activity_events",
+        "reader_mining_receipts",
+        "reader_coverage_snapshots",
+        "cloze_definitions",
+        "import_jobs",
+        "import_row_receipts",
+        "conjugation_sessions",
+        "conjugation_practice_attempts",
+        "dictionary_artifact_records",
+        "lexeme_dictionary_bindings"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -195,6 +221,21 @@ public enum OboeDatabaseSchema {
                 migrator.registerMigration(
                     identifier,
                     migrate: GRDBCustomStudyRepository.createCustomStudySchema
+                )
+            case "v17_reader_foundation":
+                migrator.registerMigration(identifier, migrate: GRDBReaderSchema.migrate)
+            case "v18_lexical_knowledge":
+                migrator.registerMigration(identifier, migrate: GRDBKnowledgeSchema.migrate)
+            case "v19_cloze":
+                migrator.registerMigration(identifier, migrate: GRDBClozeSchema.migrate)
+            case "v20_import_execution":
+                migrator.registerMigration(identifier, migrate: GRDBImportSchema.migrate)
+            case "v21_conjugation_practice":
+                migrator.registerMigration(identifier, migrate: GRDBConjugationSchema.migrate)
+            case "v22_dictionary_knowledge":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: GRDBDictionaryKnowledgeSchema.migrate
                 )
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")

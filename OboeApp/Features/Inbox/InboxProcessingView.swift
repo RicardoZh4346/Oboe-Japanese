@@ -20,6 +20,41 @@ struct InboxProcessingServices {
     let dictionaryQueryService: DictionaryQueryService?
     /// S07：已有 Note 加牌组的来源落库；nil 时跳过。
     let sourceContextRepository: (any SourceContextRepository)?
+    /// S12：sentence Note 详情页读取挖空定义；nil 时详情页降级为
+    /// 仅摘要展示（无遮罩预览）。
+    let clozeRepository: (any ClozeRepository)?
+
+    init(
+        deckService: DeckManagementService,
+        vocabularyService: VocabularyService,
+        grammarService: GrammarService,
+        knowledgePointService: KnowledgePointService,
+        contentCardService: ContentCardService,
+        aiCardGenerationService: AICardGenerationService,
+        sentenceAnalysisService: SentenceAnalysisService,
+        sentenceAnalysisCardCreationService: SentenceAnalysisCardCreationService,
+        historyService: StudyHistoryService,
+        speechService: any SpeechService,
+        studyService: StudySessionService?,
+        dictionaryQueryService: DictionaryQueryService?,
+        sourceContextRepository: (any SourceContextRepository)?,
+        clozeRepository: (any ClozeRepository)? = nil
+    ) {
+        self.deckService = deckService
+        self.vocabularyService = vocabularyService
+        self.grammarService = grammarService
+        self.knowledgePointService = knowledgePointService
+        self.contentCardService = contentCardService
+        self.aiCardGenerationService = aiCardGenerationService
+        self.sentenceAnalysisService = sentenceAnalysisService
+        self.sentenceAnalysisCardCreationService = sentenceAnalysisCardCreationService
+        self.historyService = historyService
+        self.speechService = speechService
+        self.studyService = studyService
+        self.dictionaryQueryService = dictionaryQueryService
+        self.sourceContextRepository = sourceContextRepository
+        self.clozeRepository = clozeRepository
+    }
 }
 
 /// Pushed from the inbox detail view. Ensures a processing context exists,

@@ -1,0 +1,12 @@
+{
+  "name": "Oboe Sideloading Source",
+  "identifier": "org.example.Oboe.sidestore-source",
+  "subtitle": "Oboe — 日语阅读与词汇挖掘（侧载测试源）",
+  "description": "Oboe iOS 日语学习应用的 SideStore/AltStore 兼容源。IPA 为未签名 arm64 构建，由用户 Apple Account 本地重签安装。",
+  "iconURL": "https://ricardozh4346.github.io/Oboe-Japanese/assets/AppIcon.png",
+  "website": "https://github.com/RicardoZh4346/Oboe-Japanese",
+  "tintColor": "#2563EB",
+  "nsfw": false,
+  "apps": [],
+  "news": []
+}

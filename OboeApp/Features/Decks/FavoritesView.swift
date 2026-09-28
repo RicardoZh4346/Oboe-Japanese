@@ -10,6 +10,8 @@ struct FavoritesView: View {
     let contentCardService: ContentCardService
     let historyService: StudyHistoryService
     let speechService: any SpeechService
+    /// S12：sentence 详情页读取挖空定义；nil 时降级为摘要展示。
+    let clozeRepository: (any ClozeRepository)?
 
     @State private var model: FavoritesViewModel
 
@@ -20,7 +22,8 @@ struct FavoritesView: View {
         grammarService: GrammarService,
         contentCardService: ContentCardService,
         historyService: StudyHistoryService,
-        speechService: any SpeechService
+        speechService: any SpeechService,
+        clozeRepository: (any ClozeRepository)? = nil
     ) {
         self.deckService = deckService
         self.knowledgeService = knowledgeService
@@ -29,6 +32,7 @@ struct FavoritesView: View {
         self.contentCardService = contentCardService
         self.historyService = historyService
         self.speechService = speechService
+        self.clozeRepository = clozeRepository
         _model = State(initialValue: FavoritesViewModel(service: knowledgeService))
     }
 
@@ -99,6 +103,16 @@ struct FavoritesView: View {
                 contentCardService: contentCardService,
                 historyService: historyService,
                 speechService: speechService
+            ) {
+                await model.load()
+            }
+        case .sentence:
+            SentenceNoteDetailView(
+                noteID: item.id,
+                headword: item.headword,
+                meaningZH: item.meaningZH,
+                clozeRepository: clozeRepository,
+                knowledgeService: knowledgeService
             ) {
                 await model.load()
             }

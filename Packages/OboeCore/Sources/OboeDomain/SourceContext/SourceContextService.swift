@@ -39,7 +39,11 @@ public struct SourceContextService: Sendable {
             dictionarySenseKey: normalized.dictionarySenseKey,
             selectedGlossLanguage: normalized.selectedGlossLanguage,
             isPrimary: normalized.isPrimary,
-            createdAt: now
+            createdAt: now,
+            readerDocumentID: normalized.readerDocumentID,
+            readerChapterID: normalized.readerChapterID,
+            readerLocation: normalized.readerLocation,
+            selectedSurface: normalized.selectedSurface
         )
     }
 

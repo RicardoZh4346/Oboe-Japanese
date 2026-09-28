@@ -16,6 +16,8 @@ public struct PortableBackupExport: Equatable, Sendable {
 
 public enum PortableBackupExportError: Error, Equatable, Sendable {
     case unsupportedDatabaseValue(table: String, column: String)
+    /// 请求的记录协议版本不可导出（早于当前默认或未知）。
+    case unsupportedRecordFormatVersion(Int)
 }
 
 /// Writes Oboe's public, versioned NDJSON backup format.
@@ -47,10 +49,33 @@ public actor PortableBackupExporter {
         self.snapshotCreatedHook = snapshotCreatedHook
     }
 
+    /// 默认导出当前协议版本（`PortableBackupFormat.currentVersion` = v8）。
     public func export(
         appVersion: String,
         at exportedAt: Date = Date()
     ) async throws -> PortableBackupExport {
+        try await export(
+            appVersion: appVersion,
+            at: exportedAt,
+            recordFormatVersion: PortableBackupFormat.currentVersion
+        )
+    }
+
+    /// 显式指定记录协议版本（设计 §14.1 registry）。只允许
+    /// `PortableBackupFormatRegistry.isExportable` 放行的版本——
+    /// 当前仅 v8；v1–v7 只能读入恢复，不可再生成。
+    public func export(
+        appVersion: String,
+        at exportedAt: Date = Date(),
+        recordFormatVersion: Int
+    ) async throws -> PortableBackupExport {
+        guard PortableBackupFormatRegistry.isExportable(
+            version: recordFormatVersion
+        ) else {
+            throw PortableBackupExportError.unsupportedRecordFormatVersion(
+                recordFormatVersion
+            )
+        }
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: workingDirectoryURL,
@@ -86,7 +111,8 @@ public actor PortableBackupExporter {
                 from: snapshot.url,
                 to: pendingURL,
                 appVersion: appVersion,
-                exportedAt: exportedAt
+                exportedAt: exportedAt,
+                recordFormatVersion: recordFormatVersion
             )
             try fileManager.moveItem(at: pendingURL, to: finalURL)
             return PortableBackupExport(
@@ -110,14 +136,23 @@ public actor PortableBackupExporter {
         }
     }
 
-    /// 把一致的快照库写成完整 v6 NDJSON 流（manifest 行 + 记录行 + footer）。
-    /// 提为 static 供 v7 包导出复用——`records.ndjson` 与该文件逐字节同构。
+    /// 把一致的快照库写成完整 NDJSON 流（manifest 行 + 记录行 + footer）。
+    /// 提为 static 供包导出复用——`records.ndjson` 与该文件逐字节同构。
+    /// `recordFormatVersion` 经 registry 决定表规格/列白名单/记录序/
+    /// 排除清单——版本不是表面数字，而是整套协议的选择键。
     static func writeBackupRecords(
         from snapshotURL: URL,
         to outputURL: URL,
         appVersion: String,
-        exportedAt: Date
+        exportedAt: Date,
+        recordFormatVersion: Int
     ) throws -> [String: Int] {
+        guard let specifications = PortableBackupFormatRegistry
+            .tableSpecifications(forVersion: recordFormatVersion) else {
+            throw PortableBackupExportError.unsupportedRecordFormatVersion(
+                recordFormatVersion
+            )
+        }
         var configuration = Configuration()
         configuration.readonly = true
         configuration.foreignKeysEnabled = true
@@ -130,7 +165,7 @@ public actor PortableBackupExporter {
 
         return try snapshot.read { db in
             var counts: [String: Int] = [:]
-            for specification in PortableBackupFormatV7.tableSpecifications {
+            for specification in specifications {
                 let countSQL: String
                 if let selectSQL = specification.selectSQL {
                     countSQL = "SELECT COUNT(*) FROM (\(selectSQL))"
@@ -141,22 +176,28 @@ public actor PortableBackupExporter {
             }
 
             var hasher = SHA256()
+            // v8 起 manifest 追加声明本版新增的排除范围（Reader 正文/
+            // 派生数据、词典数据、导入 staging），预览据此解释边界。
+            let excludedScopes = recordFormatVersion >= PortableBackupFormatRegistry.v8Version
+                ? PortableBackupFormat.excludedScopes
+                    + PortableBackupFormatV8.additionalExcludedScopes
+                : PortableBackupFormat.excludedScopes
             let manifest: [String: Any] = [
                 "recordType": "manifest",
                 "format": PortableBackupFormat.identifier,
-                "formatVersion": PortableBackupFormat.currentVersion,
+                "formatVersion": recordFormatVersion,
                 "appVersion": appVersion,
                 "exportedAt": Self.iso8601String(from: exportedAt),
                 "encoding": "utf-8",
                 "lineEnding": "lf",
                 "checksumAlgorithm": PortableBackupFormat.checksumAlgorithm,
-                "recordOrder": PortableBackupFormatV7.recordTypes,
+                "recordOrder": specifications.map(\.recordType),
                 "counts": counts,
-                "excludedScopes": PortableBackupFormat.excludedScopes
+                "excludedScopes": excludedScopes
             ]
             try Self.writeHashedLine(manifest, to: handle, hasher: &hasher)
 
-            for specification in PortableBackupFormatV7.tableSpecifications {
+            for specification in specifications {
                 let sql: String
                 if let selectSQL = specification.selectSQL {
                     sql = "\(selectSQL) ORDER BY \(specification.orderBy)"

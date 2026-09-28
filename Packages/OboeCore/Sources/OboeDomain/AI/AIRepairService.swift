@@ -48,6 +48,10 @@ public enum AIRepairServiceError: Error, Equatable, Sendable {
     case draftNotAnalyzable(AIRepairDraftPhase)
     /// A newer request already owns this draft — the late response is dropped.
     case staleResponse
+    /// v0.7.0 S12（设计 §9.1）：AI 修卡初版只支持 vocabulary/grammar；
+    /// sentence Note 由手动编辑（S13）承载，service 层同样明确拒绝，
+    /// 不依赖 UI 隐藏入口兜底。
+    case unsupportedNoteKind
 }
 
 extension AIRepairServiceError: LocalizedError {
@@ -57,6 +61,7 @@ extension AIRepairServiceError: LocalizedError {
         case .targetUnavailable: "目标卡片或笔记已被删除，无法继续修卡。"
         case let .draftNotAnalyzable(phase): "当前修卡状态（\(phase.rawValue)）不能发起分析。"
         case .staleResponse: "较早的修卡响应已失效。"
+        case .unsupportedNoteKind: "句子卡片暂不支持 AI 修卡，请手动编辑。"
         }
     }
 }
@@ -493,6 +498,8 @@ public actor AIRepairService {
                 throw AIRepairServiceError.targetUnavailable
             }
             return note.deckID
+        case .sentence:
+            throw AIRepairServiceError.unsupportedNoteKind
         }
     }
 
@@ -839,6 +846,8 @@ public actor AIRepairService {
                 throw AIRepairServiceError.targetUnavailable
             }
             return (AIRepairNoteSnapshot(note), note.contentVersion)
+        case .sentence:
+            throw AIRepairServiceError.unsupportedNoteKind
         }
     }
 

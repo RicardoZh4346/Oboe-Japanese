@@ -240,6 +240,9 @@ final class PortableBackupV6RestorationTests: XCTestCase {
     }
 
     /// 更高版本仍按 futureFormatVersion 拒绝。
+    /// S23：v8 已登记为已知协议（opt-in 导出），future 探针越过 registry
+    /// 上限（maximumSupportedVersion + 1）才算真正未知；自称 v8 但带着
+    /// v7 recordOrder 的文件按字段契约不符拒绝，同样不进入恢复。
     func testFutureVersionStillRejected() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
@@ -248,21 +251,37 @@ final class PortableBackupV6RestorationTests: XCTestCase {
         try await seedSource(source, seed: seed)
         let backup = try await export(source, fixture: fixture)
 
+        let futureVersion =
+            PortableBackupFormatRegistry.maximumSupportedVersion + 1
         let futureURL = fixture.rootURL.appendingPathComponent("future.oboe-backup")
         try rewriteBackup(backup.url, to: futureURL) { objects in
-            objects[0]["formatVersion"] = PortableBackupFormat.currentVersion + 1
+            objects[0]["formatVersion"] = futureVersion
         }
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         do {
             _ = try await preparer(current: current, fixture: fixture).prepare(fileURL: futureURL)
             XCTFail("future format version must be rejected")
         } catch let error as PortableBackupPreparationError {
-            let expectedVersion = PortableBackupFormat.currentVersion + 1
-            guard case .futureFormatVersion(expectedVersion) = error else {
+            guard case .futureFormatVersion(futureVersion) = error else {
                 return XCTFail(
-                    "expected futureFormatVersion(\(expectedVersion)), got \(error)"
+                    "expected futureFormatVersion(\(futureVersion)), got \(error)"
                 )
             }
+        }
+
+        // 自称 v8 但仍是 v7 契约字段 → 按 invalidManifest 拒绝（版本号
+        // 已知但文件不兑现该版本的记录序）。默认导出已是 v8，先把
+        // fixture 降级成 v7 再盖上 8 的版本戳。
+        let forgedV8URL = fixture.rootURL
+            .appendingPathComponent("forged-v8.oboe-backup")
+        try rewriteBackup(backup.url, to: forgedV8URL) { objects in
+            downgradeBackupToLegacyFormat(&objects, version: 7)
+            objects[0]["formatVersion"] = PortableBackupFormatRegistry.v8Version
+        }
+        let current2 = try OboeDatabase(path: fixture.currentDatabaseURL.path)
+        await XCTAssertThrowsPreparationError {
+            _ = try await preparer(current: current2, fixture: fixture)
+                .prepare(fileURL: forgedV8URL)
         }
     }
 

@@ -279,6 +279,9 @@ public enum AIRepairOutputDecoder {
             guard candidate.pitchAccent == nil else {
                 throw AIRepairError.fieldNotApplicableForKind("pitchAccent")
             }
+        case .sentence:
+            // v0.7.0 S12：拆卡候选不支持 sentence 类型，整条候选拒绝。
+            throw AIRepairError.fieldNotApplicableForKind("kind=sentence")
         }
         if let jlpt = candidate.jlpt, JLPTLevel(rawValue: jlpt) == nil {
             throw AIRepairError.invalidJLPT(jlpt)
@@ -289,6 +292,8 @@ public enum AIRepairOutputDecoder {
                 _ = try candidate.vocabularyFormData().validatedContent()
             case .grammar:
                 _ = try candidate.grammarFormData().validatedContent()
+            case .sentence:
+                throw AIRepairError.fieldNotApplicableForKind("kind=sentence")
             }
         } catch let error as VocabularyValidationError {
             throw AIRepairError.invalidCandidate(String(describing: error))

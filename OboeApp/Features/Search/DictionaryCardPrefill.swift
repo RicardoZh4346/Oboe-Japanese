@@ -40,7 +40,8 @@ enum DictionaryCardPrefill {
 
     /// JMdict POS code → `VocabularyPartOfSpeech` 白名单原子。
     /// 前缀归类覆盖同族 code（n-* 名词系、v5* 五段、vs* する系等）。
-    private static func mapPartOfSpeech(_ codes: Set<String>) -> String? {
+    /// S11 Reader Inspector 预填复用同一映射（词典→词汇词性的唯一转换点）。
+    static func mapPartOfSpeech(_ codes: Set<String>) -> String? {
         var atoms = Set<VocabularyPartOfSpeech>()
         for code in codes {
             switch code {
