@@ -44,6 +44,8 @@ final class ReaderInspectorViewModel {
         didSet {
             selectedSenseID = nil
             mineOperationID = UUID()
+            // pending 标记属于旧候选——换候选后不再回显。
+            pendingMark = nil
         }
     }
     var selectedSenseID: Int64? {
@@ -185,19 +187,51 @@ final class ReaderInspectorViewModel {
         }
     }
 
-    /// 关闭：在途 lookup/挖掘全部取消（层叠 UI 不接收陈旧结果）。
+    /// 关闭：在途 lookup/挖掘/标记全部取消（层叠 UI 不接收陈旧结果）。
     func dismiss() {
         lookupTask?.cancel()
+        markTask?.cancel()
     }
 
     // MARK: - 知识状态操作
 
-    /// 标为已知/忽略/重置。候选未落库时先 ensureLexeme（OOV 也可
-    /// 标记）；完成后刷新 lookup 让状态徽章即时反映真值表。
+    /// Picker 的乐观选择：`.auto` 对应 override=nil。保留 pending
+    /// 值让分段控件立即回显——不等 DB 写+重查跑完。
+    enum KnowledgeMark: Equatable {
+        case auto, known, ignored
+
+        init(_ override: KnowledgeOverride?) {
+            switch override {
+            case .known: self = .known
+            case .ignored: self = .ignored
+            case nil: self = .auto
+            }
+        }
+
+        var override: KnowledgeOverride? {
+            switch self {
+            case .auto: nil
+            case .known: .known
+            case .ignored: .ignored
+            }
+        }
+    }
+
+    /// 最近一次用户选择（尚未被 lookup 刷新覆盖前优先显示）。
+    private(set) var pendingMark: KnowledgeMark?
+    private var markTask: Task<Void, Never>?
+
+    /// 标为已知/忽略/重置（auto）。乐观更新：picker 立即回显；
+    /// 快速连点时取消前一次标记任务，最新值生效。候选未落库时先
+    /// ensureLexeme（OOV 也可标记）；完成后只内联重跑 lookup，
+    /// 不再顺带重查牌组目录。
     func mark(_ override: KnowledgeOverride?) {
-        guard let candidate = selectedCandidate, !isBusy else { return }
+        guard let candidate = selectedCandidate else { return }
+        let choice = KnowledgeMark(override)
+        pendingMark = choice
+        markTask?.cancel()
         isBusy = true
-        Task { [deps] in
+        markTask = Task { [deps] in
             defer { isBusy = false }
             do {
                 let lexemeID: UUID
@@ -215,7 +249,7 @@ final class ReaderInspectorViewModel {
                         )
                     ).id
                 }
-                switch override {
+                switch choice.override {
                 case .known:
                     _ = try await deps.knowledge.markKnown(
                         lexemeID: lexemeID)
@@ -226,15 +260,29 @@ final class ReaderInspectorViewModel {
                     _ = try await deps.knowledge.resetKnowledge(
                         lexemeID: lexemeID)
                 }
+                try Task.checkCancellation()
                 markedLexemeID = lexemeID
-                noticeMessage = switch override {
+                noticeMessage = switch choice {
                 case .known: "已标记为已知"
                 case .ignored: "已忽略该词"
-                case nil: "已重置知识状态"
+                case .auto: "已重置知识状态"
                 }
-                load()
+                // 内联重查 lookup：徽章回到真值表结果后才撤乐观态，
+                // 避免「写完成→旧解析态闪回→新态」的抖动。
+                let fresh = try await deps.service.lookup(
+                    surface: tap.surface,
+                    reading: tap.reading,
+                    morphologyCandidates: tap.candidates,
+                    tokenWasAmbiguous: tap.resolutionStatus == .ambiguous
+                )
+                try Task.checkCancellation()
+                lookup = fresh
+                if pendingMark == choice { pendingMark = nil }
+            } catch is CancellationError {
+                // 被更新的标记取代——pendingMark 由新任务接管。
             } catch {
                 guard generationAlive(deps) else { return }
+                if pendingMark == choice { pendingMark = nil }
                 errorMessage = error.localizedDescription
             }
         }

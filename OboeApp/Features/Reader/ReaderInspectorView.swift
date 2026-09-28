@@ -279,14 +279,15 @@ struct ReaderInspectorView: View {
                 Text("已忽略").tag(KnowledgeOverride?.some(.ignored))
             }
             .pickerStyle(.segmented)
-            .disabled(model.selectedCandidate == nil || model.isBusy)
+            // 标记任务可取消、最新值生效——picker 全程保持可点。
+            .disabled(model.selectedCandidate == nil)
             .accessibilityIdentifier("inspector-knowledge-override-picker")
         } header: {
             HStack {
                 Text("知识状态")
                 Spacer()
                 if let candidate = model.selectedCandidate {
-                    knowledgeBadge(candidate.knowledgeState)
+                    knowledgeBadge(displayedState(of: candidate))
                 }
             }
         } footer: {
@@ -300,7 +301,12 @@ struct ReaderInspectorView: View {
     private var knowledgeBinding: Binding<KnowledgeOverride?> {
         Binding(
             get: {
-                switch model.selectedCandidate?.knowledgeState {
+                // 有 pending 选择先回显（乐观更新），否则按解析态反推：
+                // 已知/已忽略恒来自 override；其余解析态一律「自动」。
+                if let pending = model.pendingMark {
+                    return pending.override
+                }
+                return switch model.selectedCandidate?.knowledgeState {
                 case .known: .known
                 case .ignored: .ignored
                 default: nil
@@ -387,6 +393,18 @@ struct ReaderInspectorView: View {
             }
             .disabled(model.isBusy || model.targetDeckID == nil)
             .accessibilityIdentifier("inspector-create-cloze")
+        }
+    }
+
+    /// pending 选择优先：known/ignored 立即回显；auto 的真值要等
+    /// 服务端解析，沿用当前徽章。
+    private func displayedState(
+        of candidate: ReaderMiningCandidate
+    ) -> VocabularyKnowledgeState {
+        switch model.pendingMark {
+        case .known: .known
+        case .ignored: .ignored
+        case .auto, nil: candidate.knowledgeState
         }
     }
 
