@@ -891,6 +891,7 @@ public final class ImportExecutor: Sendable {
             try attachMembership(noteID: targetID, deckID: job.targetDeckID, at: timestamp, in: db)
             let tags = try requireTags(mapped)
             try mergeTagUnion(tags: tags, noteID: targetID, at: timestamp, in: db)
+            try ensureUnitLink(noteID: targetID, headword: persisted.headword, reading: persisted.reading, at: timestamp, in: db)
             return RowOutcome(action: .mergedTags, targetNoteID: targetID)
         case .update:
             let tags = try requireTags(mapped)
@@ -915,6 +916,7 @@ public final class ImportExecutor: Sendable {
                     arguments: [timestamp, DatabaseValueCodec.encode(targetID)]
                 )
             }
+            try ensureUnitLink(noteID: targetID, headword: persisted.headword, reading: persisted.reading, at: timestamp, in: db)
             return RowOutcome(action: .updated, targetNoteID: targetID)
         }
     }
@@ -1077,6 +1079,27 @@ public final class ImportExecutor: Sendable {
         try GRDBContentCardRepository.insertHomeMembership(
             noteID: noteID,
             deckID: deckID,
+            atMilliseconds: timestamp,
+            in: db
+        )
+    }
+
+    /// S06：update/mergeTags 触碰的既有词汇 Note 若尚未绑定 unit
+    /// （v22 旧数据/并发窗口），同事务兜底落 localNote 链接；
+    /// 已有链接幂等。skip 策略无写入，不触发本函数。
+    private func ensureUnitLink(
+        noteID: UUID,
+        headword: String,
+        reading: String?,
+        at timestamp: Int64,
+        in db: Database
+    ) throws {
+        try LearningUnitWriteBridge.ensureUnit(
+            noteID: noteID,
+            headword: headword,
+            reading: reading,
+            binding: nil,
+            linkOrigin: .imported,
             atMilliseconds: timestamp,
             in: db
         )

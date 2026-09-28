@@ -190,6 +190,17 @@ public struct GRDBSentenceAnalysisCardRepository: SentenceAnalysisCardRepository
             }
             try GRDBSourceContextRepository.insert(sourceContext, in: db)
         }
+        // S06：与 commitVocabulary 同规约——句子分析/AI 拆分出的新
+        // 词汇 Note 同事务绑定 unit（无词典证据 → localNote）。
+        try LearningUnitWriteBridge.ensureUnit(
+            noteID: commit.noteID,
+            headword: commit.content.headword,
+            reading: commit.content.reading,
+            binding: commit.dictionaryBinding,
+            linkOrigin: LearningUnitWriteBridge.linkOrigin(for: commit.origin),
+            atMilliseconds: timestamp,
+            in: db
+        )
     }
 
     static func insertGrammar(

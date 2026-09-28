@@ -1,0 +1,285 @@
+{
+  "dataset_version": "jmdict-spike-v2",
+  "entries": [
+    {
+      "entry_id": 100001,
+      "senses": [
+        {
+          "sense_id": 1,
+          "sense_order": 0,
+          "glosses_en": [
+            "to go up",
+            "to rise"
+          ],
+          "glosses_zh": [
+            "上升；提高"
+          ],
+          "pos_codes": [
+            "v1",
+            "vi"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        },
+        {
+          "sense_id": 2,
+          "sense_order": 1,
+          "glosses_en": [
+            "to be raised",
+            "to be elevated"
+          ],
+          "glosses_zh": [
+            "被抬高；被提高"
+          ],
+          "pos_codes": [
+            "v1",
+            "vi"
+          ],
+          "restricted_forms": [
+            "上がる"
+          ],
+          "restricted_readings": [],
+          "tags": [
+            {
+              "category": "misc",
+              "code": "uk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "entry_id": 100002,
+      "senses": [
+        {
+          "sense_id": 3,
+          "sense_order": 0,
+          "glosses_en": [
+            "to live on",
+            "to subsist on"
+          ],
+          "glosses_zh": [
+            "靠……为生"
+          ],
+          "pos_codes": [
+            "v1"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        },
+        {
+          "sense_id": 4,
+          "sense_order": 1,
+          "glosses_en": [
+            "to eat"
+          ],
+          "glosses_zh": [
+            "吃"
+          ],
+          "pos_codes": [
+            "v1",
+            "vt"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "entry_id": 100003,
+      "senses": [
+        {
+          "sense_id": 5,
+          "sense_order": 0,
+          "glosses_en": [
+            "to go",
+            "to move"
+          ],
+          "glosses_zh": [
+            "去；走"
+          ],
+          "pos_codes": [
+            "v5k-s",
+            "vi"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        },
+        {
+          "sense_id": 6,
+          "sense_order": 1,
+          "glosses_en": [
+            "to be held",
+            "to be carried out"
+          ],
+          "glosses_zh": [
+            "被举行；被进行"
+          ],
+          "pos_codes": [
+            "v5k-s",
+            "vi"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": [
+            {
+              "category": "misc",
+              "code": "uk"
+            }
+          ]
+        },
+        {
+          "sense_id": 7,
+          "sense_order": 2,
+          "glosses_en": [
+            "to proceed",
+            "to take place"
+          ],
+          "glosses_zh": [
+            "进行；举行"
+          ],
+          "pos_codes": [
+            "v5k-s",
+            "vi"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [
+            "おこなう"
+          ],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "entry_id": 100004,
+      "senses": [
+        {
+          "sense_id": 8,
+          "sense_order": 0,
+          "glosses_en": [
+            "to see",
+            "to watch"
+          ],
+          "glosses_zh": [
+            "看见；观看；查看"
+          ],
+          "pos_codes": [
+            "v1",
+            "vt"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        }
+      ]
+    },
+    {
+      "entry_id": 100005,
+      "senses": [
+        {
+          "sense_id": 9,
+          "sense_order": 0,
+          "glosses_en": [
+            "to take (time)",
+            "to cost"
+          ],
+          "glosses_zh": [
+            "花费（时间）"
+          ],
+          "pos_codes": [
+            "v5r",
+            "vi"
+          ],
+          "restricted_forms": [
+            "掛かる"
+          ],
+          "restricted_readings": [],
+          "tags": [
+            {
+              "category": "misc",
+              "code": "uk"
+            }
+          ]
+        },
+        {
+          "sense_id": 10,
+          "sense_order": 1,
+          "glosses_en": [
+            "to take (time)",
+            "to cost"
+          ],
+          "glosses_zh": [
+            "耗费"
+          ],
+          "pos_codes": [
+            "v5r",
+            "vi"
+          ],
+          "restricted_forms": [
+            "掛かる"
+          ],
+          "restricted_readings": [],
+          "tags": [
+            {
+              "category": "misc",
+              "code": "uk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "entry_id": 100006,
+      "senses": [
+        {
+          "sense_id": 11,
+          "sense_order": 0,
+          "glosses_en": [
+            "water",
+            "cold water"
+          ],
+          "glosses_zh": [
+            "水；凉水"
+          ],
+          "pos_codes": [
+            "n"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": [
+            {
+              "category": "misc",
+              "code": "uk"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "entry_id": 100007,
+      "senses": [
+        {
+          "sense_id": 12,
+          "sense_order": 0,
+          "glosses_en": [
+            "book",
+            "volume"
+          ],
+          "glosses_zh": [
+            "书；书籍"
+          ],
+          "pos_codes": [
+            "n"
+          ],
+          "restricted_forms": [],
+          "restricted_readings": [],
+          "tags": []
+        }
+      ]
+    }
+  ]
+}

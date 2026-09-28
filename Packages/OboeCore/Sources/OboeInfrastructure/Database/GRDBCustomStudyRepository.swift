@@ -235,6 +235,17 @@ public struct GRDBCustomStudyRepository: CustomStudyRepository, Sendable {
         var conditions = ["cards.is_enabled = 1"]
         var values: [any DatabaseValueConvertible] = []
 
+        // 契约 §2.2/D15：tooEasy 单元的词汇方向卡——scheduled 恒排除；
+        // practiceOnly 默认排除、`filter.includeMastered` 显式放行。
+        // mode/includeMastered 组合是否放行由
+        // `SchedulingEligibility.isPracticeEligible` 单一判定。
+        if !SchedulingEligibility.isPracticeEligible(
+            mode: context.mode,
+            includeMastered: filter.includeMastered
+        ) {
+            conditions.append(SchedulingEligibilitySQL.eligibleCondition)
+        }
+
         if filter.favoriteOnly {
             conditions.append("notes.is_favorite = 1")
         }
@@ -407,13 +418,17 @@ public struct GRDBCustomStudyRepository: CustomStudyRepository, Sendable {
 
     public func fetchSession(id: UUID) async throws -> CustomStudySession? {
         try await pool.read { db in
-            try Self.fetchSessionRow(id: id, in: db).map(Self.decodeSession)
+            guard let session = try Self.fetchSessionRow(id: id, in: db)
+                .map(Self.decodeSession) else {
+                return nil
+            }
+            return try Self.applySchedulingEligibility(to: session, in: db)
         }
     }
 
     public func fetchActiveSession() async throws -> CustomStudySession? {
         try await pool.read { db in
-            try Row.fetchOne(
+            guard let session = try Row.fetchOne(
                 db,
                 sql: """
                     SELECT \(Self.sessionColumns) FROM custom_study_sessions
@@ -421,7 +436,10 @@ public struct GRDBCustomStudyRepository: CustomStudyRepository, Sendable {
                     ORDER BY started_at_ms DESC, id DESC
                     LIMIT 1
                     """
-            ).map(Self.decodeSession)
+            ).map(Self.decodeSession) else {
+                return nil
+            }
+            return try Self.applySchedulingEligibility(to: session, in: db)
         }
     }
 
@@ -612,6 +630,9 @@ public struct GRDBCustomStudyRepository: CustomStudyRepository, Sendable {
             }
             return stored
         }
+        // 契约 §2.2：practice 提交同样复核 mode/flag 规则——默认排除的
+        // 队列不得在单元被标 tooEasy 后继续积累练习记录。
+        try requirePracticeEligibility(for: attempt, in: db)
         do {
             try db.execute(
                 sql: """
@@ -772,6 +793,119 @@ public struct GRDBCustomStudyRepository: CustomStudyRepository, Sendable {
             throw CustomStudyRepositoryError.cardNotInSessionQueue(
                 cardID: cardID,
                 sessionID: sessionID
+            )
+        }
+    }
+
+    /// 冻结队列的读路径资格重算（契约 §2.2/D15）：启动后才被标
+    /// `too_easy` 单元的词汇方向卡从呈现队列剔除；`queue_json` 保持
+    /// 启动时的冻结原样不重写——重算只是投影，flag 解除后旧卡自然
+    /// 回到队列。删除/停用的卡照旧保留（会话内跳过处理）；非
+    /// active session 直接返回冻结态；`(mode, includeMastered)` 已
+    /// 放行的组合不重算（practiceOnly + includeMastered 允许练习
+    /// 已掌握单元）。
+    static func applySchedulingEligibility(
+        to session: CustomStudySession,
+        in db: Database
+    ) throws -> CustomStudySession {
+        guard session.status == .active,
+              !session.queue.cardIDs.isEmpty,
+              !SchedulingEligibility.isPracticeEligible(
+                  mode: session.mode,
+                  includeMastered: session.filter.includeMastered
+              )
+        else { return session }
+        let placeholders = session.queue.cardIDs
+            .map { _ in "?" }
+            .joined(separator: ",")
+        let ineligible = try Set(
+            String.fetchAll(
+                db,
+                sql: """
+                    SELECT cards.id
+                    FROM cards
+                    JOIN learning_unit_note_links sched_lul
+                      ON sched_lul.note_id = cards.note_id
+                    JOIN learning_unit_flags sched_luf
+                      ON sched_luf.unit_id = sched_lul.unit_id
+                    WHERE sched_luf.too_easy = 1
+                      AND cards.template_kind IN (\(SchedulingEligibilitySQL.vocabularyTemplateList))
+                      AND cards.id IN (\(placeholders))
+                    """,
+                arguments: StatementArguments(
+                    session.queue.cardIDs.map(DatabaseValueCodec.encode)
+                )
+            )
+        )
+        guard !ineligible.isEmpty else { return session }
+        let kept = session.queue.cardIDs.filter {
+            !ineligible.contains(DatabaseValueCodec.encode($0))
+        }
+        return CustomStudySession(
+            id: session.id,
+            filter: session.filter,
+            mode: session.mode,
+            status: session.status,
+            queue: CustomStudyQueue(
+                cardIDs: kept,
+                order: session.queue.order,
+                randomSeed: session.queue.randomSeed,
+                generatedAt: session.queue.generatedAt
+            ),
+            startedAt: session.startedAt,
+            finishedAt: session.finishedAt
+        )
+    }
+
+    /// practice attempt 的事务内资格复核（契约 §2.2）：按 session 的
+    /// `(mode, includeMastered)` 与提交瞬间的 flag 重判——单元在
+    /// session 启动后被标 `too_easy` 且组合不允许练习已掌握时拒绝。
+    /// 已删除的卡（card_key 孤儿）没有 flag 可判，跳过复核——练习
+    /// 历史按 card_key 照旧锚定。
+    static func requirePracticeEligibility(
+        for attempt: PracticeAttempt,
+        in db: Database
+    ) throws {
+        guard let sessionRow = try fetchSessionRow(id: attempt.sessionID, in: db) else {
+            throw CustomStudyRepositoryError.sessionNotFound(attempt.sessionID)
+        }
+        let modeValue: String = sessionRow["mode"]
+        guard let mode = CustomStudyMode(rawValue: modeValue) else {
+            throw CustomStudyRepositoryError.invalidPersistedValue(field: "mode")
+        }
+        let filterJSON: String = sessionRow["filter_json"]
+        guard let filter = try? jsonDecoder.decode(
+            CustomStudyFilter.self,
+            from: Data(filterJSON.utf8)
+        ) else {
+            throw CustomStudyRepositoryError.invalidPersistedValue(
+                field: "filter_json"
+            )
+        }
+        guard !SchedulingEligibility.isPracticeEligible(
+            mode: mode,
+            includeMastered: filter.includeMastered
+        ) else { return }
+        let ineligible = try Bool.fetchOne(
+            db,
+            sql: """
+                SELECT EXISTS(
+                    SELECT 1 FROM cards
+                    JOIN learning_unit_note_links sched_lul
+                      ON sched_lul.note_id = cards.note_id
+                    JOIN learning_unit_flags sched_luf
+                      ON sched_luf.unit_id = sched_lul.unit_id
+                    WHERE cards.id = ?
+                      AND cards.template_kind IN (\(SchedulingEligibilitySQL.vocabularyTemplateList))
+                      AND sched_luf.too_easy = 1
+                )
+                """,
+            arguments: [DatabaseValueCodec.encode(attempt.cardKey)]
+        ) == true
+        if ineligible {
+            throw CustomStudyRepositoryError.cardNotPracticeEligible(
+                cardID: attempt.cardKey,
+                sessionID: attempt.sessionID
             )
         }
     }

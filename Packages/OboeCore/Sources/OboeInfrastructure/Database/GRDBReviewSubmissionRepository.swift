@@ -48,6 +48,23 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             guard context.card.isEnabled else {
                 throw SubmitReviewError.cardDisabled
             }
+            // 契约 §2.2/D15：事务内复核单元 flag——提交瞬间卡的单元已被
+            // 另一窗口标 too_easy 时，三个词汇方向卡失去排程资格，迟到
+            // 评分拒绝（不进 FSRS、不写 review_logs）；Cloze/Grammar
+            // 与未挂单元的卡不受 flag 影响。isEnabled/tooEasy 是两个
+            // 独立维度，各自守卫保持不变。
+            guard SchedulingEligibility.isScheduledEligible(
+                templateKind: context.card.templateKind,
+                isEnabled: context.card.isEnabled,
+                unitTooEasy: try Self.isUnitTooEasy(
+                    noteID: context.card.noteID,
+                    in: db
+                )
+            ) else {
+                throw SubmitReviewError.cardNotSchedulingEligible(
+                    cardID: mutation.request.cardID
+                )
+            }
             guard context.card.stateVersion == mutation.request.expectedStateVersion else {
                 throw SubmitReviewError.stateVersionConflict(
                     expected: mutation.request.expectedStateVersion,
@@ -270,6 +287,27 @@ public struct GRDBReviewSubmissionRepository: ReviewSubmissionRepository, Review
             }
             return updated
         }
+    }
+
+    /// 「note → learning_unit_note_links → learning_unit_flags」的当前
+    /// flag 读取（契约 §2.2 LEFT JOIN 语义）：未挂单元或缺 flag 行
+    /// 都按 tooEasy = false；一个 Note 挂到多个单元时任一单元
+    /// tooEasy 即视为掌握。`commitReview` 事务内调用——读到的是本
+    /// 事务快照，堵的是两个窗口之间的间隙标记。
+    private static func isUnitTooEasy(
+        noteID: UUID,
+        in db: Database
+    ) throws -> Bool {
+        try Bool.fetchOne(
+            db,
+            sql: """
+                SELECT COALESCE(MAX(luf.too_easy), 0)
+                FROM learning_unit_note_links lul
+                JOIN learning_unit_flags luf ON luf.unit_id = lul.unit_id
+                WHERE lul.note_id = ?
+                """,
+            arguments: [DatabaseValueCodec.encode(noteID)]
+        ) ?? false
     }
 
     private static func fetchReviewContext(

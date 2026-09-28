@@ -99,7 +99,9 @@ public enum OboeDatabaseSchema {
         "v19_cloze",
         "v20_import_execution",
         "v21_conjugation_practice",
-        "v22_dictionary_knowledge"
+        "v22_dictionary_knowledge",
+        "v23_learning_units",
+        "v24_reader_study_binding"
     ]
 
     public static let tableNames: Set<String> = [
@@ -145,7 +147,13 @@ public enum OboeDatabaseSchema {
         "conjugation_sessions",
         "conjugation_practice_attempts",
         "dictionary_artifact_records",
-        "lexeme_dictionary_bindings"
+        "lexeme_dictionary_bindings",
+        "lexical_learning_units",
+        "learning_unit_dictionary_aliases",
+        "learning_unit_note_links",
+        "learning_unit_flags",
+        "learning_unit_events",
+        "learning_unit_migration_items"
     ]
 
     public static func makeMigrator() -> DatabaseMigrator {
@@ -236,6 +244,16 @@ public enum OboeDatabaseSchema {
                 migrator.registerMigration(
                     identifier,
                     migrate: GRDBDictionaryKnowledgeSchema.migrate
+                )
+            case "v23_learning_units":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: GRDBLearningUnitSchema.migrate
+                )
+            case "v24_reader_study_binding":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: GRDBReaderStudyBindingSchema.migrate
                 )
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")

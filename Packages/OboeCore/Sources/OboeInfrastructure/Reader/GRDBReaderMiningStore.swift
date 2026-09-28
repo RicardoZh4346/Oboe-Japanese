@@ -198,6 +198,23 @@ public struct GRDBReaderMiningStore: ReaderMiningStore, Sendable {
                 try GRDBSourceContextRepository.insert(
                     resolvedContext, in: db
                 )
+                // S06：既有 Note 可能尚无 unit 链接（旧数据/并发窗口）
+                // ——同事务兜底绑定；selection 带验证过的词典义项时
+                // 直接绑 dictionarySense unit。
+                let noteRow = try Row.fetchOne(
+                    db,
+                    sql: "SELECT headword, reading FROM notes WHERE id = ?",
+                    arguments: [DatabaseValueCodec.encode(existingNoteID)]
+                )
+                try LearningUnitWriteBridge.ensureUnit(
+                    noteID: existingNoteID,
+                    headword: noteRow?["headword"] ?? "",
+                    reading: noteRow?["reading"],
+                    binding: plan.dictionaryBinding,
+                    linkOrigin: .userConfirmed,
+                    atMilliseconds: atMs,
+                    in: db
+                )
                 noteID = existingNoteID
                 cardCount = 0
                 wasExistingNote = true

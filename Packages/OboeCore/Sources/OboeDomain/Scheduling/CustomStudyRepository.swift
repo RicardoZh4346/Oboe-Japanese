@@ -13,15 +13,22 @@ public struct CustomStudyQueueContext: Equatable, Sendable {
     public let now: Date
     public let studyDayStartsAt: Date?
     public let studyDayEndsAt: Date?
+    /// 契约 §2.2/D15：候选队列的目标会话模式。`.scheduled` 恒排除
+    /// `too_easy` 单元的词汇方向卡；`.practiceOnly`（默认）配合
+    /// `CustomStudyFilter.includeMastered` 才放行。判定统一走
+    /// `SchedulingEligibility.isPracticeEligible`。
+    public let mode: CustomStudyMode
 
     public init(
         now: Date,
         studyDayStartsAt: Date? = nil,
-        studyDayEndsAt: Date? = nil
+        studyDayEndsAt: Date? = nil,
+        mode: CustomStudyMode = .practiceOnly
     ) {
         self.now = now
         self.studyDayStartsAt = studyDayStartsAt
         self.studyDayEndsAt = studyDayEndsAt
+        self.mode = mode
     }
 }
 
@@ -144,4 +151,8 @@ public enum CustomStudyRepositoryError: Error, Equatable, Sendable {
     /// 提交的 card 不在该 session 启动时冻结的队列里（设计 §7.3：
     /// 队列成员以 queue_json 为准，UI 不能传任意 allowEarly 绕过）。
     case cardNotInSessionQueue(cardID: UUID, sessionID: UUID)
+    /// practice attempt 的事务内资格复核失败（契约 §2.2）：提交时卡的
+    /// 单元已被标 `too_easy`，而 session 的 (mode, includeMastered)
+    /// 组合不允许练习已掌握单元——`isPracticeEligible` 判否。
+    case cardNotPracticeEligible(cardID: UUID, sessionID: UUID)
 }

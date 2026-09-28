@@ -81,6 +81,12 @@ public struct CustomStudyFilter: Codable, Equatable, Hashable, Sendable {
     public var order: CustomStudyOrder
     /// `order == .random` 时必填的固定 seed。
     public var randomSeed: Int64?
+    /// 契约 §2.2/D15：practiceOnly 会话显式选择「包含已掌握」。
+    /// `true` 时 `too_easy` 单元的词汇方向卡仍可作为练习候选；`false`
+    /// （默认）与 `scheduled` 一致地排除。对 `.scheduled` 会话无效果——
+    /// scheduled 恒排除，`SchedulingEligibility.isPracticeEligible`
+    /// 是唯一判定源。
+    public var includeMastered: Bool
 
     public init(
         preset: CustomStudyPreset? = nil,
@@ -91,7 +97,8 @@ public struct CustomStudyFilter: Codable, Equatable, Hashable, Sendable {
         earlyReviewWindowDays: Int = CustomStudyService.defaultEarlyReviewWindowDays,
         limit: Int = CustomStudyService.defaultQueueLimit,
         order: CustomStudyOrder = .due,
-        randomSeed: Int64? = nil
+        randomSeed: Int64? = nil,
+        includeMastered: Bool = false
     ) {
         self.preset = preset
         self.deckIDs = deckIDs
@@ -102,6 +109,36 @@ public struct CustomStudyFilter: Codable, Equatable, Hashable, Sendable {
         self.limit = limit
         self.order = order
         self.randomSeed = randomSeed
+        self.includeMastered = includeMastered
+    }
+
+    /// 旧版持久化的 `filter_json` 没有 `includeMastered` 键——解码时
+    /// 用 `decodeIfPresent` 回退默认 `false`，保证 v0.6.0 落库的
+    /// session 升级后仍可恢复（v26 之前的行内兼容，不走 schema 迁移）。
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        preset = try container.decodeIfPresent(CustomStudyPreset.self, forKey: .preset)
+        deckIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .deckIDs) ?? []
+        tagIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .tagIDs) ?? []
+        jlptLevels = try container.decodeIfPresent(Set<JLPTLevel>.self, forKey: .jlptLevels) ?? []
+        favoriteOnly = try container.decodeIfPresent(Bool.self, forKey: .favoriteOnly) ?? false
+        earlyReviewWindowDays = try container.decodeIfPresent(
+            Int.self,
+            forKey: .earlyReviewWindowDays
+        ) ?? CustomStudyService.defaultEarlyReviewWindowDays
+        limit = try container.decodeIfPresent(
+            Int.self,
+            forKey: .limit
+        ) ?? CustomStudyService.defaultQueueLimit
+        order = try container.decodeIfPresent(
+            CustomStudyOrder.self,
+            forKey: .order
+        ) ?? .due
+        randomSeed = try container.decodeIfPresent(Int64.self, forKey: .randomSeed)
+        includeMastered = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .includeMastered
+        ) ?? false
     }
 }
 

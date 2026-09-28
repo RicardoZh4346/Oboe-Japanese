@@ -155,13 +155,39 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
             )
 
             let studyDayID = DatabaseValueCodec.encode(studyDay.id)
+            // 资格重算（契约 §2.2/D15）：未学习的 'new' 预约随单元
+            // too_easy 一并释放名额——tooEasy 的词汇方向卡不再持有
+            // 预约；已产生今日学习记录的任务保留（历史不动），解除
+            // flag 后由正常额度重排决定是否再入选。非词汇模板与
+            // is_enabled 维度各自独立。
             try db.execute(
                 sql: """
                     UPDATE daily_tasks SET cancelled_at_ms = ?
                     WHERE study_day_id = ? AND cancelled_at_ms IS NULL
-                      AND EXISTS (
-                          SELECT 1 FROM cards
-                          WHERE cards.id = daily_tasks.card_id AND cards.is_enabled = 0
+                      AND (
+                          EXISTS (
+                              SELECT 1 FROM cards
+                              WHERE cards.id = daily_tasks.card_id AND cards.is_enabled = 0
+                          )
+                          OR (
+                              daily_tasks.category_at_admission = 'new'
+                              AND EXISTS (
+                                  SELECT 1 FROM cards
+                                  JOIN learning_unit_note_links sched_lul
+                                    ON sched_lul.note_id = cards.note_id
+                                  JOIN learning_unit_flags sched_luf
+                                    ON sched_luf.unit_id = sched_lul.unit_id
+                                  WHERE cards.id = daily_tasks.card_id
+                                    AND cards.template_kind IN (\(SchedulingEligibilitySQL.vocabularyTemplateList))
+                                    AND sched_luf.too_easy = 1
+                              )
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM review_logs
+                                  WHERE review_logs.study_day_id = daily_tasks.study_day_id
+                                    AND review_logs.card_key = daily_tasks.card_id
+                                    AND review_logs.undone_at_ms IS NULL
+                              )
+                          )
                       )
                     """,
                 arguments: [now, studyDayID]
@@ -405,6 +431,7 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                 WHERE daily_tasks.study_day_id = ?
                   AND daily_tasks.category_at_admission = 'new'
                   AND daily_tasks.cancelled_at_ms IS NULL
+                  AND \(SchedulingEligibilitySQL.eligibleCondition)
                   AND NOT EXISTS (
                       SELECT 1 FROM review_logs
                       WHERE review_logs.study_day_id = daily_tasks.study_day_id
@@ -485,6 +512,7 @@ public struct GRDBStudyDayPlanningRepository: StudyDayPlanningRepository, Sendab
                     WHERE cards.is_enabled = 1
                       AND cards.state = 0
                       AND cards.first_studied_at_ms IS NULL
+                      AND \(SchedulingEligibilitySQL.eligibleCondition)
                       AND (daily_tasks.card_id IS NULL
                            OR daily_tasks.cancelled_at_ms IS NOT NULL
                            OR daily_tasks.category_at_admission = 'new')

@@ -87,6 +87,11 @@ public struct VocabularyContentCommit: Equatable, Sendable {
     /// repository 在 Note/Card 同事务内插入——重试不生成第二来源，
     /// 内容变动后的重试经 digest 判冲突（设计 §6.2）。
     public let sourceContext: SourceContext?
+    /// v0.7.5 S06：装配方已验证的词典义项绑定（contracts §1）。
+    /// 非 nil 时写事务在 Note 同事务内 resolve-or-create
+    /// dictionarySense unit + alias + primary link；nil → `localNote`
+    /// unit。digest 不覆盖——绑定不影响「同一内容」判定。
+    public let dictionaryBinding: DictionarySenseBinding?
 
     public init(
         noteID: UUID,
@@ -102,7 +107,8 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         sourceRef: String? = nil,
         sourceText: String? = nil,
         deckIDs: Set<UUID>? = nil,
-        sourceContext: SourceContext? = nil
+        sourceContext: SourceContext? = nil,
+        dictionaryBinding: DictionarySenseBinding? = nil
     ) {
         self.noteID = noteID
         self.exampleID = exampleID
@@ -118,6 +124,7 @@ public struct VocabularyContentCommit: Equatable, Sendable {
         self.sourceRef = sourceRef
         self.sourceText = sourceText
         self.sourceContext = sourceContext
+        self.dictionaryBinding = dictionaryBinding
     }
 }
 

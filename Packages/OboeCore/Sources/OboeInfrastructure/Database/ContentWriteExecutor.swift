@@ -59,8 +59,22 @@ public enum GRDBContentWriteExecutor {
                    """,
                arguments: [sourceRef]
            ) {
+            // S06：去重命中的既有 Note 可能尚未绑定 unit（v22 旧数据
+            // 或并发窗口）——同事务兜底链接，不漏绑。
+            let existingNoteID = try DatabaseValueCodec.decodeUUID(
+                existing["id"])
+            try LearningUnitWriteBridge.ensureUnit(
+                noteID: existingNoteID,
+                headword: commit.content.headword,
+                reading: commit.content.reading,
+                binding: commit.dictionaryBinding,
+                linkOrigin: LearningUnitWriteBridge.linkOrigin(
+                    for: commit.origin),
+                atMilliseconds: timestamp,
+                in: db
+            )
             return ContentCommitResult(
-                noteID: try DatabaseValueCodec.decodeUUID(existing["id"]),
+                noteID: existingNoteID,
                 cardCount: existing["card_count"],
                 wasCreated: false
             )
@@ -136,6 +150,18 @@ public enum GRDBContentWriteExecutor {
             }
             try GRDBSourceContextRepository.insert(sourceContext, in: db)
         }
+        // S06：统一 Learning Unit 绑定——每条新词汇 Note 同事务获得
+        // 正式 unit 链接（dictionaryBinding 已验证 → dictionarySense
+        // unit；否则 localNote unit）。已有链接幂等返回，Replay 不重写。
+        try LearningUnitWriteBridge.ensureUnit(
+            noteID: commit.noteID,
+            headword: commit.content.headword,
+            reading: commit.content.reading,
+            binding: commit.dictionaryBinding,
+            linkOrigin: LearningUnitWriteBridge.linkOrigin(for: commit.origin),
+            atMilliseconds: timestamp,
+            in: db
+        )
         if let draftID = commit.draftID {
             try GRDBContentCardRepository.deleteDraft(id: draftID, kind: "vocabulary", in: db)
         }

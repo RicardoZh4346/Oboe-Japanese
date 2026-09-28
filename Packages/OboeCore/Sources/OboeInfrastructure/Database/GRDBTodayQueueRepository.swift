@@ -38,6 +38,7 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
                       AND cards.state != 0
                       AND cards.due_at_ms < ?
                       AND (daily_tasks.card_id IS NULL OR daily_tasks.cancelled_at_ms IS NOT NULL)
+                      AND \(SchedulingEligibilitySQL.eligibleCondition)
                     ORDER BY
                       CASE cards.state WHEN 1 THEN 0 WHEN 3 THEN 0 ELSE 1 END,
                       cards.due_at_ms, cards.id
@@ -148,6 +149,7 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
             WHERE daily_tasks.study_day_id = ?
               AND daily_tasks.cancelled_at_ms IS NULL
               AND cards.is_enabled = 1
+              AND \(SchedulingEligibilitySQL.eligibleCondition)
               AND (
                   (cards.state = 0 AND cards.first_studied_at_ms IS NULL)
                   OR (cards.state != 0 AND cards.due_at_ms < ?)
@@ -295,4 +297,39 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
         return lhs.cardID.uuidString < rhs.cardID.uuidString
     }
 
+}
+
+/// 契约 §2.2 / D15 排程资格的 SQL 谓词（S08）。
+///
+/// 语义以 `SchedulingEligibility` 为唯一判定源：三个词汇方向卡若其
+/// Note 经 `learning_unit_note_links` 挂到的单元被标 `too_easy = 1`
+/// 则失去排程资格；Cloze/Grammar 模板与未挂任何单元的卡不受 flag
+/// 影响。SQL 用相关 `NOT EXISTS` 实现文档里「LEFT JOIN 取 flag，
+/// 缺失行按 tooEasy = false」的等价语义——子查询只承载资格判断，
+/// 不会像真 JOIN 那样放大行数。`is_enabled` 与 tooEasy 是两个独立
+/// 维度，各自在原有过滤里保持原样。
+enum SchedulingEligibilitySQL {
+    /// 词汇方向模板的 SQL 字面量列表，直接以
+    /// `SchedulingEligibility.vocabularyTemplateKinds` 的 rawValue 生成。
+    static var vocabularyTemplateList: String {
+        SchedulingEligibility.vocabularyTemplateKinds
+            .map { "'\($0.rawValue)'" }
+            .joined(separator: ", ")
+    }
+
+    /// 追加到「以 `cards` 为基表别名」的 WHERE 的条件：通过 = 卡仍有
+    /// 排程资格（非 tooEasy 词汇卡 / 非词汇模板 / 未挂单元）。
+    static var eligibleCondition: String {
+        """
+        NOT EXISTS (
+            SELECT 1
+            FROM learning_unit_note_links sched_lul
+            JOIN learning_unit_flags sched_luf
+              ON sched_luf.unit_id = sched_lul.unit_id
+            WHERE sched_lul.note_id = cards.note_id
+              AND sched_luf.too_easy = 1
+              AND cards.template_kind IN (\(vocabularyTemplateList))
+        )
+        """
+    }
 }

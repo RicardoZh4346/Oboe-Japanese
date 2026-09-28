@@ -89,7 +89,13 @@ public struct GRDBDeckRepository: DeckRepository, Sendable {
                 sql: "UPDATE decks SET name = ?, updated_at_ms = ? WHERE id = ?",
                 arguments: [name, milliseconds, DatabaseValueCodec.encode(id)]
             )
-            return db.changesCount == 1
+            let renamed = db.changesCount == 1
+            // S06：用户显式改名后该牌组不再跟随文档标题
+            // （study_deck_name_follows_title = 0，contracts §5）。
+            try GRDBReaderStudyDeckService.markDeckManuallyRenamed(
+                deckID: id, in: db
+            )
+            return renamed
         }
     }
 

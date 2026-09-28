@@ -204,6 +204,10 @@ public enum SubmitReviewError: Error, Equatable, Sendable {
     case cardNotInStudyPlan
     case cardNotDue(until: Date)
     case clockMovedBackward(lastReviewAt: Date, attemptedAt: Date)
+    /// 契约 §2.2：commitReview 事务内复核——提交瞬间卡所属学习单元
+    /// 已被另一窗口标 `too_easy`，词汇方向卡失去排程资格，迟到评分
+    /// 拒绝（不进 FSRS、不写 review_logs）。非词汇模板不受 flag 影响。
+    case cardNotSchedulingEligible(cardID: UUID)
 }
 
 public struct SubmitReview: Sendable {

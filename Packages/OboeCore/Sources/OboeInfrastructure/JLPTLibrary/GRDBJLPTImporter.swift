@@ -256,6 +256,17 @@ public struct GRDBJLPTImporter: JLPTImporting, Sendable {
                 ]
             )
         }
+        // S06：内置 JLPT 导入的 Note 同事务绑定 unit——builtin
+        // sourceRef 不指向词典义项，落 localNote。
+        try LearningUnitWriteBridge.ensureUnit(
+            noteID: noteID,
+            headword: vocabulary.headword,
+            reading: vocabulary.reading,
+            binding: nil,
+            linkOrigin: .imported,
+            atMilliseconds: timestamp,
+            in: db
+        )
         return true
     }
 }

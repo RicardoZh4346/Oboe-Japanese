@@ -34,6 +34,11 @@ public struct ReaderMiningWritePlan: Sendable {
     /// 请求发起时的数据库世代——写事务内复核。
     public let expectedGeneration: Int
     public let committedAt: Date
+    /// v0.7.5 S06：selection 显式指向词典义项时由 service 在异步层
+    /// 预验证（entry 拉取 + fingerprint）后携带——`.createNote` 经
+    /// `commit.dictionaryBinding` 生效；`.linkExisting` 由 store 在
+    /// 事务内调 `ensureUnit` 用同一份绑定。
+    public let dictionaryBinding: DictionarySenseBinding?
 
     public init(
         operationID: UUID,
@@ -45,7 +50,8 @@ public struct ReaderMiningWritePlan: Sendable {
         documentID: UUID,
         eventSnapshotJSON: String,
         expectedGeneration: Int,
-        committedAt: Date
+        committedAt: Date,
+        dictionaryBinding: DictionarySenseBinding? = nil
     ) {
         self.operationID = operationID
         self.canonicalPayload = canonicalPayload
@@ -57,6 +63,7 @@ public struct ReaderMiningWritePlan: Sendable {
         self.eventSnapshotJSON = eventSnapshotJSON
         self.expectedGeneration = expectedGeneration
         self.committedAt = committedAt
+        self.dictionaryBinding = dictionaryBinding
     }
 }
 
@@ -366,9 +373,36 @@ public struct ReaderMiningService: Sendable {
                 expected: request.expectedGeneration, current: current
             )
         }
-        let plan = try makePlan(request: request, selection: selection)
+        let binding = try await resolveDictionaryBinding(selection: selection)
+        let plan = try makePlan(
+            request: request, selection: selection,
+            dictionaryBinding: binding
+        )
         return try await store.commit(
             plan, currentGeneration: currentGeneration
+        )
+    }
+
+    /// S06：selection 显式指向词典义项（entryID+senseID 齐全）时用
+    /// 当前快照验算 fingerprint/快照 JSON，装配可消费的绑定证据；
+    /// 义项缺失/无词典证据 → nil（写路径落 localNote）。
+    private func resolveDictionaryBinding(
+        selection: ReaderMiningSelection
+    ) async throws -> DictionarySenseBinding? {
+        guard let entryID = selection.entryID,
+              let senseID = selection.senseID else { return nil }
+        let datasetVersion: String
+        if let selected = selection.dictionaryVersion {
+            datasetVersion = selected
+        } else {
+            datasetVersion = try await dictionary.metadata().datasetVersion
+        }
+        guard let entry = try await dictionary.entry(id: entryID),
+              let sense = entry.senses.first(where: { $0.id == senseID })
+        else { return nil }
+        return try DictionarySenseBinding.from(
+            sense: sense, entryID: entryID,
+            datasetVersion: datasetVersion
         )
     }
 
@@ -492,7 +526,8 @@ public struct ReaderMiningService: Sendable {
 
     private func makePlan(
         request: ReaderMiningRequest,
-        selection: ReaderMiningSelection
+        selection: ReaderMiningSelection,
+        dictionaryBinding: DictionarySenseBinding? = nil
     ) throws -> ReaderMiningWritePlan {
         let createdAt = now()
         let documentID = request.context.documentID
@@ -569,7 +604,8 @@ public struct ReaderMiningService: Sendable {
                     origin: .reader,
                     deckIDs: Set([request.deckID])
                         .union(request.additionalDeckIDs),
-                    sourceContext: sourceContext
+                    sourceContext: sourceContext,
+                    dictionaryBinding: dictionaryBinding
                 )
             )
         }
@@ -583,7 +619,8 @@ public struct ReaderMiningService: Sendable {
             documentID: documentID,
             eventSnapshotJSON: eventSnapshotJSON,
             expectedGeneration: request.expectedGeneration,
-            committedAt: createdAt
+            committedAt: createdAt,
+            dictionaryBinding: dictionaryBinding
         )
     }
 
