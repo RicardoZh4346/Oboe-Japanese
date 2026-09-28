@@ -406,6 +406,8 @@ jobs:
       url: ${{ needs.plan.outputs.release_url }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 本 job 无 checkout —— gh 需显式仓库上下文，否则报 "not a git repository"。
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.plan.outputs.tag }}
       IPA_NAME: ${{ needs.plan.outputs.ipa_name }}
       IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
@@ -698,6 +700,8 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 本 job 无 checkout —— gh 需显式仓库上下文，否则报 "not a git repository"。
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
       # 最后一步才转正式：此前 draft 的下载 URL 不对外，source/Pages 已就绪。
@@ -722,6 +726,9 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 本 job 无 checkout —— gh api 用显式路径不受影响，
+      # 但 gh release view/delete 需 GH_REPO，否则报 "not a git repository"。
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.plan.outputs.tag }}
       VERSION: ${{ needs.plan.outputs.version }}
       BUILD_VERSION: ${{ needs.build.outputs.build_version }}
