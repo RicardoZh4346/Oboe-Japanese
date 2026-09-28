@@ -47,6 +47,13 @@ on:
         required: true
         default: true
         type: boolean
+      repair_existing_release:
+        description: >-
+          true=修复已存在的正式 Release：直接复用其 IPA，重新生成并部署
+          SideStore Source；不会重新构建或覆盖 Release 附件。
+        required: true
+        default: false
+        type: boolean
 
 # 全仓串行：同 tag 重跑串行化，不同 tag 也不会交错写 canonical source / 部署 Pages。
 concurrency:
@@ -169,6 +176,7 @@ jobs:
 
       # SideStore 源设计为用户本地重签，因此流水线产出未签名 IPA（arm64 真机构建）。
       - name: Build unsigned Release archive
+        if: ${{ !inputs.repair_existing_release }}
         env:
           BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
         run: |
@@ -187,7 +195,7 @@ jobs:
             archive 2>&1 | tee "$RUNNER_TEMP/xcodebuild-archive.log"
 
       - name: Package IPA (Payload zip)
-        id: package
+        if: ${{ !inputs.repair_existing_release }}
         env:
           BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
         run: |
@@ -200,6 +208,22 @@ jobs:
           mkdir -p dist/Payload
           cp -R "$APP_DIR" dist/Payload/
           (cd dist && zip -qry "$IPA_NAME" Payload && rm -rf Payload)
+      - name: Download IPA from the existing formal release (repair mode)
+        if: ${{ inputs.repair_existing_release }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "$TAG" \
+            --pattern "$IPA_NAME" --dir dist --clobber
+
+      - name: Resolve packaged IPA metadata
+        id: package
+        env:
+          BUILD_VERSION: ${{ steps.resolve.outputs.build_version }}
+        run: |
+          set -euo pipefail
           (cd dist && shasum -a 256 "$IPA_NAME" > SHA256SUMS)
           SHA="$(cd dist && shasum -a 256 "$IPA_NAME" | awk '{print $1}')"
           SIZE="$(stat -f%z "dist/$IPA_NAME")"
@@ -267,6 +291,7 @@ jobs:
       IPA_SHA256: ${{ needs.build.outputs.ipa_sha256 }}
       IPA_SIZE: ${{ needs.build.outputs.ipa_size }}
       BUILD_VERSION: ${{ needs.build.outputs.build_version }}
+      REPAIR_EXISTING_RELEASE: ${{ inputs.repair_existing_release }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -288,8 +313,11 @@ jobs:
             STATE=none
           fi
           if [ "$STATE" = "false" ]; then
-            echo "::error::$TAG 已是正式 release，拒绝覆写（相同 tag 不覆盖不同内容）"
-            exit 1
+            if [ "$REPAIR_EXISTING_RELEASE" != "true" ]; then
+              echo "::error::$TAG 已是正式 release；仅 repair_existing_release=true 可进入修复模式"
+              exit 1
+            fi
+            echo "正式 release 已存在；修复模式将复用其 IPA 并补齐 Source/Pages"
           fi
           echo "state=$STATE" >> "$GITHUB_OUTPUT"   # none | true(已有 draft)
 
@@ -314,6 +342,7 @@ jobs:
           echo "created=true" >> "$GITHUB_OUTPUT"
 
       - name: Attach artifacts to the draft
+        if: ${{ !inputs.repair_existing_release }}
         run: |
           set -euo pipefail
           gh release upload "$TAG" \
@@ -373,7 +402,7 @@ jobs:
     environment:
       # 正式发布：release-evidence 环境必须配置 Required reviewers，审批 = 人工证据。
       # dry-run：release-rehearsal 无保护规则，自动通过、不制造审批噪音。
-      name: ${{ needs.plan.outputs.publish == 'true' && 'release-evidence' || 'release-rehearsal' }}
+      name: ${{ needs.plan.outputs.publish == 'true' && !inputs.repair_existing_release && 'release-evidence' || 'release-rehearsal' }}
       url: ${{ needs.plan.outputs.release_url }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -384,6 +413,7 @@ jobs:
       BUILD_VERSION: ${{ needs.build.outputs.build_version }}
       DOWNLOAD_URL: ${{ needs.plan.outputs.download_url }}
       PUBLISH: ${{ needs.plan.outputs.publish }}
+      REPAIR_EXISTING_RELEASE: ${{ inputs.repair_existing_release }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/download-artifact@v4
@@ -393,7 +423,7 @@ jobs:
 
       # 双保险：正式发布时必须有真实审批记录，防止环境未配 reviewer 导致静默放行。
       - name: Verify a human approval exists for the protected environment
-        if: needs.plan.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true' && !inputs.repair_existing_release
         env:
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
@@ -436,7 +466,7 @@ jobs:
           } > "release-evidence-$TAG.md"
 
       - name: Attach evidence to the draft release
-        if: needs.plan.outputs.publish == 'true'
+        if: needs.plan.outputs.publish == 'true' && !inputs.repair_existing_release
         run: gh release upload "$TAG" "release-evidence-$TAG.md" --clobber
 
       - name: Upload evidence artifact
@@ -674,7 +704,12 @@ jobs:
       - name: Publish the draft release
         run: |
           set -euo pipefail
-          gh release edit "$TAG" --draft=false --latest
+          IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+          if [ "$IS_DRAFT" = "true" ]; then
+            gh release edit "$TAG" --draft=false --latest
+          else
+            echo "$TAG 已是正式 release；修复模式无需重复发布"
+          fi
           gh release view "$TAG" --json url,isDraft \
             --jq '"published: " + .url + " (isDraft=" + (.isDraft | tostring) + ")"'
 
