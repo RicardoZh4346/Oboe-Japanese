@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import GRDB
 import OboeDomain
+import os
 
 /// v0.7.5 S13（前置·角色 C）：AI Study **应用层**——把已确认的
 /// `ai_study_selections`（immutable revision）逐 unit 落到学习数据。
@@ -49,7 +50,9 @@ import OboeDomain
 /// # 不在这里做的事
 ///
 /// - 不写 review_logs / FSRS state / daily_tasks（复习统计零副作用）。
-/// - 不写 reader_study_occurrences（S15/S17 的领域）。
+/// - `reader_study_occurrences` 只回写 `unit_id` 链接（随
+///   resolution.unit_id 同事务落值——S20 Coverage v2 分母所依）；
+///   状态/锚点归 finalize 管。
 /// - 不删 Note/Card——「删除」永远只由用户动作产生。
 ///
 /// # 装配分工（物化接缝）
@@ -970,6 +973,13 @@ public enum GRDBAIStudyApplyService {
 
     /// `ai_study_resolutions.unit_id` 弱引用回填（§6 v25：应用后
     /// 落值；`unit_id IS NULL` 守卫使重放/局部补写幂等）。
+    ///
+    /// S20：同事务把同一 unit 落回 `reader_study_occurrences.unit_id`
+    /// ——occurrence `resolution_id` 由 finalize 指向本 resolution；
+    /// 该列是 Coverage v2 分母（unit_id 非空的已解析 occurrence 的
+    /// distinct unit）的唯一来源，缺它快照恒为空分母。无 `IS NULL`
+    /// 守卫：重放同值覆盖无害，resolution 换绑时跟随最新证据（unit
+    /// 删除由 SET NULL 弱引用自动释放）。
     static func backfillResolutionUnitIDs(
         unitID: UUID,
         context: AIStudyApplyUnitContext,
@@ -982,6 +992,15 @@ public enum GRDBAIStudyApplyService {
                 sql: """
                     UPDATE ai_study_resolutions SET unit_id = ?
                     WHERE id = ? AND unit_id IS NULL
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    DatabaseValueCodec.encode(resolution.id),
+                ])
+            try db.execute(
+                sql: """
+                    UPDATE reader_study_occurrences SET unit_id = ?
+                    WHERE resolution_id = ?
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(unitID),
@@ -1669,10 +1688,60 @@ public struct AIStudyApplyService: Sendable {
                 expectedEpoch: job.epoch, atMs: nowMs, in: db)).status
         }
 
+        // S20：应用收尾即落整文档 Coverage v2 快照（best-effort——
+        // 快照是历史留痕，失败只记日志绝不推翻已提交的应用；
+        // 入口 `.completed` 的只读重放路径不落——零写入契约）。
+        // 文档已删（missingSource）时投影必败，跳过不刷日志噪声。
+        if case .documentMissing = abortError {
+            // 文档缺失——无投影对象，快照留待下次有效应用。
+        } else {
+            await recordCoverageSnapshot(
+                jobID: jobID, documentID: entry.documentID)
+        }
+
         return AIStudyApplyReport(
             jobID: jobID, entryStatus: entry.status,
             finalStatus: finalStatus, units: outcomes)
     }
+
+    /// v26 快照 best-effort 写入（S20 集成点）：独立短事务，
+    /// 失败经 `snapshotLogger` 记录后继续——度量行绝不当业务
+    /// 失败的乘数。版本分量取 Job 冻结 manifest（快照归因到
+    /// 产出它的分析上下文）；manifest 缺席降级 "unknown"——
+    /// 保留快照行不丢历史，版本字段如实标记来源缺失。
+    private func recordCoverageSnapshot(
+        jobID: UUID, documentID: UUID
+    ) async {
+        do {
+            try await pool.write { db in
+                let manifest = try Data.fetchOne(
+                    db,
+                    sql: """
+                        SELECT manifest FROM ai_study_job_manifests
+                        WHERE job_id = ?
+                        """,
+                    arguments: [DatabaseValueCodec.encode(jobID)]
+                ).flatMap { try? AIStudyJobManifest.decode($0) }
+                try GRDBReaderCoverageSnapshotStore
+                    .recordDocumentSnapshot(
+                        documentID: documentID,
+                        dictionaryVersion:
+                            manifest?.dictionaryDatasetVersion
+                                ?? "unknown",
+                        morphologyVersion: manifest?.morphologyVersion
+                            ?? "unknown",
+                        at: now(), in: db)
+            }
+        } catch {
+            Self.snapshotLogger.error(
+                "coverage snapshot skipped for job \(jobID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// S20 快照失败的统一日志点（与 preparation 侧同纪律）。
+    private static let snapshotLogger = Logger(
+        subsystem: "com.oboe.infra",
+        category: "ai-study-coverage")
 
     /// completed Job 的幂等报告——只读重建逐 unit 结果（receipt
     /// outcomeJSON 优先，缺失退化为 alreadyApplied）。

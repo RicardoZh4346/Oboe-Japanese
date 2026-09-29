@@ -12,13 +12,18 @@ struct StatisticsView: View {
     @State private var model: StatisticsViewModel
     /// S22：「阅读分析」页数据源；nil 时不显示入口（增量接入）。
     private let readerAnalyticsSource: (any ReaderAnalyticsFetching)?
+    /// v0.7.5 S20：「阅读学习」数据源（漏斗 + Coverage v2）；
+    /// nil 时阅读分析页不渲染该区块。
+    private let readerStudyMetricsSource: (any ReaderStudyMetricsFetching)?
 
     init(
         studyDay: StudyDay,
         source: any StatisticsInsightFetching,
-        readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil
+        readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil,
+        readerStudyMetricsSource: (any ReaderStudyMetricsFetching)? = nil
     ) {
         self.readerAnalyticsSource = readerAnalyticsSource
+        self.readerStudyMetricsSource = readerStudyMetricsSource
         _model = State(
             initialValue: StatisticsViewModel(
                 studyDay: studyDay,
@@ -103,7 +108,9 @@ struct StatisticsView: View {
         if let readerSource = readerAnalyticsSource {
             Section {
                 NavigationLink {
-                    ReaderAnalyticsView(source: readerSource)
+                    ReaderAnalyticsView(
+                        source: readerSource,
+                        studyMetricsSource: readerStudyMetricsSource)
                 } label: {
                     Label("阅读分析", systemImage: "book")
                 }

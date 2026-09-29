@@ -2,6 +2,7 @@ import Foundation
 import OboeDomain
 import OboeInfrastructure
 import Observation
+import os
 
 /// v0.7.5 S15「AI 准备学习内容」流程模型——Reader 工具栏入口弹层
 /// 的单一驱动点：
@@ -278,6 +279,7 @@ final class ReaderAIStudyFlowModel {
         }
         switch existing.status {
         case .awaitingConfirmation, .partiallyCompleted:
+            await finalizeBestEffort(jobID: existing.id)
             await loadPreview()
         case .paused:
             phase = .analyzing   // 显示「恢复/取消」
@@ -429,6 +431,7 @@ final class ReaderAIStudyFlowModel {
         job = current
         switch current.status {
         case .awaitingConfirmation, .partiallyCompleted:
+            await finalizeBestEffort(jobID: jobID)
             await loadPreview()
             if automaticApply, phase == .preview,
                let preview,
@@ -438,8 +441,10 @@ final class ReaderAIStudyFlowModel {
                 await confirm()
             }
         case .cancelled:
+            await finalizeBestEffort(jobID: jobID)
             phase = .cancelled
         case .failed:
+            await finalizeBestEffort(jobID: jobID)
             errorMessage = "分析失败——可在预览页查看失败块后重试。"
             await loadPreview()
         case .paused:
@@ -448,6 +453,20 @@ final class ReaderAIStudyFlowModel {
             break
         default:
             break
+        }
+    }
+
+    /// S20 集成点：Runner 收束/接管即 finalize——occurrence 状态
+    /// 回填 + 译文发布（服务内随即 best-effort 落 Coverage v2
+    /// 快照）。finalize 幂等，重试/恢复路径会再次调用；失败不拦
+    /// 相位推进——预览仍可读证据链，occurrence/译文由下次
+    /// finalize 补齐。
+    private func finalizeBestEffort(jobID: UUID) async {
+        do {
+            try await preparation.finalizeResults(jobID: jobID)
+        } catch {
+            Self.logger.error(
+                "finalizeResults failed for \(jobID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -650,6 +669,10 @@ final class ReaderAIStudyFlowModel {
     }
 
     // MARK: - 工具
+
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.oboe.app",
+        category: "AIStudyFlow")
 
     static func message(for error: Error) -> String {
         if let localized = error as? LocalizedError,

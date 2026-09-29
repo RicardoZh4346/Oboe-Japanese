@@ -1,6 +1,7 @@
 import Foundation
 import GRDB
 import OboeDomain
+import os
 
 /// v0.7.5 S15：Reader「AI 准备学习内容」编排服务。
 ///
@@ -1085,7 +1086,8 @@ public struct AIStudyPreparationService: Sendable {
                 try db.execute(
                     sql: """
                         UPDATE reader_study_occurrences
-                        SET resolution_status = ?, resolution_id = ?
+                        SET resolution_status = ?, resolution_id = ?,
+                            unit_id = COALESCE(?, unit_id)
                         WHERE document_id = ? AND content_revision = ?
                           AND tokenizer_version = ?
                           AND start_utf16 = ? AND length_utf16 = ?
@@ -1097,6 +1099,10 @@ public struct AIStudyPreparationService: Sendable {
                     arguments: [
                         status,
                         DatabaseValueCodec.encode(record.id),
+                        // S20：resolution 已绑 unit（重收束/部分应用后
+                        // 路径）时一并回填——NULL 则保留既有值，
+                        // 绝不把已绑定链接清掉。
+                        record.unitID.map(DatabaseValueCodec.encode),
                         DatabaseValueCodec.encode(job.documentID),
                         job.contentRevision,
                         manifest.tokenizerVersion,
@@ -1126,7 +1132,44 @@ public struct AIStudyPreparationService: Sendable {
                     at: now(), in: db)
             }
         }
+
+        // S20：收束即落整文档 Coverage v2 快照（best-effort——
+        // 快照是历史留痕，失败只记日志绝不让 finalize 失败）。
+        // 版本分量取 Job 冻结 manifest——快照必须归因到产出它的
+        // 分析上下文，不是调用当下的词典/形态状态。
+        await recordCoverageSnapshot(
+            documentID: job.documentID,
+            dictionaryVersion: manifest.dictionaryDatasetVersion,
+            morphologyVersion: manifest.morphologyVersion)
     }
+
+    /// v26 快照 best-effort 写入（S20 集成点）：独立短事务，
+    /// 失败经 `snapshotLogger` 记录后继续——度量行绝不当业务
+    /// 失败的乘数。同度量上下文重放由唯一键去重（幂等）。
+    private func recordCoverageSnapshot(
+        documentID: UUID,
+        dictionaryVersion: String,
+        morphologyVersion: String
+    ) async {
+        do {
+            try await pool.write { db in
+                try GRDBReaderCoverageSnapshotStore
+                    .recordDocumentSnapshot(
+                        documentID: documentID,
+                        dictionaryVersion: dictionaryVersion,
+                        morphologyVersion: morphologyVersion,
+                        at: now(), in: db)
+            }
+        } catch {
+            Self.snapshotLogger.error(
+                "coverage snapshot skipped for \(documentID.uuidString, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// S20 快照失败的统一日志点（finalize/其他触发点同纪律）。
+    private static let snapshotLogger = Logger(
+        subsystem: "com.oboe.infra",
+        category: "ai-study-coverage")
 
     /// job block → S17 译文 locator_key：`tr:ch:<co>:b:<bo>#r<s>-<e>`
     /// （序数取块行 locatorJSON，区间取 subblockKey `#r` 后缀）。

@@ -175,6 +175,7 @@
 		A01100000000000000000118 /* ReaderAnalyticsSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000118 /* ReaderAnalyticsSource.swift */; };
 		A01100000000000000000119 /* ReaderAnalyticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000119 /* ReaderAnalyticsView.swift */; };
 		A01100000000000000000120 /* ReaderAnalyticsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */; };
+		A01100000000000000000126 /* ReaderStudyMetricsSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000126 /* ReaderStudyMetricsSource.swift */; };
 		A01100000000000000000121 /* ReaderAIStudyFlowModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000121 /* ReaderAIStudyFlowModel.swift */; };
 		A01100000000000000000122 /* ReaderAIStudySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000122 /* ReaderAIStudySheet.swift */; };
 		A01100000000000000000123 /* ReaderTranslationDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000123 /* ReaderTranslationDependencies.swift */; };
@@ -378,6 +379,7 @@
 		A01200000000000000000118 /* ReaderAnalyticsSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsSource.swift; sourceTree = "<group>"; };
 		A01200000000000000000119 /* ReaderAnalyticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsView.swift; sourceTree = "<group>"; };
 		A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAnalyticsViewModel.swift; sourceTree = "<group>"; };
+		A01200000000000000000126 /* ReaderStudyMetricsSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStudyMetricsSource.swift; sourceTree = "<group>"; };
 		A01200000000000000000121 /* ReaderAIStudyFlowModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAIStudyFlowModel.swift; sourceTree = "<group>"; };
 		A01200000000000000000122 /* ReaderAIStudySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderAIStudySheet.swift; sourceTree = "<group>"; };
 		A01200000000000000000123 /* ReaderTranslationDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTranslationDependencies.swift; sourceTree = "<group>"; };
@@ -613,7 +615,7 @@
 			sourceTree = "<group>";
 		};
 		A01300000000000000000101 /* Reader */ = {isa = PBXGroup; children = (A01200000000000000000101 /* ReaderFeatureDependencies.swift */, A01200000000000000000102 /* ReaderLibraryViewModel.swift */, A01200000000000000000103 /* ReaderDocumentViewModel.swift */, A01200000000000000000104 /* ReaderTextView.swift */, A01200000000000000000105 /* ReaderView.swift */, A01200000000000000000106 /* ReaderLibraryView.swift */, A01200000000000000000107 /* ReaderRootView.swift */, A01200000000000000000109 /* ReaderInspectorViewModel.swift */, A01200000000000000000110 /* ReaderInspectorView.swift */, A01200000000000000000116 /* ReaderClozeCreateViewModel.swift */, A01200000000000000000117 /* ReaderClozeCreateView.swift */, A01200000000000000000121 /* ReaderAIStudyFlowModel.swift */, A01200000000000000000122 /* ReaderAIStudySheet.swift */, A01200000000000000000123 /* ReaderTranslationDependencies.swift */, A01200000000000000000124 /* ReaderTranslationViewModel.swift */, A01200000000000000000125 /* ReaderTranslationViews.swift */,); path = Reader; sourceTree = "<group>"; };
-		A01300000000000000000103 /* Statistics */ = {isa = PBXGroup; children = (A01200000000000000000112 /* StatisticsInsightSource.swift */, A01200000000000000000113 /* StatisticsView.swift */, A01200000000000000000114 /* StatisticsViewModel.swift */, A01200000000000000000118 /* ReaderAnalyticsSource.swift */, A01200000000000000000119 /* ReaderAnalyticsView.swift */, A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */,); path = Statistics; sourceTree = "<group>"; };
+		A01300000000000000000103 /* Statistics */ = {isa = PBXGroup; children = (A01200000000000000000112 /* StatisticsInsightSource.swift */, A01200000000000000000113 /* StatisticsView.swift */, A01200000000000000000114 /* StatisticsViewModel.swift */, A01200000000000000000118 /* ReaderAnalyticsSource.swift */, A01200000000000000000119 /* ReaderAnalyticsView.swift */, A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */, A01200000000000000000126 /* ReaderStudyMetricsSource.swift */,); path = Statistics; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -895,6 +897,7 @@
 				A01100000000000000000118 /* ReaderAnalyticsSource.swift in Sources */,
 				A01100000000000000000119 /* ReaderAnalyticsView.swift in Sources */,
 				A01100000000000000000120 /* ReaderAnalyticsViewModel.swift in Sources */,
+				A01100000000000000000126 /* ReaderStudyMetricsSource.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -322,6 +322,10 @@ enum AppFeatureContainerFactory {
                 readerAnalyticsSource: AppReaderAnalyticsSource(
                     repository: GRDBReaderAnalyticsRepository(
                         database: database)
+                ),
+                readerStudyMetricsSource: AppReaderStudyMetricsSource(
+                    repository: GRDBReaderStudyMetricsRepository(
+                        database: database)
                 )
             ),
             decks: DeckFeatureDependencies(

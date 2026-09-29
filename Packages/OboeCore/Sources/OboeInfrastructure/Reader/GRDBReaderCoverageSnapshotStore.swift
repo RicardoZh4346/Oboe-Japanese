@@ -271,7 +271,7 @@ public enum GRDBReaderCoverageSnapshotStore {
                     SELECT \(columnList)
                     FROM reader_learning_coverage_snapshots
                     WHERE document_id = ?
-                    ORDER BY calculated_at_ms DESC
+                    ORDER BY calculated_at_ms DESC, rowid DESC
                     """,
                 arguments: [DatabaseValueCodec.encode(documentID)]
             )
@@ -291,7 +291,7 @@ public enum GRDBReaderCoverageSnapshotStore {
                     SELECT \(columnList)
                     FROM reader_learning_coverage_snapshots
                     WHERE document_id_snapshot = ?
-                    ORDER BY calculated_at_ms DESC
+                    ORDER BY calculated_at_ms DESC, rowid DESC
                     """,
                 arguments: [documentIDSnapshot]
             )
@@ -310,7 +310,7 @@ public enum GRDBReaderCoverageSnapshotStore {
                     SELECT \(columnList)
                     FROM reader_learning_coverage_snapshots
                     WHERE document_id = ?
-                    ORDER BY calculated_at_ms DESC LIMIT 1
+                    ORDER BY calculated_at_ms DESC, rowid DESC LIMIT 1
                     """,
                 arguments: [DatabaseValueCodec.encode(documentID)]
             )

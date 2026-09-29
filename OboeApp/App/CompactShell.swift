@@ -88,6 +88,7 @@ struct CompactShell: View {
                 openSettings: { isSettingsPresented = true },
                 statisticsSource: today.statisticsSource,
                 readerAnalyticsSource: today.readerAnalyticsSource,
+                readerStudyMetricsSource: today.readerStudyMetricsSource,
                 learningProgress: container.shared.learningProgress
             )
                 .id(container.generation)

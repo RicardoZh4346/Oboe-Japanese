@@ -588,6 +588,7 @@ struct RegularShell: View {
                 openSettings: { navigation.selectTab(.settings) },
                 statisticsSource: today.statisticsSource,
                 readerAnalyticsSource: today.readerAnalyticsSource,
+                readerStudyMetricsSource: today.readerStudyMetricsSource,
                 learningProgress: container.shared.learningProgress
             )
         case .reader:

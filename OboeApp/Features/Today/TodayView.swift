@@ -36,6 +36,10 @@ struct TodayView: View {
     /// S22：「阅读分析」页数据源；nil 时统计页不显示入口。
     /// 装配见 AppFeatureContainerFactory → AppReaderAnalyticsSource）。
     let readerAnalyticsSource: (any ReaderAnalyticsFetching)?
+    /// v0.7.5 S20：「阅读学习」数据源（漏斗 + Coverage v2）；nil 时
+    /// 阅读分析页不渲染该区块。
+    /// 装配见 AppFeatureContainerFactory → AppReaderStudyMetricsSource。
+    let readerStudyMetricsSource: (any ReaderStudyMetricsFetching)?
     /// v0.7.5 S18：学习表面观察流——评级/成员/绑定写发射即
     /// `load()`，今日数字与牌组区始终同一口径同一时点。nil →
     /// 退回既有 30s 轮询 + 返回页刷新。
@@ -72,6 +76,7 @@ struct TodayView: View {
         openSettings: (() -> Void)? = nil,
         statisticsSource: (any StatisticsInsightFetching)? = nil,
         readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil,
+        readerStudyMetricsSource: (any ReaderStudyMetricsFetching)? = nil,
         learningProgress: (any LearningProgressProviding)? = nil
     ) {
         self.studyService = studyService
@@ -97,6 +102,7 @@ struct TodayView: View {
         self.openSettings = openSettings
         self.statisticsSource = statisticsSource
         self.readerAnalyticsSource = readerAnalyticsSource
+        self.readerStudyMetricsSource = readerStudyMetricsSource
         self.learningProgress = learningProgress
         _model = State(
             initialValue: TodayViewModel(
@@ -384,7 +390,8 @@ struct TodayView: View {
             NavigationLink {
                 StatisticsView(
                     studyDay: plan.studyDay, source: source,
-                    readerAnalyticsSource: readerAnalyticsSource
+                    readerAnalyticsSource: readerAnalyticsSource,
+                    readerStudyMetricsSource: readerStudyMetricsSource
                 )
             } label: {
                 HomeShortcutTile(

@@ -20,4 +20,7 @@ struct TodayFeatureDependencies {
     /// S22：阅读分析页数据源（事件流/知识态/版本分段覆盖率）。
     /// nil 时统计页不显示「阅读分析」入口。
     var readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil
+    /// v0.7.5 S20：阅读学习数据源（漏斗 + Coverage v2）。
+    /// nil 时阅读分析页不渲染「阅读学习」区块。
+    var readerStudyMetricsSource: (any ReaderStudyMetricsFetching)? = nil
 }

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OboeDomain
+import OboeInfrastructure
 
 /// v0.7.0 S22：阅读分析页数据源——VM 只依赖这条窄协议，测试用桩件。
 /// 生产实现见 `AppReaderAnalyticsSource`（GRDBReaderAnalyticsRepository
@@ -40,6 +41,9 @@ final class ReaderAnalyticsViewModel {
     static let dailyWindowCount = 30
 
     private let source: any ReaderAnalyticsFetching
+    /// v0.7.5 S20：「阅读学习」数据源（漏斗 + Coverage v2）。
+    /// nil 时整个新区块隐藏——增量接入不破坏 S22 页面。
+    private let studyMetricsSource: (any ReaderStudyMetricsFetching)?
     /// 切换选中文档时丢弃过期趋势响应（世代守卫，同 S21 模式）。
     private var trendGeneration = 0
 
@@ -56,12 +60,22 @@ final class ReaderAnalyticsViewModel {
         }
     }
     var trendSegments: [ReaderCoverageTrendSegment] = []
+    /// S20：选中文档的 Reader→学习项漏斗（当前态）。
+    var studyFunnel: ReaderStudyFunnel?
+    /// S20：选中文档的 Coverage v2 活算结果（当前态，不落库）。
+    var liveCoverageV2: ReaderCoverageV2.Result?
+    /// S20：选中文档的 v26 快照历史（版本分段）。
+    var coverageV2Segments: [ReaderStudyCoverageSegment] = []
     var isLoading = true
     var isTrendLoading = false
     var errorMessage: String?
 
-    init(source: any ReaderAnalyticsFetching) {
+    init(
+        source: any ReaderAnalyticsFetching,
+        studyMetricsSource: (any ReaderStudyMetricsFetching)? = nil
+    ) {
         self.source = source
+        self.studyMetricsSource = studyMetricsSource
     }
 
     // MARK: - 载入
@@ -111,8 +125,27 @@ final class ReaderAnalyticsViewModel {
             do {
                 let segments = try await self.source.coverageTrend(
                     documentID: documentID)
+                // S20：阅读学习三支路随文档选择一并刷新（源未接 →
+                // nil/空——视图区隐藏不渲染空框）。
+                var funnel: ReaderStudyFunnel?
+                var live: ReaderCoverageV2.Result?
+                var v2Segments: [ReaderStudyCoverageSegment] = []
+                if let metrics = self.studyMetricsSource {
+                    async let funnelTask = metrics.funnel(
+                        documentID: documentID)
+                    async let liveTask = metrics.liveCoverage(
+                        documentID: documentID)
+                    async let trendTask = metrics.coverageTrend(
+                        documentID: documentID)
+                    funnel = try await funnelTask
+                    live = try await liveTask?.result
+                    v2Segments = try await trendTask
+                }
                 guard generation == self.trendGeneration else { return }
                 self.trendSegments = segments
+                self.studyFunnel = funnel
+                self.liveCoverageV2 = live
+                self.coverageV2Segments = v2Segments
             } catch is CancellationError {
                 return
             } catch {
@@ -221,6 +254,82 @@ final class ReaderAnalyticsViewModel {
             text += "（已分析 \(point.analyzedBlocks)/\(point.totalBlocks) 块）"
         }
         return text
+    }
+
+    // MARK: - S20 阅读学习展示语义
+
+    /// 「阅读学习」区块可见性——源未接 → 整区隐藏（增量接入纪律）。
+    var hasStudyMetrics: Bool { studyMetricsSource != nil }
+
+    /// 选中文档是否有任何漏斗/Coverage v2 可读数据（全空 → 「暂无」，
+    /// 不渲染一排 0）。
+    var hasStudyData: Bool {
+        (studyFunnel?.preparedOccurrences ?? 0) > 0
+            || (studyFunnel?.selectedTotal ?? 0) > 0
+            || (studyFunnel?.appliedTotal ?? 0) > 0
+            || liveCoverageV2 != nil
+            || !coverageV2Segments.isEmpty
+    }
+
+    /// Coverage v2 段的版本标签（同 S22 segmentLabel——断线原因展示）。
+    func coverageV2SegmentLabel(
+        _ segment: ReaderStudyCoverageSegment
+    ) -> String {
+        "口径 \(segment.metricVersion)"
+            + " · 形态 \(segment.morphologyVersion)"
+            + " · 词典 \(segment.dictionaryVersion)"
+    }
+
+    /// v2 快照点明细文本（等价于图表读数——日期 + 已解析覆盖 +
+    /// 已掌握 + 部分范围标注）。
+    func coverageV2PointSummary(
+        _ point: ReaderStudyCoveragePoint
+    ) -> String {
+        var text = point.calculatedAt
+            .formatted(date: .abbreviated, time: .shortened) + "："
+        if let value = point.resolvedCoverage {
+            text += "覆盖率 \(percentText(value))"
+        } else {
+            text += "暂无可统计词汇"
+        }
+        if let mastered = point.masteredCoverage,
+           point.masteredUnique > 0 {
+            text += " · 已掌握 \(percentText(mastered))"
+        }
+        if point.isPartial {
+            text += "（已分析 \(point.analyzedBlocks)/"
+                + "\(point.totalBlocks) 块）"
+        }
+        return text
+    }
+
+    /// 漏斗 Job 行计数摘要（零 Job → 「无 Job」而非一排 0）。
+    func funnelJobSummary(_ funnel: ReaderStudyFunnel) -> String {
+        var parts: [String] = []
+        if funnel.activeJobs > 0 {
+            parts.append("活跃 \(funnel.activeJobs)")
+        }
+        if funnel.completedJobs > 0 {
+            parts.append("完成 \(funnel.completedJobs)")
+        }
+        if funnel.failedJobs > 0 {
+            parts.append("失败 \(funnel.failedJobs)")
+        }
+        if funnel.cancelledJobs > 0 {
+            parts.append("取消 \(funnel.cancelledJobs)")
+        }
+        return parts.isEmpty ? "无 Job" : parts.joined(separator: "，")
+    }
+
+    /// v2 趋势图 AX 摘要（段数 + 各段点数）。
+    var coverageV2ChartAccessibilitySummary: String {
+        guard !coverageV2Segments.isEmpty else {
+            return "暂无 Coverage v2 记录"
+        }
+        let detail = coverageV2Segments.map {
+            "\(coverageV2SegmentLabel($0)) 共 \($0.points.count) 个快照"
+        }.joined(separator: "；")
+        return "共 \(coverageV2Segments.count) 个版本段：\(detail)"
     }
 
     // MARK: - 图表 AX 摘要

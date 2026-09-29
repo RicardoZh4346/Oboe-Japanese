@@ -1,18 +1,27 @@
 import Charts
 import Observation
 import OboeDomain
+import OboeInfrastructure
 import SwiftUI
 
 /// v0.7.0 S22 阅读分析页：Reader 活动聚合 + 当前知识态 + 版本分段
 /// 覆盖率趋势 + 事件时间线。空态与 AX 约定同 S21 统计页：
 /// 每个区块独立「暂无」文案、图表配 AX 标签与等价数值明细。
 ///
+/// v0.7.5 S20 增量：「阅读学习」区（AI 学习漏斗 + Coverage v2
+/// 当前态/快照史）——`studyMetricsSource` 未接时整区隐藏。
+///
 /// 独立页面（不改 Reader* UI）：由统计页「阅读分析」入口进入。
 struct ReaderAnalyticsView: View {
     @State private var model: ReaderAnalyticsViewModel
 
-    init(source: any ReaderAnalyticsFetching) {
-        _model = State(initialValue: ReaderAnalyticsViewModel(source: source))
+    init(
+        source: any ReaderAnalyticsFetching,
+        studyMetricsSource: (any ReaderStudyMetricsFetching)? = nil
+    ) {
+        _model = State(initialValue: ReaderAnalyticsViewModel(
+            source: source,
+            studyMetricsSource: studyMetricsSource))
     }
 
     var body: some View {
@@ -52,6 +61,7 @@ struct ReaderAnalyticsView: View {
             activitySection
             dailySection
             coverageSection
+            studySection
             timelineSection
         }
         .refreshable {
@@ -330,6 +340,203 @@ struct ReaderAnalyticsView: View {
             "reader-analytics-doc-\(document.documentID.uuidString)")
     }
 
+    // MARK: - 阅读学习（v0.7.5 S20：漏斗 + Coverage v2）
+
+    /// 「阅读学习」区块：随上方文档选择联动；源未接 → 整区隐藏。
+    /// 口径纪律：漏斗与活算 Coverage v2 是**当前态**，快照史是
+    /// **历史留痕**——两口径分 Section 标注；v2 与旧
+    /// `coverage-1.0.0` 趋势（上方「覆盖率趋势」）分列展示，
+    /// 永不合并为一条累计线。
+    @ViewBuilder
+    private var studySection: some View {
+        if model.hasStudyMetrics {
+            // —— Reader → 学习项漏斗（当前态）——
+            Section {
+                if let funnel = model.studyFunnel, model.hasStudyData {
+                    StudyMetricRow(
+                        title: "准备（occurrence 锚点）",
+                        value: "\(funnel.preparedOccurrences)",
+                        accessibilityID: "reader-study-funnel-prepared")
+                    StudyMetricRow(
+                        title: "已解析",
+                        value: "\(funnel.resolvedOccurrences)",
+                        accessibilityID: "reader-study-funnel-resolved")
+                    StudyMetricRow(
+                        title: "待确认",
+                        value: "\(funnel.pendingOccurrences)",
+                        accessibilityID: "reader-study-funnel-pending")
+                    StudyMetricRow(
+                        title: "OOV（无候选）",
+                        value: "\(funnel.oovOccurrences)",
+                        accessibilityID: "reader-study-funnel-oov")
+                    StudyMetricRow(
+                        title: "已确认选择",
+                        value: "复用 \(funnel.selectedReuse)"
+                            + " · 新增 \(funnel.selectedCreate)"
+                            + " · 跳过 \(funnel.selectedSkip)"
+                            + " · 太简单 \(funnel.selectedTooEasy)"
+                            + (funnel.selectedPending > 0
+                                ? " · 未定 \(funnel.selectedPending)" : ""),
+                        accessibilityID: "reader-study-funnel-selected")
+                    StudyMetricRow(
+                        title: "已应用",
+                        value: "复用 \(funnel.appliedReuse)"
+                            + " · 新增 \(funnel.appliedCreate)"
+                            + " · 跳过 \(funnel.appliedSkip)"
+                            + " · 太简单 \(funnel.appliedTooEasy)",
+                        accessibilityID: "reader-study-funnel-applied")
+                    Text("Job：\(model.funnelJobSummary(funnel))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("reader-study-funnel-jobs")
+                } else {
+                    Text("暂无学习记录")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("reader-study-funnel-empty")
+                }
+            } header: {
+                Text("阅读学习（AI 学习漏斗）")
+            } footer: {
+                Text("漏斗按当前态统计：本文档当前修订的锚点 + 最新选择"
+                    + "修订；「已应用」是「已确认」的子集（receipt 幂等）。")
+            }
+
+            // —— Coverage v2 当前态（活算投影）——
+            Section {
+                if let live = model.liveCoverageV2 {
+                    coverageV2Rows(
+                        resolvedUnique: live.resolvedUnique,
+                        learningUnique: live.learningUnique,
+                        masteredUnique: live.masteredUnique,
+                        unlearnedUnique: live.unlearnedUnique,
+                        pendingOccurrences: live.pendingOccurrences,
+                        oovOccurrences: live.oovOccurrences,
+                        resolvedCoverage: live.resolvedCoverage,
+                        masteredCoverage: live.masteredCoverage,
+                        isPartial: live.isPartial,
+                        analyzedBlocks: live.analyzedBlocks,
+                        totalBlocks: live.totalBlocks,
+                        caption: "当前态活算")
+                } else if let latest = model.coverageV2Segments
+                    .last?.points.last {
+                    // 文档已删/无活算对象——最近快照行仍可读（历史
+                    // 留痕，标注来源防止误读为当前值）。
+                    coverageV2Rows(
+                        resolvedUnique: latest.resolvedUnique,
+                        learningUnique: latest.learningUnique,
+                        masteredUnique: latest.masteredUnique,
+                        unlearnedUnique: latest.unlearnedUnique,
+                        pendingOccurrences: latest.pendingOccurrences,
+                        oovOccurrences: latest.oovOccurrences,
+                        resolvedCoverage: latest.resolvedCoverage,
+                        masteredCoverage: latest.masteredCoverage,
+                        isPartial: latest.isPartial,
+                        analyzedBlocks: latest.analyzedBlocks,
+                        totalBlocks: latest.totalBlocks,
+                        caption: "最近快照（历史）")
+                } else {
+                    Text("暂无 Coverage v2 数据")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("reader-study-v2-empty")
+                }
+            } header: {
+                Text("覆盖率 v2（已解析词义）")
+            } footer: {
+                Text("口径 \(ReaderCoverageV2.metricVersion)：分母为已确认"
+                    + "身份的 distinct 词义；待确认/OOV 相邻展示不进分母。"
+                    + "与 coverage-1.0.0 旧口径分列，互不连线合并。")
+            }
+
+            // —— Coverage v2 快照史（版本分段）——
+            if !model.coverageV2Segments.isEmpty {
+                Section {
+                    ReaderStudyCoverageTrendChart(
+                        segments: model.coverageV2Segments)
+                        .frame(height: 140)
+                        .accessibilityLabel("Coverage v2 快照趋势图")
+                        .accessibilityValue(
+                            model.coverageV2ChartAccessibilitySummary)
+                        .accessibilityIdentifier("reader-study-v2-chart")
+                } header: {
+                    Text("Coverage v2 快照史")
+                } footer: {
+                    Text("按 口径/形态/词典 版本三元组分段连线——跨版本"
+                        + "不连线；历史快照是留痕口径，不随当前态改写。")
+                }
+
+                ForEach(model.coverageV2Segments) { segment in
+                    Section {
+                        ForEach(segment.points) { point in
+                            Text(model.coverageV2PointSummary(point))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier(
+                                    "reader-study-v2-point-"
+                                        + "\(point.id.uuidString)")
+                        }
+                    } header: {
+                        Text("v2 第 \(segment.index + 1) 段 · "
+                            + segment.metricVersion)
+                    } footer: {
+                        Text(model.coverageV2SegmentLabel(segment))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Coverage v2 覆盖读数行组（活算/最近快照共用——caption 区分
+    /// 当前态与历史快照两个口径）。
+    @ViewBuilder
+    private func coverageV2Rows(
+        resolvedUnique: Int,
+        learningUnique: Int,
+        masteredUnique: Int,
+        unlearnedUnique: Int,
+        pendingOccurrences: Int,
+        oovOccurrences: Int,
+        resolvedCoverage: Double?,
+        masteredCoverage: Double?,
+        isPartial: Bool,
+        analyzedBlocks: Int,
+        totalBlocks: Int,
+        caption: String
+    ) -> some View {
+        ReaderMetricRow(
+            title: "已解析覆盖率",
+            value: model.percentText(resolvedCoverage),
+            caption: "\(caption) · 已解析 \(resolvedUnique) 词义"
+                + "（学习中 \(learningUnique) · 已掌握 \(masteredUnique)）",
+            accessibilityID: "reader-study-v2-resolved")
+        ReaderMetricRow(
+            title: "已掌握覆盖率",
+            value: model.percentText(masteredCoverage),
+            caption: "仍待学 \(unlearnedUnique) 词义计分母不计分子",
+            accessibilityID: "reader-study-v2-mastered")
+        HStack(spacing: 8) {
+            Text("口径 \(ReaderCoverageV2.metricVersion)")
+            if isPartial {
+                Text("部分范围 \(analyzedBlocks)/\(totalBlocks) 块")
+                    .font(.caption2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(.quaternary, in: .capsule)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("reader-study-v2-metric")
+        if pendingOccurrences > 0 || oovOccurrences > 0 {
+            Text("相邻计数：待确认 \(pendingOccurrences)"
+                + " · OOV \(oovOccurrences)（不进分母）")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("reader-study-v2-adjacent")
+        }
+    }
+
     // MARK: - 事件时间线
 
     @ViewBuilder
@@ -409,6 +616,66 @@ private struct ReaderDailyActivityChart: View {
                 x: .value("学习日", point.id),
                 y: .value("事件", point.total)
             )
+        }
+    }
+}
+
+/// S20 漏斗行：标题 + 值（同一行宽排版，值已含分桶文案）。
+private struct StudyMetricRow: View {
+    let title: String
+    let value: String
+    let accessibilityID: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(.subheadline)
+            Spacer()
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(accessibilityID)
+    }
+}
+
+/// v0.7.5 S20：Coverage v2 快照趋势——每段一条线（`foregroundStyle(by:)`
+/// 以段序号为序列键——版本切换/回退都开新段，绝不跨版本连线；
+/// 与 `coverage-1.0.0` 旧趋势图分列，两族序列永不合并）。
+private struct ReaderStudyCoverageTrendChart: View {
+    let segments: [ReaderStudyCoverageSegment]
+
+    var body: some View {
+        Chart {
+            ForEach(segments) { segment in
+                ForEach(segment.points) { point in
+                    if let value = point.resolvedCoverage {
+                        LineMark(
+                            x: .value("快照时刻", point.calculatedAt),
+                            y: .value("覆盖率", value),
+                            series: .value("段", "段 \(segment.index)")
+                        )
+                        PointMark(
+                            x: .value("快照时刻", point.calculatedAt),
+                            y: .value("覆盖率", value)
+                        )
+                        .foregroundStyle(by: .value("段", "段 \(segment.index)"))
+                    }
+                }
+            }
+        }
+        .chartYScale(domain: 0...1)
+        .chartYAxis {
+            AxisMarks(position: .leading) { value in
+                AxisGridLine()
+                AxisValueLabel {
+                    if let v = value.as(Double.self) {
+                        Text("\(Int(v * 100))%")
+                    }
+                }
+            }
         }
     }
 }
