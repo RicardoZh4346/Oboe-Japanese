@@ -27,6 +27,36 @@ struct ReaderFeatureDependencies {
     /// S24 恢复屏障闸门：导入/重链/覆盖率长任务登记点；nil
     /// （测试桩）→ 任务直接跑不登记。
     var workGate: RestorationWorkGate?
+    /// v0.7.5 AI Study 依赖包（S12 Runner/store + S13 应用 + S09
+    /// 候选打包器 + S10 resolver）；nil = 装配缺席 → 隐藏 AI
+    /// 学习入口。
+    var aiStudy: ReaderAIStudyDependencies?
+}
+
+/// v0.7.5 AI Study 的依赖包：UI 只消费窄面——准备/预览/确认经
+/// `store` 读写 Job 证据链，`applier` 执行确认后的原子应用，
+/// `candidatePlanner`/`resolver`/`aiConfiguration`/`credentialStore`
+/// 供准备期建 Job 与 Runner 派发装配，`units` 支撑预览计数与
+/// flag 状态。study deck 绑定走 `GRDBReaderStudyDeckService`
+/// 静态面（v24），恢复屏障登记走 `workGate`。
+struct ReaderAIStudyDependencies {
+    /// Job/block/resolution/selection/receipt/cache 持久化（v25）。
+    let store: GRDBAIStudyJobStore
+    /// S13 应用事务（§4.3 receipt 幂等 + §11 物化接缝——词典
+    /// 物化器已注入）。
+    let applier: AIStudyApplyService
+    /// S09 候选打包器：tokens+candidates → 定稿请求序列。
+    let candidatePlanner: AIStudyCandidatePlanner
+    /// S10 resolver client：request → 本地校验后结果。
+    let resolver: AIStudyResolverClient
+    /// AI 连接配置服务（sendRequest 装配读当前配置）。
+    let aiConfiguration: AIConfigurationService
+    /// 凭据仓（sendRequest 装配读 Key——只在发送时取，不缓存）。
+    let credentialStore: any AICredentialStore
+    /// unit 仓储（flag/链接/预览期 unit 归属计数）。
+    let units: GRDBLearningUnitRepository
+    /// 词典仓储（occurrence 物化与 sense 详情批量取）。
+    let dictionary: any DictionaryRepository
 }
 
 /// S11 Inspector/挖词的依赖包：服务 + 牌组目录 + 世代快照 +

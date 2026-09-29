@@ -274,6 +274,27 @@ enum AppFeatureContainerFactory {
             generation: generation
         )
 
+        // v0.7.5 AI Study 装配（M 集成点）：S12 store/applier +
+        // S09 候选打包器 + S10 resolver + unit 仓储共一包注入
+        // Reader deps——准备/预览/确认 UI 的全部持久化与派发
+        // 组件按世代绑定，恢复替换时随容器整体重建。
+        let learningUnits = GRDBLearningUnitRepository(database: database)
+        let aiStudyDependencies = ReaderAIStudyDependencies(
+            store: GRDBAIStudyJobStore(pool: database.pool),
+            applier: AIStudyApplyService(
+                pool: database.pool,
+                unitSources: DictionaryAIStudyUnitSourceProvider(
+                    repository: dictionaryRepository)),
+            candidatePlanner: AIStudyCandidatePlanner(
+                senseSource: DictionaryRepositorySenseSource(
+                    repository: dictionaryRepository)),
+            resolver: AIStudyResolverClient(),
+            aiConfiguration: aiConfigurationService,
+            credentialStore: credentialStore,
+            units: learningUnits,
+            dictionary: dictionaryRepository
+        )
+
         let container = AppFeatureContainer(
             generation: generation,
             today: TodayFeatureDependencies(
@@ -341,7 +362,8 @@ enum AppFeatureContainerFactory {
                 ),
                 clozeRepository: GRDBClozeRepository(database: database),
                 customStudyRepository: customStudyRepository,
-                customStudyService: CustomStudyService()
+                customStudyService: CustomStudyService(),
+                learningUnits: learningUnits
             ),
             dictionary: DictionaryFeatureDependencies(
                 queryService: dictionaryQueryService
@@ -355,7 +377,8 @@ enum AppFeatureContainerFactory {
                 tokenStates: readerKnowledge,
                 mining: miningDependencies,
                 relink: readerRelinkService,
-                workGate: workGate
+                workGate: workGate,
+                aiStudy: aiStudyDependencies
             )
         )
         let runtime = RuntimeServices(

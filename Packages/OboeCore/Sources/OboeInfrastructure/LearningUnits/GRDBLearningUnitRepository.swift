@@ -901,6 +901,49 @@ public struct GRDBLearningUnitRepository: Sendable {
         }
     }
 
+    public func fetchLink(
+        noteID: UUID
+    ) async throws -> LearningUnitNoteLink? {
+        try await pool.read { db in
+            try Self.fetchLink(noteID: noteID, in: db)
+        }
+    }
+
+    public func fetchLinks(
+        unitID: UUID
+    ) async throws -> [LearningUnitNoteLink] {
+        try await pool.read { db in
+            try Self.fetchLinks(unitID: unitID, in: db)
+        }
+    }
+
+    public func linkedVocabularyUnitIDs(
+        unitIDs: [UUID]
+    ) async throws -> Set<UUID> {
+        try await pool.read { db in
+            try Self.linkedVocabularyUnitIDs(unitIDs: unitIDs, in: db)
+        }
+    }
+
+    @discardableResult
+    public func undoTooEasy(
+        _ command: TooEasyUndoCommand, at date: Date
+    ) async throws -> LearningUnitFlag {
+        let atMs = try DatabaseValueCodec.encode(date)
+        return try await pool.write { db in
+            try Self.undoTooEasy(
+                command, atMilliseconds: atMs, in: db)
+        }
+    }
+
+    public func fetchEvents(
+        unitID: UUID
+    ) async throws -> [LearningUnitEventRecord] {
+        try await pool.read { db in
+            try Self.fetchEvents(unitID: unitID, in: db)
+        }
+    }
+
     @discardableResult
     public func upsertAlias(
         _ alias: LearningUnitDictionaryAlias,
