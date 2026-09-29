@@ -57,6 +57,36 @@ struct ReaderAIStudyDependencies {
     let units: GRDBLearningUnitRepository
     /// 词典仓储（occurrence 物化与 sense 详情批量取）。
     let dictionary: any DictionaryRepository
+    /// v0.7.5 S15 准备编排服务（预检/prepare/replan/预览/选择/
+    /// 摘要）。`makeServices` 时形态分析/词典服务已就绪但容器
+    /// 未完成——由 `readerWithEditorFactory` 合成注入；nil =
+    /// 装配缺席（无形态分析）→ AI 入口隐藏。
+    var preparation: AIStudyPreparationService?
+    /// 摘要页「开始学习」目的地（牌组 id + 标题 → ReviewView）；
+    /// 由容器层注入——Reader 依赖包不持有 ReviewView 的服务集。
+    var studyDestination:
+        (@MainActor (_ deckID: UUID, _ title: String) -> AnyView)?
+    /// 摘要页「查看牌组」目的地（牌组详情）。
+    var deckDestination: (@MainActor (_ deckID: UUID) -> AnyView)?
+}
+
+/// `ReaderDocumentStore` → `AIStudyPreparationService.ReaderSource`
+/// 的三方法适配（仓库协议面更宽，此处只投影读取面）。
+struct ReaderAIStudyDocumentSource: AIStudyPreparationService.ReaderSource {
+    let store: any ReaderDocumentStore
+
+    func fetchDocument(id: UUID) async throws -> ReaderDocumentMetadata? {
+        try await store.fetchDocument(id: id)
+    }
+    func fetchChapters(documentID: UUID) async throws
+        -> [ReaderChapterMetadata] {
+        try await store.fetchChapters(documentID: documentID)
+    }
+    func fetchBlocks(documentID: UUID, chapterID: UUID) async throws
+        -> [ReaderBlock] {
+        try await store.fetchBlocks(
+            documentID: documentID, chapterID: chapterID)
+    }
 }
 
 /// S11 Inspector/挖词的依赖包：服务 + 牌组目录 + 世代快照 +
@@ -189,6 +219,113 @@ extension AppFeatureContainer {
                 container: self,
                 onCommitted: onCommitted
             ))
+        }
+        // v0.7.5 S15：准备编排服务 + 摘要导航出口在此合成——
+        // `AppFeatureContainerFactory` 只装配基础依赖包，不改动。
+        // morphology 缺席（测试容器/精简装配）→ preparation 留 nil，
+        // Reader 隐藏 AI 学习入口。
+        if var ai = deps.aiStudy,
+           let morphology = deps.morphology
+                as? AIStudyPreparationService.MorphologySource {
+            let jlptLibrary = decks.jlpt.libraryService
+            ai.preparation = AIStudyPreparationService(
+                pool: ai.store.databasePool,
+                reader: ReaderAIStudyDocumentSource(
+                    store: deps.repository),
+                morphology: morphology,
+                dictionary: ai.dictionary,
+                jlptIndexProvider: {
+                    // 内置 JLPT 词库全量行（5 级分页拉取）——
+                    // 参考索引只读，不写用户内容。
+                    var rows: [AIStudyJLPTReferenceIndex.Row] = []
+                    for level in JLPTLevel.allCases {
+                        var offset = 0
+                        while true {
+                            let page = try await jlptLibrary.vocabulary(
+                                level: level, sort: .source,
+                                offset: offset, limit: 500)
+                            rows += page.items.map {
+                                AIStudyJLPTReferenceIndex.Row(
+                                    headword: $0.headword,
+                                    reading: $0.reading,
+                                    level: $0.level)
+                            }
+                            guard let next = page.nextOffset else {
+                                break
+                            }
+                            offset = next
+                        }
+                    }
+                    return AIStudyJLPTReferenceIndex(rows: rows)
+                })
+            let deckDeps = decks
+            let shared = shared
+            let queryService = dictionary.queryService
+            ai.studyDestination = { deckID, title in
+                AnyView(NavigationStack {
+                    ReviewView(
+                        service: deckDeps.studyService,
+                        historyService: deckDeps.historyService,
+                        speechPreferencesService:
+                            deckDeps.speechPreferencesService,
+                        adaptiveCardService: deckDeps.adaptiveCardService,
+                        adaptivePreferencesService:
+                            deckDeps.adaptivePreferencesService,
+                        aiRepairService: deckDeps.aiRepairService,
+                        deckService: deckDeps.deckService,
+                        speechService: shared.speechService,
+                        sourceContextRepository:
+                            shared.sourceContextRepository,
+                        inboxImageStore: shared.inboxImageStore,
+                        customStudyRepository:
+                            shared.customStudyRepository,
+                        customStudyService: shared.customStudyService,
+                        scope: StudyScope(deckID: deckID, title: title)
+                    )
+                })
+            }
+            ai.deckDestination = { deckID in
+                AnyView(NavigationStack {
+                    DeckDetailView(
+                        deckID: deckID,
+                        model: DeckListModel(
+                            service: deckDeps.deckService,
+                            studyService: deckDeps.studyService,
+                            historyService: deckDeps.historyService),
+                        deckService: deckDeps.deckService,
+                        vocabularyService: deckDeps.vocabularyService,
+                        grammarService: deckDeps.grammarService,
+                        knowledgePointService:
+                            deckDeps.knowledgePointService,
+                        searchService: deckDeps.searchService,
+                        contentCardService: deckDeps.contentCardService,
+                        studyService: deckDeps.studyService,
+                        historyService: deckDeps.historyService,
+                        speechPreferencesService:
+                            deckDeps.speechPreferencesService,
+                        adaptiveCardService: deckDeps.adaptiveCardService,
+                        adaptivePreferencesService:
+                            deckDeps.adaptivePreferencesService,
+                        aiRepairService: deckDeps.aiRepairService,
+                        speechService: shared.speechService,
+                        aiCardGenerationService:
+                            deckDeps.aiCardGenerationService,
+                        sentenceAnalysisService:
+                            deckDeps.sentenceAnalysisService,
+                        sentenceAnalysisCardCreationService:
+                            deckDeps.sentenceAnalysisCardCreationService,
+                        sourceContextRepository:
+                            shared.sourceContextRepository,
+                        clozeRepository: shared.clozeRepository,
+                        inboxImageStore: shared.inboxImageStore,
+                        dictionaryQueryService: queryService,
+                        customStudyRepository:
+                            shared.customStudyRepository,
+                        customStudyService: shared.customStudyService
+                    )
+                })
+            }
+            deps.aiStudy = ai
         }
         return deps
     }

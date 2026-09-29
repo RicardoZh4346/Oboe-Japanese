@@ -103,7 +103,8 @@ public enum OboeDatabaseSchema {
         "v23_learning_units",
         "v24_reader_study_binding",
         "v25_ai_study_pipeline",
-        "v26_learning_metrics"
+        "v26_learning_metrics",
+        "v27_ai_study_manifests"
     ]
 
     public static let tableNames: Set<String> = [
@@ -164,6 +165,7 @@ public enum OboeDatabaseSchema {
         "ai_study_selections",
         "ai_study_receipts",
         "ai_study_cache",
+        "ai_study_job_manifests",
         "reader_learning_coverage_snapshots"
     ]
 
@@ -275,6 +277,11 @@ public enum OboeDatabaseSchema {
                 migrator.registerMigration(
                     identifier,
                     migrate: GRDBLearningMetricsSchema.migrate
+                )
+            case "v27_ai_study_manifests":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: GRDBAIStudyManifestSchema.migrate
                 )
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")

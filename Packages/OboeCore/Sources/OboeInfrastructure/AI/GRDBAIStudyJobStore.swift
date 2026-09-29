@@ -34,6 +34,10 @@ import OboeDomain
 public struct GRDBAIStudyJobStore: Sendable {
     private let pool: DatabasePool
 
+    /// 底层连接池——宿主层装配共享同库组件（如
+    /// `AIStudyPreparationService`）时使用；不暴露给 UI。
+    public var databasePool: DatabasePool { pool }
+
     public init(pool: DatabasePool) {
         self.pool = pool
     }

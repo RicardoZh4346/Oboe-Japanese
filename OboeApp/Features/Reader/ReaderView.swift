@@ -26,13 +26,19 @@ struct ReaderView: View {
     @State private var clozeDraft: ReaderClozeDraft?
     /// S11 挖词依赖包；nil = 词典等装配缺席，点词静默不弹层。
     private let mining: ReaderMiningDependencies?
+    /// v0.7.5 AI Study 依赖包；nil/无 preparation = 隐藏 AI 入口。
+    private let aiStudy: ReaderAIStudyDependencies?
+    /// AI 学习流程模型——nil = 弹层关闭（值语义 @State 持有）。
+    @State private var aiStudyModel: ReaderAIStudyFlowModel?
 
     init(
         model: ReaderDocumentViewModel,
-        mining: ReaderMiningDependencies? = nil
+        mining: ReaderMiningDependencies? = nil,
+        aiStudy: ReaderAIStudyDependencies? = nil
     ) {
         _model = State(initialValue: model)
         self.mining = mining
+        self.aiStudy = aiStudy
     }
 
     var body: some View {
@@ -104,6 +110,21 @@ struct ReaderView: View {
                 .accessibilityIdentifier("reader-chapter-list")
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
+                // v0.7.5 S15：AI 学习入口——preparation 装配缺席
+                // （无形态分析）或文档未载入时隐藏。
+                if let aiStudy, aiStudy.preparation != nil,
+                   let document = model.document {
+                    Button {
+                        aiStudyModel = ReaderAIStudyFlowModel(
+                            context: aiStudyContext(
+                                documentID: document.id,
+                                title: document.title),
+                            dependencies: aiStudy)
+                    } label: {
+                        Label("AI 学习", systemImage: "sparkles")
+                    }
+                    .accessibilityIdentifier("reader-ai-study-button")
+                }
                 if mining != nil {
                     Button {
                         isBatchSelecting.toggle()
@@ -193,6 +214,16 @@ struct ReaderView: View {
                 )
             }
         }
+        // v0.7.5 S15：AI 学习流程弹层——预检/分析/预览/摘要全链路
+        // 在 sheet 内闭环；取消与返回阅读都经流程模型。
+        .sheet(isPresented: .init(
+            get: { aiStudyModel != nil },
+            set: { if !$0 { aiStudyModel = nil } }
+        )) {
+            if let aiStudyModel {
+                ReaderAIStudySheet(model: aiStudyModel)
+            }
+        }
         .overlay(alignment: .bottom) {
             if isBatchSelecting {
                 Text(
@@ -260,6 +291,26 @@ struct ReaderView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+    }
+
+    /// AI 流程上下文：当前章/当前可见块的定位快照——范围解析
+    /// （currentChapter/currentText）的锚参数。
+    private func aiStudyContext(
+        documentID: UUID, title: String
+    ) -> ReaderAIStudyFlowModel.Context {
+        let chapterID = model.chapters.indices
+            .contains(model.currentChapterIndex)
+            ? model.chapters[model.currentChapterIndex].id
+            : nil
+        let blockID = model.blocks.first(where: {
+            $0.ordinal == model.visibleBlockOrdinal
+        })?.id ?? model.blocks.first?.id
+        return ReaderAIStudyFlowModel.Context(
+            documentID: documentID,
+            documentTitle: title,
+            currentChapterID: chapterID,
+            currentBlockID: blockID,
+            chapterCount: model.chapters.count)
     }
 }
 
