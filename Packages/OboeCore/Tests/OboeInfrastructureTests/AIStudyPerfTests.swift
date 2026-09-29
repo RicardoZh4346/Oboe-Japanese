@@ -106,9 +106,9 @@ final class AIStudyPerfTests: XCTestCase {
             } catch AIStudyPreparationService.PreparationError
                 .manifestTooLarge(let bytes)
             {
-                // 整书量级上限：32MiB manifest 闸门在 tokenize/证据
-                // 批量提交之后才触发——被拒时证据行已落库但 Job 未建。
-                // 如实记录被拒体量、已提交的残留证据与耗时。
+                // 整书量级上限：32MiB manifest 闸门在 materialize 内
+                // 以下界和提前判负、且先于任何证据提交——被拒时证据
+                // 行数必须为 0、Job 未建。如实记录被拒体量与耗时。
                 let prepareMs = prepareStart.duration(to: .now)
                     .milliseconds
                 let leftoverOccurrences = try await env.pool.read { db in
@@ -138,6 +138,9 @@ final class AIStudyPerfTests: XCTestCase {
                     """)
                 XCTAssertGreaterThan(
                     bytes, GRDBAIStudyManifestSchema.manifestMaxBytes)
+                // F1 回归门：manifest 超界拒绝必须零证据残留。
+                XCTAssertEqual(leftoverOccurrences, 0)
+                XCTAssertEqual(leftoverCached, 0)
             }
         }
     }

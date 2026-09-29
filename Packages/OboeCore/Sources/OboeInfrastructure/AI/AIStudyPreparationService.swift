@@ -310,9 +310,18 @@ public struct AIStudyPreparationService: Sendable {
         scope: ResolvedScope,
         tokenizerVersion: String,
         dictionaryVersion: String,
+        manifestBytesBudget: Int,
         progress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> [MaterializedBlock] {
         var materialized: [MaterializedBlock] = []
+        // manifest 字节下界累计：每块 sourceText + tokens 按 manifest
+        // 同款 .sortedKeys 编码逐块求和——真 manifest 还含 entries/
+        // 信封/上下文等额外字节，故此和严格 < 真载荷；超过预算即可
+        // 提前判负（不会误杀），避免超大文档全量 tokenize 后才被拒
+        // （S21 F1/F2：1MB 文档曾 269s + 1.1GB RSS 后才拒）。
+        let payloadEncoder = JSONEncoder()
+        payloadEncoder.outputFormatting = [.sortedKeys]
+        var payloadFloor = 0
         var processed = 0
         // 先按章枚举块总数（进度分母——每章一次 count 不贵）。
         var chapterBlocks: [UUID: [ReaderBlock]] = [:]
@@ -359,6 +368,14 @@ public struct AIStudyPreparationService: Sendable {
                     record: block, chapter: chapter,
                     scopeKey: scopeKey, tokens: tokens,
                     stagedCachePayload: staged))
+                payloadFloor += block.text.utf8.count
+                    + (try payloadEncoder.encode(
+                        tokens.map { CachedReaderToken(token: $0) })
+                    ).count
+                if payloadFloor > manifestBytesBudget {
+                    throw PreparationError.manifestTooLarge(
+                        bytes: payloadFloor)
+                }
                 processed += 1
                 progress?(processed, total)
             }
@@ -697,32 +714,14 @@ public struct AIStudyPreparationService: Sendable {
             scope: scope,
             tokenizerVersion: tokenizerVersion,
             dictionaryVersion: dictionaryVersion,
+            manifestBytesBudget: GRDBAIStudyManifestSchema
+                .manifestMaxBytes,
             progress: progress)
 
-        // 分批提交证据（cache payload + occurrence pending 锚点）；
-        // 批大小 commitBatchSize，取消点在事务首行。
-        var batch: [MaterializedBlock] = []
-        for block in blocks {
-            try Task.checkCancellation()
-            batch.append(block)
-            if batch.count >= commitBatchSize {
-                try await commitBatch(
-                    documentID: documentID,
-                    contentRevision: revision,
-                    tokenizerVersion: tokenizerVersion,
-                    dictionaryVersion: dictionaryVersion,
-                    blocks: batch, atMs: nowMs)
-                batch.removeAll(keepingCapacity: true)
-            }
-        }
-        try await commitBatch(
-            documentID: documentID, contentRevision: revision,
-            tokenizerVersion: tokenizerVersion,
-            dictionaryVersion: dictionaryVersion,
-            blocks: batch, atMs: nowMs)
-
-        // 候选 entry 详情——**一次 IN-bulk**（目标 token 候选的
-        // 有序去重集；绝不逐 token 查询）。
+        // manifest 先行构建+尺寸核验——`manifestTooLarge` 必须在
+        // 任何证据提交前抛出，否则超大文档会留下数万条孤儿
+        // occurrence/token-cache 行（S21 F1：1MB 文档曾 commit
+        // 151k occurrence 后才被拒）。
         var seenIDs = Set<Int64>()
         let wantedIDs = blocks.flatMap { block in
             block.tokens
@@ -755,6 +754,28 @@ public struct AIStudyPreparationService: Sendable {
                 <= GRDBAIStudyManifestSchema.manifestMaxBytes else {
             throw PreparationError.manifestTooLarge(bytes: payload.count)
         }
+
+        // 分批提交证据（cache payload + occurrence pending 锚点）；
+        // 批大小 commitBatchSize，取消点在事务首行。
+        var batch: [MaterializedBlock] = []
+        for block in blocks {
+            try Task.checkCancellation()
+            batch.append(block)
+            if batch.count >= commitBatchSize {
+                try await commitBatch(
+                    documentID: documentID,
+                    contentRevision: revision,
+                    tokenizerVersion: tokenizerVersion,
+                    dictionaryVersion: dictionaryVersion,
+                    blocks: batch, atMs: nowMs)
+                batch.removeAll(keepingCapacity: true)
+            }
+        }
+        try await commitBatch(
+            documentID: documentID, contentRevision: revision,
+            tokenizerVersion: tokenizerVersion,
+            dictionaryVersion: dictionaryVersion,
+            blocks: batch, atMs: nowMs)
 
         let fingerprint = AIStudyInputFingerprint.compute(
             documentID: documentID,
