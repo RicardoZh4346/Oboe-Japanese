@@ -124,6 +124,13 @@ public struct StudySessionService: Sendable {
         self.clock = clock
     }
 
+    /// v0.7.5 S16：暴露底层 queue 仓储给装配层——UI 不能改依赖
+    /// 装配文件时，经它派生同 pool 的 learning-unit flag 门面
+    /// （`LearningUnitFlagProviding`），不产生第二份资格判定。
+    public var todayQueueRepository: any TodayQueueRepository {
+        queueRepository
+    }
+
     public func buildTodayPlan(defaultTimeZoneID: String) async throws -> TodayPlan {
         try await planBuilder(at: clock.now(), defaultTimeZoneID: defaultTimeZoneID)
     }

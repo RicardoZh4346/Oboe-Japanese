@@ -18,6 +18,8 @@ struct VocabularyDetailView: View {
     @State private var isEditing = false
     @State private var isEditingTags = false
     @State private var speechErrorMessage: String?
+    /// S16：太简单开启前的后果确认。
+    @State private var showingTooEasyConfirmation = false
 
     init(
         noteID: UUID,
@@ -121,6 +123,63 @@ struct VocabularyDetailView: View {
 
                     KnowledgeMetadataSection(metadata: model.metadata)
 
+                    // S16：学习单元三态 + 太简单开关。ON 需先弹后果
+                    // 确认；OFF 随时可清（不受复习页撤销窗口限制）。
+                    // CAS 冲突不覆盖——报错并重新载入真实状态。
+                    if model.unitStateLoaded {
+                        Section("学习单元") {
+                            LabeledContent("知识状态") {
+                                Text(model.unitStateLabel)
+                                    .foregroundStyle(
+                                        model.unitContext?.tooEasy == true
+                                            ? OboeTheme.Colors.accent
+                                            : .primary
+                                    )
+                            }
+                            .accessibilityIdentifier(
+                                "vocabulary-unit-state-row"
+                            )
+                            if model.unitContext != nil {
+                                Toggle(
+                                    isOn: Binding(
+                                        get: {
+                                            model.unitContext?.tooEasy
+                                                ?? false
+                                        },
+                                        set: { on in
+                                            if on {
+                                                showingTooEasyConfirmation = true
+                                            } else {
+                                                Task {
+                                                    _ = await model
+                                                        .setTooEasy(false)
+                                                    await onUpdated()
+                                                }
+                                            }
+                                        }
+                                    )
+                                ) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("太简单")
+                                        Text(
+                                            "开启后，本词所有方向的卡不再进入学习计划。"
+                                        )
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .disabled(model.isApplyingUnitFlag)
+                                .accessibilityIdentifier(
+                                    "vocabulary-too-easy-toggle"
+                                )
+                            } else {
+                                Text("该词条未关联学习单元。")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
                     CardDirectionManagementSection(
                         noteID: note.id,
                         kind: .vocabulary,
@@ -220,6 +279,33 @@ struct VocabularyDetailView: View {
         } message: {
             Text(speechErrorMessage ?? "未知错误")
         }
+        .alert(
+            "无法更新「太简单」标记",
+            isPresented: Binding(
+                get: { model.unitFlagErrorMessage != nil },
+                set: { shown in if !shown { model.unitFlagErrorMessage = nil } }
+            )
+        ) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(model.unitFlagErrorMessage ?? "未知错误")
+        }
+        .confirmationDialog(
+            "标记为「太简单」？",
+            isPresented: $showingTooEasyConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("太简单——不再进入学习计划") {
+                Task {
+                    _ = await model.setTooEasy(true)
+                    await onUpdated()
+                }
+            }
+            .accessibilityIdentifier("vocabulary-too-easy-confirm")
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("本词所有方向的卡将不再进入学习计划；此开关随时可再次关闭。")
+        }
         .task(id: noteID) {
             await model.load()
         }
@@ -254,20 +340,35 @@ private final class VocabularyDetailViewModel {
     private let noteID: UUID
     private let service: VocabularyService
     private let knowledgeService: KnowledgePointService
+    /// S16：learning-unit flag 门面——缺省由词汇服务派生同 pool
+    /// 门面；nil 时「学习单元」区只显示状态不提供开关。
+    private let learningUnits: (any LearningUnitFlagProviding)?
 
     var note: VocabularyNote?
     var metadata: KnowledgePointMetadata?
     var isLoading = true
     var errorMessage: String?
 
+    // MARK: - S16 学习单元 / 太简单
+
+    /// note → unit → flag 解析出的三态上下文；nil = 无关联 unit。
+    var unitContext: LearningUnitContext?
+    /// 单元态是否已完成至少一次解析（区分「载入中」与「未关联」）。
+    var unitStateLoaded = false
+    var isApplyingUnitFlag = false
+    var unitFlagErrorMessage: String?
+    private var unitObservationTask: Task<Void, Never>?
+
     init(
         noteID: UUID,
         service: VocabularyService,
-        knowledgeService: KnowledgePointService
+        knowledgeService: KnowledgePointService,
+        learningUnits: (any LearningUnitFlagProviding)? = nil
     ) {
         self.noteID = noteID
         self.service = service
         self.knowledgeService = knowledgeService
+        self.learningUnits = learningUnits ?? service.learningUnitFlags
     }
 
     func load() async {
@@ -279,6 +380,81 @@ private final class VocabularyDetailViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        await loadUnitState()
+        startUnitObservationIfNeeded()
+    }
+
+    /// 重新解析本 Note 的学习单元三态——观察 ping 与显式刷新共用。
+    /// link 缺失/指向已删除 unit → nil（「未关联」，绝不按词形猜）。
+    func loadUnitState() async {
+        guard let learningUnits else {
+            unitContext = nil
+            unitStateLoaded = true
+            return
+        }
+        do {
+            unitContext = try await LearningUnitFlagOperator(
+                flags: learningUnits
+            ).context(forNoteID: noteID)
+            unitFlagErrorMessage = nil
+        } catch {
+            // 观察触发的静默失败不弹错——保守保留旧状态。
+            if !unitStateLoaded { unitContext = nil }
+        }
+        unitStateLoaded = true
+    }
+
+    /// Too Easy 开/关（§12.3）：CAS 取当前 revision——另一窗口改过
+    /// 时冲突报错并重新载入状态，绝不覆盖。ON/OFF 都可随时执行，
+    /// 不受复习页撤销窗口限制。
+    @discardableResult
+    func setTooEasy(_ value: Bool) async -> Bool {
+        guard let learningUnits,
+              let unitID = unitContext?.unit.id,
+              !isApplyingUnitFlag else { return false }
+        isApplyingUnitFlag = true
+        defer { isApplyingUnitFlag = false }
+        do {
+            _ = try await LearningUnitFlagOperator(flags: learningUnits)
+                .set(value, unitID: unitID, operationID: UUID(), at: Date())
+            await loadUnitState()
+            return true
+        } catch {
+            unitFlagErrorMessage = LearningUnitFlagOperator.message(
+                for: error
+            )
+            await loadUnitState()
+            return false
+        }
+    }
+
+    /// 三态显示文案（§2.1 状态复用 `LearningKnowledgeResolver`）。
+    var unitStateLabel: String {
+        guard let unitContext else { return "未关联学习单元" }
+        return switch unitContext.knowledgeState {
+        case .unknown: "未知"
+        case .learning: "学习中"
+        case .mastered: "已掌握"
+        }
+    }
+
+    /// 跨窗口刷新（§14.3）：flags/links 观察流有变更就重解析自身
+    /// 上下文——复习页/Inspector/另一窗口的写入实时反映。
+    private func startUnitObservationIfNeeded() {
+        guard unitObservationTask == nil,
+              let observing =
+                learningUnits as? any LearningUnitFlagObserving
+        else { return }
+        unitObservationTask = Task { [weak self] in
+            do {
+                for try await _ in observing.observeChanges() {
+                    guard let self, !Task.isCancelled else { return }
+                    await self.loadUnitState()
+                }
+            } catch {
+                // 流失败即停——下一次 load() 会重建。
+            }
+        }
     }
 
     func toggleFavorite() async -> Bool {

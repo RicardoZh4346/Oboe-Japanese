@@ -101,7 +101,14 @@ extension ReviewViewModel {
                     let refreshed = try await service.loadReviewCard(
                         cardID: current.content.cardID
                     )
-                    card = refreshed
+                    // S16：跨窗口 flag 置位/同 unit 驱逐——当前卡在
+                    // 刷新后若已不可排程，立即换入下一张而不是继续
+                    // 展示已失效卡。
+                    if await isSessionEvicted(content: refreshed.content) {
+                        card = nil
+                    } else {
+                        card = refreshed
+                    }
                 } catch {
                     card = nil
                 }
@@ -111,7 +118,15 @@ extension ReviewViewModel {
                 var freshCard: LoadedReviewCard?
                 while freshCard == nil, !custom.remainingCardIDs.isEmpty {
                     let cardID = custom.remainingCardIDs.removeFirst()
-                    freshCard = try? await service.loadReviewCard(cardID: cardID)
+                    guard let loaded = try? await service
+                        .loadReviewCard(cardID: cardID) else { continue }
+                    // S16：惰性跳卡——本窗口驱逐集或跨窗口 tooEasy
+                    // flag 命中的卡在冻结队列里直接跳过（不移除
+                    // flag，只影响本会话呈现）。
+                    if await isSessionEvicted(content: loaded.content) {
+                        continue
+                    }
+                    freshCard = loaded
                 }
                 card = freshCard
                 if freshCard != nil {
@@ -218,6 +233,13 @@ extension ReviewViewModel {
                 custom.lastPracticeCardID = attempt.cardKey
                 custom.presentedCount += 1
                 if rating == .again { custom.againCount += 1 }
+                // practice attempt 也占「最近一次」撤销位——typed 栈
+                // 压 review 标记即可，撤销时 customUndoLastSubmission
+                // 会先检查 lastPracticeEventID 走练习撤销。
+                submission.undoActions.removeAll { $0.isReview }
+                submission.undoActions.append(
+                    .review(eventID: attempt.eventID)
+                )
             case .scheduled:
                 guard let studyDay = custom.studyDay else {
                     throw CustomStudyDriverError.missingStudyDay
@@ -235,6 +257,10 @@ extension ReviewViewModel {
                     eventID: submitted.eventID,
                     studyDay: studyDay,
                     cardID: card.content.cardID
+                )
+                submission.undoActions.removeAll { $0.isReview }
+                submission.undoActions.append(
+                    .review(eventID: submitted.eventID)
                 )
                 custom.lastPracticeCardID = nil
                 custom.lastPracticeEventID = nil
@@ -268,6 +294,9 @@ extension ReviewViewModel {
                     eventID: eventID,
                     undoneAt: Date()
                 )
+                submission.undoActions.removeAll {
+                    $0 == .review(eventID: eventID)
+                }
                 custom.remainingCardIDs.insert(cardID, at: 0)
                 custom.lastPracticeEventID = nil
                 custom.lastPracticeCardID = nil
@@ -278,6 +307,9 @@ extension ReviewViewModel {
                     eventID: lastSubmission.eventID,
                     studyDay: lastSubmission.studyDay
                 )
+                submission.undoActions.removeAll {
+                    $0 == .review(eventID: lastSubmission.eventID)
+                }
                 custom.remainingCardIDs.insert(lastSubmission.cardID, at: 0)
                 self.lastSubmission = nil
                 custom.presentedCount = max(0, custom.presentedCount - 1)
@@ -328,6 +360,14 @@ extension ReviewViewModel {
             custom.lastPracticeCardID = nil
             custom.isFinished = false
             lastSubmission = nil
+            // S16：新会话=新驱逐边界——上一轮的 tooEasy 驱逐集/
+            // 撤销锚点随会话结束失效（flag 本身是持久状态，
+            // 资格由队列构建/惰性跳卡重新判定）。
+            tooEasy.evictedNoteIDs = []
+            tooEasy.evictedUnitIDs = []
+            tooEasy.pendingUndo = nil
+            tooEasy.expiryTask?.cancel()
+            submission.undoActions.removeAll()
             await customLoadNextCard()
         } catch {
             loadErrorMessage = error.localizedDescription

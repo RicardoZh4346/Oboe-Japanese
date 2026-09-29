@@ -845,6 +845,56 @@ final class GRDBLearningUnitRepositoryTests: XCTestCase {
         }
     }
 
+    /// S16 回归：`observeChanges` 在同 pool 的审计写提交后发出
+    /// ping——`learning_unit_flags`/`learning_unit_note_links` 是
+    /// WITHOUT ROWID 表，不产生 `DatabaseEvent` 派发；观察载荷并入
+    /// `learning_unit_events` 行数作触发器（flag/link 生产写路径
+    /// 同事务必落审计事件）。裸插 flags 行（无事件）不 ping 是
+    /// 既有契约。
+    func testObserveChangesEmitsOnAuditedFlagWrite() async throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let unitID = try fixture.makeUnit(identityKey: "local-note:OBS")
+
+        final class Counter: @unchecked Sendable {
+            var n = 0
+            var error: String?
+        }
+        let counter = Counter()
+        let consumer = Task {
+            do {
+                for try await _ in fixture.repository.observeChanges() {
+                    counter.n += 1
+                }
+            } catch {
+                counter.error = "\(error)"
+            }
+        }
+        defer { consumer.cancel() }
+
+        // 观察建立后的基线值先到。
+        var deadline = Date().addingTimeInterval(5)
+        while counter.n < 1, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertGreaterThanOrEqual(counter.n, 1, "观察应先发基线值")
+
+        // 仓库写：同事务 tooEasySet 事件 → 观察 ping。
+        try await fixture.repository.setFlagTooEasy(
+            TooEasyCommand(
+                unitID: unitID, value: true,
+                expectedFlagRevision: 0, operationID: UUID()),
+            at: Date())
+
+        deadline = Date().addingTimeInterval(5)
+        while counter.n < 2, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        if let error = counter.error { XCTFail("观察流抛错: \(error)") }
+        XCTAssertGreaterThanOrEqual(
+            counter.n, 2, "审计写应触发观察 ping")
+    }
+
     private func makeFixture() throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(

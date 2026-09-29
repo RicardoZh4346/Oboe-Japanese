@@ -72,6 +72,20 @@ extension ReviewViewModel {
         undoPreferredCardID = nil
         skippedListeningIDs.removeAll()
 
+        // S16：Too Easy 会话态随会话边界清空——驱逐集/typed 撤销
+        // 锚点/横幅计时/观察订阅。持久 flag 本身不受影响。
+        tooEasy.evictedNoteIDs = []
+        tooEasy.evictedUnitIDs = []
+        tooEasy.pendingUndo = nil
+        tooEasy.noticeMessage = nil
+        tooEasy.errorMessage = nil
+        tooEasy.isApplying = false
+        tooEasy.expiryTask?.cancel()
+        tooEasy.expiryTask = nil
+        tooEasy.observationTask?.cancel()
+        tooEasy.observationTask = nil
+        submission.undoActions.removeAll()
+
         // 专项会话的完成/计数态同属一个会话周期。
         customIsFinished = false
         customPresentedCount = 0
@@ -87,6 +101,10 @@ extension ReviewViewModel {
     }
 
     func loadNextCard(preservingCurrentCard: Bool = false) async {
+        // S16：会话级观察订阅惰性建立——flags/links 的跨窗口写入
+        // 触发 preserving-refresh（normal 计划重算驱逐；custom 走
+        // 惰性跳卡复核）。桩件无观察能力时静默为空实现。
+        startUnitChangeObservationIfNeeded()
         if isCustomSession {
             await customLoadNextCard(preservingCurrentCard: preservingCurrentCard)
             return
@@ -111,16 +129,27 @@ extension ReviewViewModel {
             )
             // T18: session-skipped listening cards stay due but are never
             // re-picked this round — a failing card cannot loop forever.
+            // S16: tooEasy 驱逐集（本窗口 flag 命中的 Note）一律不再
+            // 被选——即使旧计划快照里仍带着它。
             let candidates = scopedNowItems(in: freshPlan)
                 .filter { !skippedListeningIDs.contains($0.cardID) }
-            let keepsCurrentCard = preservingCurrentCard && !hasCommittedCurrentCard
+                .filter { !tooEasy.evictedNoteIDs.contains($0.noteID) }
+            var keepsCurrentCard = preservingCurrentCard && !hasCommittedCurrentCard
                 && candidates.contains(where: { $0.cardID == currentItem?.cardID })
             var selected: TodayQueueItem?
             var freshCard: LoadedReviewCard?
             if keepsCurrentCard, let current = currentItem {
-                selected = current
-                freshCard = try await service.loadReviewCard(cardID: current.cardID)
-            } else {
+                let loaded = try await service.loadReviewCard(cardID: current.cardID)
+                // S16：卡还在计划里但 flag 已被其他窗口置位（写读竞态）
+                // ——视同被驱逐，放弃保留改为重选。
+                if await isSessionEvicted(content: loaded.content) {
+                    keepsCurrentCard = false
+                } else {
+                    selected = current
+                    freshCard = loaded
+                }
+            }
+            if !keepsCurrentCard {
                 // T21 (设计 §9.1): the display order is decided by the pure
                 // sibling-selection policy over the scope-filtered,
                 // skip-filtered candidates — the queue's raw order is the
@@ -138,7 +167,11 @@ extension ReviewViewModel {
                     workingDebt = nil
                     let candidate = pool.remove(at: index)
                     let loaded = try await service.loadReviewCard(cardID: candidate.cardID)
-                    if loaded.content.templateKind == .vocabularyListening,
+                    // S16：被撤回的评分卡若恰好同窗口被 tooEasy 驱逐，
+                    // 不再回放——资格复核优先于 undo 偏好。
+                    if await isSessionEvicted(content: loaded.content) {
+                        // fall through to the policy pick
+                    } else if loaded.content.templateKind == .vocabularyListening,
                        listeningPromptUnavailableReason(for: loaded.content) != nil {
                         skippedListeningIDs.insert(candidate.cardID)
                         listeningSkipNotice = "音频暂不可用，已跳过这张听力卡。"
@@ -160,6 +193,11 @@ extension ReviewViewModel {
                     workingDebt = selection.deferredCardID
                     pool.removeAll { $0.cardID == selection.selected.cardID }
                     let loaded = try await service.loadReviewCard(cardID: selection.selected.cardID)
+                    // S16：flag 写读竞态——计划快照先于 flag 写提交时
+                    // 仍可能含被驱逐卡，加载后按当前 flag 复核。
+                    if await isSessionEvicted(content: loaded.content) {
+                        continue
+                    }
                     if loaded.content.templateKind == .vocabularyListening,
                        listeningPromptUnavailableReason(for: loaded.content) != nil {
                         skippedListeningIDs.insert(selection.selected.cardID)
@@ -292,6 +330,12 @@ extension ReviewViewModel {
                 )
                 guard !isMutating, !isLoading, !hasCommittedCurrentCard,
                       card == displayedCard else { continue }
+                // S16：预览期跨窗口 flag 置位——当前卡已不可排程，
+                // 立即重选而不是继续展示失效卡。
+                if await isSessionEvicted(content: refreshedCard.content) {
+                    await loadNextCard()
+                    continue
+                }
                 if recallAttempt?.contentVersion != refreshedCard.content.contentVersion {
                     recallAttempt?.reloadContent(version: refreshedCard.content.contentVersion)
                     presentationID = UUID()

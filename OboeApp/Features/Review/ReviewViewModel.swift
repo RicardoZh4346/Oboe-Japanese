@@ -14,16 +14,21 @@ final class ReviewViewModel {
     /// S09：专项学习驱动依赖——normal 队列会话可为 nil（旧构造不变）。
     let customStudyRepository: (any CustomStudyRepository)?
     let customStudyService: CustomStudyService?
+    /// S16：learning-unit flag 门面（Too Easy）。nil = 门面不可派生
+    /// （测试桩）→ UI 隐藏 Too Easy 入口。
+    let learningUnits: (any LearningUnitFlagProviding)?
     let scope: StudyScope
 
     /// PR3 split：页面对外状态拆进四个子对象，下列计算属性逐一转发，
     /// 视图与方法签名保持不变。
     private let queue = ReviewQueueCoordinator()
-    private let submission = ReviewSubmissionCoordinator()
+    let submission = ReviewSubmissionCoordinator()
     private let audio = ReviewAudioController()
     private let presentation = ReviewPresentationState()
     /// S09：专项会话状态（冻结队列/练习计数/撤销锚点）。
     let custom = CustomStudyCoordinator()
+    /// S16：Too Easy 会话态（驱逐集/typed Undo 锚点/观察订阅）。
+    let tooEasy = ReviewTooEasyCoordinator()
 
     var speechPreferences = SpeechPreferences.defaults
     /// T18: adaptive toggles are loaded alongside recall preferences in
@@ -39,6 +44,9 @@ final class ReviewViewModel {
         speechService: any SpeechService,
         customStudyRepository: (any CustomStudyRepository)? = nil,
         customStudyService: CustomStudyService? = nil,
+        /// S16：测试注入桩件；缺省从 `service` 的今日队列仓储派生
+        /// 同 pool 门面（构造点文件冻结时的受控通路）。
+        learningUnits: (any LearningUnitFlagProviding)? = nil,
         scope: StudyScope
     ) {
         self.service = service
@@ -49,6 +57,7 @@ final class ReviewViewModel {
         self.speechService = speechService
         self.customStudyRepository = customStudyRepository
         self.customStudyService = customStudyService
+        self.learningUnits = learningUnits ?? service.learningUnitFlags
         self.scope = scope
     }
 

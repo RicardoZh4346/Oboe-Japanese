@@ -9,6 +9,13 @@ public struct GRDBTodayQueueRepository: TodayQueueRepository, Sendable {
         pool = database.pool
     }
 
+    /// v0.7.5 S16：同 pool 的 learning-unit flag 门面派生点——
+    /// Review 会话经 `StudySessionService` 直达 flag CAS/事件 API，
+    /// 无需改动依赖装配文件。
+    public var learningUnitFlags: GRDBLearningUnitRepository {
+        GRDBLearningUnitRepository(pool: pool)
+    }
+
     public func buildQueue(for studyDay: StudyDay, at instant: Date) async throws -> TodayPlan {
         let now = try DatabaseValueCodec.encode(instant)
         let end = try DatabaseValueCodec.encode(studyDay.endsAt)

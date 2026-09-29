@@ -357,6 +357,12 @@ public struct VocabularyService: Sendable {
         self.makeID = makeID
     }
 
+    /// v0.7.5 S16：Note 详情页 Too Easy 开关经此派生同 pool 的
+    /// learning-unit flag 门面（装配文件冻结，派生点落在既有服务上）。
+    public var vocabularyRepository: any VocabularyRepository {
+        repository
+    }
+
     public func fetchVocabularySummaries(deckID: UUID) async throws -> [VocabularyNoteSummary] {
         try await repository.fetchVocabularySummaries(deckID: deckID)
     }

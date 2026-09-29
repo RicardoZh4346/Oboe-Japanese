@@ -383,6 +383,19 @@ public struct ReaderMiningService: Sendable {
         )
     }
 
+    /// S16：暴露 mining store 给装配层——Inspector 经它派生同 pool
+    /// 的 learning-unit flag 门面（依赖装配文件冻结时的受控通路）。
+    public var miningStore: any ReaderMiningStore { store }
+
+    /// S16：所选义项（entryID+senseID 齐备）的 dictionarySense unit
+    /// 身份键——Inspector 三态/太简单定位用。无词典证据（OOV/义项
+    /// 缺快照/未选义项）→ nil，调用方按待确认处理，绝不退化猜测。
+    public func unitIdentityKey(
+        for selection: ReaderMiningSelection
+    ) async throws -> String? {
+        try await resolveDictionaryBinding(selection: selection)?.identityKey
+    }
+
     /// S06：selection 显式指向词典义项（entryID+senseID 齐全）时用
     /// 当前快照验算 fingerprint/快照 JSON，装配可消费的绑定证据；
     /// 义项缺失/无词典证据 → nil（写路径落 localNote）。

@@ -33,7 +33,11 @@ final class ReaderInspectorViewModel {
 
     // MARK: - 展示状态
 
-    private(set) var lookup: ReaderMiningLookup?
+    private(set) var lookup: ReaderMiningLookup? {
+        // lookup 结果换批（挖词/标记后重查）→ unit 归属证据可能变化，
+        // 立即重解析而不是等下一次选择操作。
+        didSet { scheduleUnitResolution() }
+    }
     private(set) var isLoading = true
     var errorMessage: String?
     /// 所选候选（`lexicalKey.identityKey`）；nil = 未选。
@@ -46,14 +50,21 @@ final class ReaderInspectorViewModel {
             mineOperationID = UUID()
             // pending 标记属于旧候选——换候选后不再回显。
             pendingMark = nil
+            scheduleUnitResolution()
         }
     }
     var selectedSenseID: Int64? {
-        didSet { mineOperationID = UUID() }
+        didSet {
+            mineOperationID = UUID()
+            scheduleUnitResolution()
+        }
     }
     /// 选择「已有 Note 只加来源」模式的目标。
     var selectedExistingNoteID: UUID? {
-        didSet { mineOperationID = UUID() }
+        didSet {
+            mineOperationID = UUID()
+            scheduleUnitResolution()
+        }
     }
     /// 目标 home 牌组 + 追加成员牌组。
     var targetDeckID: UUID? {
@@ -158,6 +169,9 @@ final class ReaderInspectorViewModel {
     /// 代数不预先选任何候选——ambiguous 语义要求用户显式点选。
     func load() {
         lookupTask?.cancel()
+        // S16：观察订阅在面板存活期内建立一次（观察句柄独立于
+        // 具体 lookup 任务）。
+        startUnitObservationIfNeeded()
         lookupTask = Task { [deps, tap] in
             do {
                 async let lookupResult = deps.service.lookup(
@@ -191,6 +205,200 @@ final class ReaderInspectorViewModel {
     func dismiss() {
         lookupTask?.cancel()
         markTask?.cancel()
+        // S16：unit 解析与观察句柄随面板生命周期结束。
+        unitResolveTask?.cancel()
+        unitObservationTask?.cancel()
+    }
+
+    // MARK: - S16 学习单元（太简单）
+
+    /// unit 定位结果（§12.4：只有 resolved 才允许 Too Easy 操作；
+    /// 其余三态一律展示「待确认」，绝不按表形/lemma 猜 unit）。
+    enum LearningUnitResolution: Equatable {
+        /// 未选候选/义项，或所选义项尚无持久 unit——待确认。
+        case unresolved
+        /// 关联笔记分属多个 unit（同 lemma 多义独立）——拒绝合并。
+        case ambiguous
+        /// `unitContext` 有效——展示三态并可操作。
+        case resolved
+    }
+
+    /// flag 门面——由 mining service 同 pool 派生（依赖装配文件
+    /// 冻结时的受控通路）；nil = 入口隐藏。
+    private var learningUnits: (any LearningUnitFlagProviding)? {
+        deps.service.learningUnitFlags
+    }
+
+    private(set) var unitContext: LearningUnitContext?
+    private(set) var unitResolution: LearningUnitResolution = .unresolved
+    private(set) var isApplyingUnitFlag = false
+    /// flag 操作的幂等键——按「当前 resolved unit」轮换：换义项/
+    /// 候选产生新 opID，同 unit 的重试复用 receipt。
+    private var unitFlagOperationID = UUID()
+    private var unitResolveTask: Task<Void, Never>?
+    private var unitObservationTask: Task<Void, Never>?
+
+    var canApplyUnitTooEasy: Bool {
+        unitResolution == .resolved && unitContext != nil
+            && learningUnits != nil && !isBusy && !isApplyingUnitFlag
+    }
+
+    /// 三态显示文案（复用 `LearningKnowledgeResolver` 的结果，
+    /// 不引入第二份判定）。
+    var unitStateLabel: String {
+        switch unitResolution {
+        case .resolved:
+            guard let unitContext else { return "待确认" }
+            return switch unitContext.knowledgeState {
+            case .unknown: "未知"
+            case .learning: "学习中"
+            case .mastered: "已掌握"
+            }
+        case .ambiguous: return "待确认（该词关联多个学习单元）"
+        case .unresolved: return "待确认"
+        }
+    }
+
+    /// 选择/lookup 变化 → 重新解析。取消在途任务保证只应用最新
+    /// 一次解析（快速连点候选/义项不交错落盘）。
+    private func scheduleUnitResolution() {
+        unitResolveTask?.cancel()
+        unitResolveTask = Task { [weak self] in
+            await self?.resolveUnitContext()
+        }
+    }
+
+    /// unit 定位优先级：显式「既有 Note」 > 显式「候选+义项」
+    /// （dictionarySense identityKey）> 无义项候选的关联 Note 链接。
+    /// 任一环节证据不足 → unresolved；同 lemma 多 unit → ambiguous。
+    private func resolveUnitContext() async {
+        guard let units = learningUnits else {
+            unitContext = nil
+            unitResolution = .unresolved
+            return
+        }
+        let ops = LearningUnitFlagOperator(flags: units)
+        do {
+            // 1) 「只加来源」显式目标：note→link→unit。
+            if let noteID = selectedExistingNoteID {
+                if let context = try await ops.context(forNoteID: noteID) {
+                    applyUnitContext(context)
+                } else {
+                    applyUnitContext(nil)
+                }
+                return
+            }
+            guard let candidate = selectedCandidate else {
+                applyUnitContext(nil)
+                return
+            }
+            // 2) 有义项的词典候选：必须显式选义项，按
+            //    dictionarySense identityKey 定位——持久证据来自
+            //    义项快照指纹，不经表形/lemma 推断。
+            if !candidate.senses.isEmpty {
+                guard let selection = currentSelection,
+                      selection.senseID != nil,
+                      let key = try await deps.service
+                        .unitIdentityKey(for: selection),
+                      let unit = try await units
+                        .fetchUnit(identityKey: key)
+                else {
+                    applyUnitContext(nil)
+                    return
+                }
+                applyUnitContext(try await ops.context(for: unit))
+                return
+            }
+            // 3) 无义项候选（OOV/自建）：经关联 Note 的真实 link
+            //    定位；>1 个 unit = 歧义拒绝，不做 lemma 级合并。
+            let unitIDs = try await ops.unitIDs(
+                linkedToNoteIDs: candidate.linkedNotes.map(\.noteID)
+            )
+            guard unitIDs.count <= 1,
+                  let unitID = unitIDs.first,
+                  let unit = try await units
+                    .fetchUnits(ids: [unitID])[unitID]
+            else {
+                applyUnitContext(
+                    nil,
+                    resolution: unitIDs.count > 1 ? .ambiguous : .unresolved
+                )
+                return
+            }
+            applyUnitContext(try await ops.context(for: unit))
+        } catch is CancellationError {
+            // 被更新的解析取代。
+        } catch {
+            // 解析失败保守处理——不显示陈旧/可疑状态。
+            applyUnitContext(nil)
+        }
+    }
+
+    private func applyUnitContext(
+        _ context: LearningUnitContext?,
+        resolution: LearningUnitResolution? = nil
+    ) {
+        let previousUnitID = unitContext?.unit.id
+        unitContext = context
+        unitResolution = resolution
+            ?? (context != nil ? .resolved : .unresolved)
+        // unit 变了 → opID 轮换（幂等键与操作负载绑定）。
+        if context?.unit.id != previousUnitID {
+            unitFlagOperationID = UUID()
+        }
+    }
+
+    /// Too Easy 置位/清除（§12.3）：CAS 读当前 revision——另一窗口
+    /// 先改过则冲突报错并重解析；清 flag 随时允许（不限于复习页
+    /// 撤销窗口）。入口只在 `unitResolution == .resolved` 时开放。
+    func setUnitTooEasy(_ value: Bool) {
+        guard canApplyUnitTooEasy, let units = learningUnits,
+              let unitContext else { return }
+        isBusy = true
+        isApplyingUnitFlag = true
+        let operationID = unitFlagOperationID
+        Task { [deps] in
+            defer {
+                isBusy = false
+                isApplyingUnitFlag = false
+            }
+            do {
+                _ = try await LearningUnitFlagOperator(flags: units).set(
+                    value,
+                    unitID: unitContext.unit.id,
+                    operationID: operationID,
+                    at: Date()
+                )
+                guard generationAlive(deps) else { return }
+                noticeMessage = value
+                    ? "已标记「太简单」——学习计划不再排入该词条的卡。"
+                    : "已取消「太简单」标记。"
+                await resolveUnitContext()
+            } catch {
+                guard generationAlive(deps) else { return }
+                errorMessage = LearningUnitFlagOperator.message(for: error)
+                await resolveUnitContext()
+            }
+        }
+    }
+
+    /// 跨窗口观察（§14.3）：flags/links 变更 → 重解析当前选定的
+    /// unit 三态——复习页/详情页/另一窗口的写入实时反映。
+    private func startUnitObservationIfNeeded() {
+        guard unitObservationTask == nil,
+              let observing =
+                learningUnits as? any LearningUnitFlagObserving
+        else { return }
+        unitObservationTask = Task { [weak self] in
+            do {
+                for try await _ in observing.observeChanges() {
+                    guard let self, !Task.isCancelled else { return }
+                    await self.resolveUnitContext()
+                }
+            } catch {
+                // 流失败即停——面板重开会重建。
+            }
+        }
     }
 
     // MARK: - 知识状态操作

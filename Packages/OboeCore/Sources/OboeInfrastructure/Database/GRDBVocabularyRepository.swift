@@ -17,6 +17,12 @@ public struct GRDBVocabularyRepository: VocabularyRepository, Sendable {
         pool = database.pool
     }
 
+    /// v0.7.5 S16：同 pool 的 learning-unit flag 门面派生点——
+    /// Note 详情页的 Too Easy 开关经 `VocabularyService` 直达。
+    public var learningUnitFlags: GRDBLearningUnitRepository {
+        GRDBLearningUnitRepository(pool: pool)
+    }
+
     /// 牌组内容列表按 `note_decks` 成员关系过滤（设计 §4.4/§4.5）。
     public func fetchVocabularySummaries(deckID: UUID) async throws -> [VocabularyNoteSummary] {
         try await pool.read { db in

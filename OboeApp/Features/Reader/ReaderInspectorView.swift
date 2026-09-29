@@ -13,6 +13,8 @@ struct ReaderInspectorView: View {
     /// 「编辑后挖词」sheet：VM 通过依赖包里的 editorFactory 产出
     /// 已装好提交回调的 AddContentEditorView。
     @State private var editorPresentation: EditorPresentation?
+    /// S16：太简单开启前的后果确认。
+    @State private var showingTooEasyConfirmation = false
 
     init(model: ReaderInspectorViewModel) {
         _model = State(initialValue: model)
@@ -70,6 +72,21 @@ struct ReaderInspectorView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        // S16（§12.2）：Too Easy 写前给后果说明——作用于显式解析
+        // 出的学习单元，不写 ReviewLog、不算评分。
+        .confirmationDialog(
+            "标记为「太简单」？",
+            isPresented: $showingTooEasyConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("太简单——不再进入学习计划") {
+                model.setUnitTooEasy(true)
+            }
+            .accessibilityIdentifier("inspector-too-easy-confirm")
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("该学习单元所有方向的卡将不再进入学习计划；可在词条详情或此处随时取消。")
+        }
     }
 
     /// sheet(item:) 需要 Identifiable——对工厂产出的视图装箱。
@@ -86,6 +103,7 @@ struct ReaderInspectorView: View {
             senseSection
             existingNoteSection
             knowledgeSection
+            learningUnitSection
             deckSection
             actionSection
         }
@@ -270,13 +288,14 @@ struct ReaderInspectorView: View {
     }
 
     /// 「自动」＝ 无人工覆盖，状态由制卡情况判定（未制卡=未知、
-    /// 挖词后=学习中）；「已知/已忽略」＝ 人工覆盖，措辞与图例一致。
+    /// 挖词后=学习中）；「已知」＝ 人工覆盖，措辞与图例一致。
+    /// S16：旧「已忽略」入口移除——不再出现的语义改由下方
+    /// 「学习单元/太简单」承担（learning-unit flag，带 CAS/撤销）。
     private var knowledgeSection: some View {
         Section {
             Picker("标注方式", selection: knowledgeBinding) {
                 Text("自动").tag(KnowledgeOverride?.none)
                 Text("已知").tag(KnowledgeOverride?.some(.known))
-                Text("已忽略").tag(KnowledgeOverride?.some(.ignored))
             }
             .pickerStyle(.segmented)
             // 标记任务可取消、最新值生效——picker 全程保持可点。
@@ -293,6 +312,56 @@ struct ReaderInspectorView: View {
         } footer: {
             Text("「自动」按是否已制卡判定：未制卡记为未知，挖词后自动转学习中。")
                 .font(.footnote)
+        }
+    }
+
+    /// S16 学习单元区（§12.4）：显式选择解析出的 unit 才允许
+    /// 「太简单」——歧义/未选义项/无持久 unit 一律「待确认」，
+    /// 绝不按表形或 lemma 推断归属。三态复用
+    /// `LearningKnowledgeResolver`；清除随时可用（不限撤销窗口）。
+    private var learningUnitSection: some View {
+        Section {
+            LabeledContent("学习单元状态") {
+                Text(model.unitStateLabel)
+                    .foregroundStyle(
+                        model.unitContext?.tooEasy == true
+                            ? OboeTheme.Colors.accent : .primary
+                    )
+            }
+            .accessibilityIdentifier("inspector-unit-state-row")
+            switch model.unitResolution {
+            case .resolved:
+                if model.unitContext?.tooEasy == true {
+                    Button {
+                        model.setUnitTooEasy(false)
+                    } label: {
+                        Label("取消「太简单」", systemImage: "arrow.uturn.backward")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!model.canApplyUnitTooEasy)
+                    .accessibilityIdentifier("inspector-too-easy-clear")
+                } else {
+                    Button {
+                        showingTooEasyConfirmation = true
+                    } label: {
+                        Label("太简单——不再进入学习计划",
+                              systemImage: "checkmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!model.canApplyUnitTooEasy)
+                    .accessibilityIdentifier("inspector-too-easy")
+                }
+            case .ambiguous:
+                Text("该词关联到多个学习单元，无法确定目标——请到词条详情页按义项处理。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            case .unresolved:
+                Text("显式选择义项后才能标记——未定位到持久学习单元时不做任何标记。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("学习单元")
         }
     }
 

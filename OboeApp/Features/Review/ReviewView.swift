@@ -37,6 +37,8 @@ struct ReviewView: View {
     @State private var recallInputController = RecallInputController()
     /// 「收起键盘」只在键盘可见时显示——跟随 willShow/willHide。
     @State private var isKeyboardVisible = false
+    /// S16：Too Easy 后果确认面板（§12.2：应用前必须解释后果）。
+    @State private var showingTooEasyConfirmation = false
 
     init(
         service: StudySessionService,
@@ -121,7 +123,9 @@ struct ReviewView: View {
             ToolbarItem(placement: .primaryAction) {
                 if model.canUndo {
                     Button("撤销", systemImage: "arrow.uturn.backward") {
-                        Task { await model.undoLastSubmission() }
+                        // S16：typed 栈分发——栈顶是 tooEasy 锚点时
+                        // 走 flag CAS 撤销，评分撤销不受影响。
+                        Task { await model.undoLatestAction() }
                     }
                     .disabled(model.isMutating || model.isLoading)
                     .accessibilityLabel("撤销上次评分")
@@ -192,6 +196,34 @@ struct ReviewView: View {
             Button("知道了", role: .cancel) {}
         } message: {
             Text(model.speechErrorMessage ?? "未知错误")
+        }
+        .alert(
+            "无法标记太简单",
+            isPresented: Binding(
+                get: { model.tooEasyErrorMessage != nil },
+                set: { shown in if !shown { model.tooEasyErrorMessage = nil } }
+            )
+        ) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(model.tooEasyErrorMessage ?? "未知错误")
+        }
+        // S16（§12.2）：应用前后果确认——flag 是持久数据改动，
+        // 先解释再提交；撤销窗口约 10 秒（横幅另提供）。
+        .confirmationDialog(
+            "标记为「太简单」？",
+            isPresented: $showingTooEasyConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("太简单——本会话不再出现") {
+                Task { await model.applyTooEasy() }
+            }
+            .accessibilityIdentifier("review-too-easy-confirm")
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(
+                "这个词条所有方向的卡将立即从本次学习移除，今后也不再进入学习计划；可在词条详情里随时取消。"
+            )
         }
     }
 
@@ -321,6 +353,39 @@ struct ReviewView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("review-listening-play-first-hint")
             }
+            // S16：Too Easy 撤销横幅——typed Undo 锚点存活约 10 秒，
+            // 独立于「撤销评分」语义；撤销只还 flag，不把卡塞回会话。
+            if let pending = model.pendingTooEasyUndo,
+               pending.expiresAt > Date() {
+                HStack(spacing: 8) {
+                    Label(
+                        "已标记「太简单」，本单元卡已移出本次学习",
+                        systemImage: "checkmark.circle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Button("撤销") {
+                        Task { await model.undoTooEasyFlag() }
+                    }
+                    .font(.footnote)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("review-too-easy-undo-button")
+                }
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("review-too-easy-undo-banner")
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if let notice = model.tooEasyNoticeMessage {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("review-too-easy-notice")
+            }
             if model.isAnswerVisible {
                 if let message = model.submissionErrorMessage {
                     VStack(spacing: 8) {
@@ -369,6 +434,27 @@ struct ReviewView: View {
                 .buttonStyle(.oboePrimary)
                 .disabled(model.mustPlayListeningPromptFirst)
                 .accessibilityIdentifier("review-show-answer-button")
+            }
+            // S16：太简单入口——与四档评分并列但独立，点击先弹后果
+            // 确认（confirmationDialog），绝不混进评分统计。
+            if model.canApplyTooEasy {
+                HStack {
+                    Spacer(minLength: 0)
+                    if model.isApplyingTooEasy {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button {
+                            showingTooEasyConfirmation = true
+                        } label: {
+                            Label("太简单", systemImage: "checkmark.circle")
+                                .font(.footnote)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("review-too-easy-button")
+                    }
+                }
             }
         }
         .padding()

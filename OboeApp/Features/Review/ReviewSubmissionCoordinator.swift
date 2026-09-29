@@ -20,6 +20,23 @@ struct LastSubmission {
     let cardID: UUID
 }
 
+/// S16（技术文档 §12.3）：Review 撤销栈的类型化动作——
+/// `review` 走 FSRS 撤销；`tooEasy` 走 flag CAS 撤销，两者
+/// 在栈内严格隔离，绝不互相调用。
+enum ReviewUndoAction: Equatable, Sendable {
+    case review(eventID: UUID)
+    case tooEasy(eventID: UUID)
+
+    var isReview: Bool {
+        if case .review = self { return true }
+        return false
+    }
+    var isTooEasy: Bool {
+        if case .tooEasy = self { return true }
+        return false
+    }
+}
+
 /// PR3 split: 提交、重试、撤销与 pending/last submission 状态，
 /// 由 `ReviewViewModel` 以计算属性原样转发，行为不变。
 @MainActor
@@ -33,13 +50,21 @@ final class ReviewSubmissionCoordinator {
     var undoErrorMessage: String?
     var hasCommittedCurrentCard = false
     var completedSubmissionCount = 0
+    /// S16：typed undo 栈（栈底→栈顶 = 旧→新）。`review` 语义仍是
+    /// 「只能撤上一次」——压栈前先清既有 review 条目；`tooEasy`
+    /// 条目按各自事件独立存活（各自横幅窗口过期即失效）。
+    var undoActions: [ReviewUndoAction] = []
 }
 
 extension ReviewViewModel {
     var canUndo: Bool {
-        isCustomSession
-            ? (custom.lastPracticeEventID != nil || lastSubmission != nil)
-            : lastSubmission != nil
+        // S16：Too Easy 横幅窗口期内的锚点也是可撤动作。
+        let liveTooEasyUndo = tooEasy.pendingUndo != nil
+            && tooEasy.pendingUndo!.expiresAt > Date()
+        return isCustomSession
+            ? (custom.lastPracticeEventID != nil || lastSubmission != nil
+               || liveTooEasyUndo)
+            : (lastSubmission != nil || liveTooEasyUndo)
     }
     var isMutating: Bool { isSubmitting || isUndoing }
     var submittingRating: ReviewRating? { pendingSubmission?.rating }
@@ -89,6 +114,10 @@ extension ReviewViewModel {
                 studyDay: studyDay,
                 cardID: pendingSubmission.card.content.cardID
             )
+            // S16：typed 栈——语义仍是「只能撤最近一次评分」，压栈前
+            // 先清旧 review 条目；tooEasy 条目按自身窗口独立存活。
+            submission.undoActions.removeAll { $0.isReview }
+            submission.undoActions.append(.review(eventID: submitted.eventID))
             hasCommittedCurrentCard = true
             completedSubmissionCount += 1
             await loadNextCard()
@@ -103,6 +132,28 @@ extension ReviewViewModel {
                 loadErrorMessage = message
             }
         }
+    }
+
+    /// S16 全局撤销入口（toolbar/菜单）：按 `undoActions` 栈顶类型
+    /// 分发——`tooEasy` 条目不触发 FSRS 撤销，反之亦然。栈为空
+    /// （老路径/异常态）时回退旧 `undoLastSubmission` 语义。
+    func undoLatestAction() async {
+        while let top = submission.undoActions.last {
+            switch top {
+            case .tooEasy(let eventID):
+                if tooEasy.pendingUndo?.eventID == eventID,
+                   tooEasy.pendingUndo!.expiresAt > Date() {
+                    await undoTooEasyFlag()
+                    return
+                }
+                submission.undoActions.removeLast()
+            case .review:
+                submission.undoActions.removeLast()
+                await undoLastSubmission()
+                return
+            }
+        }
+        await undoLastSubmission()
     }
 
     func undoLastSubmission() async {
@@ -120,6 +171,9 @@ extension ReviewViewModel {
                 eventID: lastSubmission.eventID,
                 studyDay: lastSubmission.studyDay
             )
+            submission.undoActions.removeAll {
+                $0 == .review(eventID: lastSubmission.eventID)
+            }
             // T21 (§9.2): re-present the undone card ahead of the policy
             // pick and clear the separation debt.
             undoPreferredCardID = lastSubmission.cardID

@@ -944,6 +944,89 @@ public struct GRDBLearningUnitRepository: Sendable {
         }
     }
 
+    /// v0.7.5 S16：unit 全部关联 Note 的卡 id 集——复习会话的同
+    /// unit sibling 驱逐判定（一次 join 查询，避免逐卡载入内容）。
+    /// link 表 CHECK 限定 vocabulary Note，故返回的都是词汇方向卡。
+    public func fetchLinkedCardIDs(
+        unitID: UUID
+    ) async throws -> Set<UUID> {
+        try await pool.read { db in
+            let raw = try String.fetchAll(
+                db,
+                sql: """
+                    SELECT c.id FROM cards c
+                    JOIN learning_unit_note_links l
+                        ON l.note_id = c.note_id
+                    WHERE l.unit_id = ?
+                    """,
+                arguments: [DatabaseValueCodec.encode(unitID)]
+            )
+            return try Set(raw.map { try DatabaseValueCodec.decodeUUID($0) })
+        }
+    }
+
+    /// v0.7.5 S16：`learning_unit_flags` / `learning_unit_note_links`
+    /// 的变更信号流（§14.3：跨窗口刷新走共享数据观察，不靠
+    /// onAppear）。同一 DatabasePool 上的任一写提交（本窗口或其他
+    /// scene 共享同一池）即触发一次 Void ping；调用方按自身上下文
+    /// 重新解析 flag/link——观察流不携带负载。
+    ///
+    /// 实现注意：`learning_unit_flags`/`learning_unit_note_links`
+    /// 均为 WITHOUT ROWID 表——GRDB 的 `ValueObservation` 经
+    /// `sqlite3_update_hook` 收事件，WITHOUT ROWID 表的写不入
+    /// `DatabaseEvent` 派发（实测 v7.11：对该类表的 INSERT 不产生
+    /// 观察通知）。因此跟踪载荷里并入 `learning_unit_events`（普通
+    /// rowid 表）行数：所有 flag/link 生产写路径都在同事务写审计
+    /// 事件（`tooEasySet`/`tooEasyUndone`/`noteLinked`/`noteUnlinked`
+    /// /`created`/`migrated`），事件行即触发器；dedup 仍以
+    /// flags+links+事件计数的真实内容为准，无内容变化不 ping。
+    public func observeChanges() -> AsyncThrowingStream<Void, Error> {
+        struct ObservedState: Equatable {
+            var flags: [LearningUnitFlag]
+            var links: [LearningUnitNoteLink]
+            var eventCount: Int
+        }
+        let observation = ValueObservation
+            .tracking { db -> ObservedState in
+                try ObservedState(
+                    flags: Self.fetchAllFlags(in: db),
+                    links: Self.fetchAllLinks(in: db),
+                    // 读事件表只为把它计入跟踪区域（WITHOUT ROWID 的
+                    // flags/links 自身不产生事件派发）——行数进入
+                    // dedup 载荷，任何审计写都必然改变它。
+                    eventCount: Int.fetchOne(
+                        db,
+                        sql: "SELECT COUNT(*) FROM learning_unit_events"
+                    ) ?? 0
+                )
+            }
+            .removeDuplicates()
+        let values = observation.values(
+            in: pool,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        return AsyncThrowingStream(
+            bufferingPolicy: .bufferingNewest(1)
+        ) { continuation in
+            let task = Task {
+                do {
+                    for try await _ in values {
+                        guard !Task.isCancelled else { break }
+                        continuation.yield(())
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
     @discardableResult
     public func upsertAlias(
         _ alias: LearningUnitDictionaryAlias,
@@ -960,6 +1043,33 @@ public struct GRDBLearningUnitRepository: Sendable {
     }
 
     // MARK: - 内部：行解码 / 共享小查询
+
+    /// `observeChanges` 的观察载荷——两张表全量行（去重比较需要
+    /// Equatable 值；表规模小，仅在自身表提交时重取）。
+    private static func fetchAllFlags(
+        in db: Database
+    ) throws -> [LearningUnitFlag] {
+        try Row.fetchAll(
+            db,
+            sql: """
+                SELECT unit_id, too_easy, revision, updated_at_ms
+                FROM learning_unit_flags ORDER BY unit_id
+                """)
+        .map(decodeFlag)
+    }
+
+    private static func fetchAllLinks(
+        in db: Database
+    ) throws -> [LearningUnitNoteLink] {
+        try Row.fetchAll(
+            db,
+            sql: """
+                SELECT unit_id, note_id, role, origin, created_at_ms
+                FROM learning_unit_note_links
+                ORDER BY unit_id, note_id
+                """)
+        .map(decodeLink)
+    }
 
     private static func unitExists(
         _ unitID: UUID, in db: Database

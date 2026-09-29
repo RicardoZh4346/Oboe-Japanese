@@ -132,6 +132,8 @@
 		A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */; };
 		A0010000000000000000005E /* ReviewAudioController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005E /* ReviewAudioController.swift */; };
 		A0010000000000000000005F /* ReviewPresentationState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000005F /* ReviewPresentationState.swift */; };
+		A001000000000000000000C0 /* LearningUnitFlagSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000C0 /* LearningUnitFlagSupport.swift */; };
+		A001000000000000000000C1 /* ReviewTooEasyDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000C1 /* ReviewTooEasyDriver.swift */; };
 		A00100000000000000000080 /* RuntimeServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000080 /* RuntimeServices.swift */; };
 		A00100000000000000000081 /* DatabaseRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000081 /* DatabaseRuntime.swift */; };
 		A00100000000000000000082 /* BackupRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000082 /* BackupRuntime.swift */; };
@@ -149,6 +151,7 @@
 		A00100000000000000000096 /* DictionarySearchViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000096 /* DictionarySearchViewModelTests.swift */; };
 		A00100000000000000000099 /* DictionaryCardPrefillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000099 /* DictionaryCardPrefillTests.swift */; };
 		A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */; };
+		A001000000000000000000C2 /* TooEasyReviewDriverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000C2 /* TooEasyReviewDriverTests.swift */; };
 		A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */; };
 		A00100000000000000000087 /* RuntimeSplitWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000087 /* RuntimeSplitWiringTests.swift */; };
 		A01100000000000000000101 /* ReaderFeatureDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000101 /* ReaderFeatureDependencies.swift */; };
@@ -324,6 +327,8 @@
 		A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewSubmissionCoordinator.swift; sourceTree = "<group>"; };
 		A0020000000000000000005E /* ReviewAudioController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAudioController.swift; sourceTree = "<group>"; };
 		A0020000000000000000005F /* ReviewPresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewPresentationState.swift; sourceTree = "<group>"; };
+		A002000000000000000000C0 /* LearningUnitFlagSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningUnitFlagSupport.swift; sourceTree = "<group>"; };
+		A002000000000000000000C1 /* ReviewTooEasyDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewTooEasyDriver.swift; sourceTree = "<group>"; };
 		A00200000000000000000080 /* RuntimeServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeServices.swift; sourceTree = "<group>"; };
 		A00200000000000000000081 /* DatabaseRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseRuntime.swift; sourceTree = "<group>"; };
 		A00200000000000000000082 /* BackupRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupRuntime.swift; sourceTree = "<group>"; };
@@ -341,6 +346,7 @@
 		A00200000000000000000096 /* DictionarySearchViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionarySearchViewModelTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000099 /* DictionaryCardPrefillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryCardPrefillTests.swift; sourceTree = "<group>"; };
 		A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomStudyReviewDriverTests.swift; sourceTree = "<group>"; };
+		A002000000000000000000C2 /* TooEasyReviewDriverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TooEasyReviewDriverTests.swift; sourceTree = "<group>"; };
 		A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupImportCoordinatorTests.swift; sourceTree = "<group>"; };
 		A00200000000000000000087 /* RuntimeSplitWiringTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeSplitWiringTests.swift; sourceTree = "<group>"; };
 		A01200000000000000000101 /* ReaderFeatureDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderFeatureDependencies.swift; sourceTree = "<group>"; };
@@ -519,7 +525,7 @@
 		A00500000000000000000007 /* NoteEditor */ = {isa = PBXGroup; children = (A00200000000000000000005 /* AddView.swift */, A01200000000000000000108 /* SentenceNoteDetailView.swift */, A01200000000000000000115 /* SentenceNoteEditView.swift */,); path = NoteEditor; sourceTree = "<group>"; };
 		A00500000000000000000008 /* SentenceAnalysis */ = {isa = PBXGroup; children = (A00200000000000000000026 /* SentenceAnalysisSections.swift */,); path = SentenceAnalysis; sourceTree = "<group>"; };
 		A00500000000000000000012 /* ContentEditor */ = {isa = PBXGroup; children = (A00200000000000000000021 /* AddContentEditorView.swift */, A00200000000000000000020 /* AddContentViewModel.swift */, A00200000000000000000057 /* AddContentFormState.swift */, A00200000000000000000058 /* AddContentAISession.swift */, A00200000000000000000059 /* SentenceAnalysisSession.swift */, A0020000000000000000005A /* CaptureDraftCoordinator.swift */, A0020000000000000000005B /* AddContentCommitCoordinator.swift */, A00200000000000000000022 /* VocabularyEditingSections.swift */, A00200000000000000000023 /* GrammarEditingSections.swift */, A00200000000000000000024 /* CardFacePreview.swift */, A00200000000000000000025 /* EditorSupportViews.swift */,); path = ContentEditor; sourceTree = "<group>"; };
-		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000009A /* CustomStudyReviewDriver.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
+		A00500000000000000000009 /* Review */ = {isa = PBXGroup; children = (B01200000000000000000002 /* RecallTextInput.swift */, B01300000000000000000002 /* ListeningQuestionView.swift */, A00200000000000000000010 /* StudyScope.swift */, A00200000000000000000011 /* ReviewView.swift */, A00200000000000000000012 /* ReviewViewModel.swift */, A0020000000000000000005C /* ReviewQueueCoordinator.swift */, A0020000000000000000009A /* CustomStudyReviewDriver.swift */, A0020000000000000000005D /* ReviewSubmissionCoordinator.swift */, A0020000000000000000005E /* ReviewAudioController.swift */, A0020000000000000000005F /* ReviewPresentationState.swift */, A002000000000000000000C0 /* LearningUnitFlagSupport.swift */, A002000000000000000000C1 /* ReviewTooEasyDriver.swift */, A0020000000000000000001A /* StudyCardView.swift */, A0020000000000000000001B /* ReviewRatingBar.swift */,); path = Review; sourceTree = "<group>"; };
 		A0050000000000000000009D /* CustomStudy */ = {isa = PBXGroup; children = (A0020000000000000000009B /* CustomStudySetupModel.swift */, A0020000000000000000009C /* CustomStudySetupView.swift */,); path = CustomStudy; sourceTree = "<group>"; };
 		A0050000000000000000000A /* SharedUI */ = {isa = PBXGroup; children = (A00200000000000000000013 /* StudyTimeText.swift */, A00200000000000000000014 /* ReviewRatingPresentation.swift */, A00200000000000000000015 /* OboeTheme.swift */, A00200000000000000000016 /* OboeCardSurface.swift */, A00200000000000000000017 /* OboePrimaryButtonStyle.swift */, A00200000000000000000018 /* OboeSpeechButton.swift */, A00200000000000000000019 /* OboeEmptyState.swift */, B01200000000000000000005 /* LanguageHintField.swift */, A00200000000000000000043 /* DeckNameEditor.swift */, BD40144146D14359888E78DD /* SecondaryPage.swift */,); path = SharedUI; sourceTree = "<group>"; };
 		A0050000000000000000000B /* Resources */ = {isa = PBXGroup; children = (A00200000000000000000008 /* Assets.xcassets */, A0020000000000000000000D /* THIRD_PARTY_NOTICES.txt */, A0020000000000000000000F /* JLPT */, A00200000000000000000090 /* Dictionary */,); path = Resources; sourceTree = "<group>"; };
@@ -556,6 +562,7 @@
 				A00200000000000000000096 /* DictionarySearchViewModelTests.swift */,
 				A00200000000000000000099 /* DictionaryCardPrefillTests.swift */,
 				A0020000000000000000009E /* CustomStudyReviewDriverTests.swift */,
+				A002000000000000000000C2 /* TooEasyReviewDriverTests.swift */,
 				A002000000000000000000A5 /* BackupImportCoordinatorTests.swift */,
 				A0020000000000000000006B /* StatisticsViewModelTests.swift */,
 				A0020000000000000000006C /* ReaderAnalyticsViewModelTests.swift */,
@@ -586,7 +593,6 @@
 			path = OboeShareExtension;
 			sourceTree = "<group>";
 		};
-		A01300000000000000000101 /* Reader */ = {isa = PBXGroup; children = (A01200000000000000000101 /* ReaderFeatureDependencies.swift */, A01200000000000000000102 /* ReaderLibraryViewModel.swift */, A01200000000000000000103 /* ReaderDocumentViewModel.swift */, A01200000000000000000104 /* ReaderTextView.swift */, A01200000000000000000105 /* ReaderView.swift */, A01200000000000000000106 /* ReaderLibraryView.swift */, A01200000000000000000107 /* ReaderRootView.swift */, A01200000000000000000109 /* ReaderInspectorViewModel.swift */, A01200000000000000000110 /* ReaderInspectorView.swift */, A01200000000000000000116 /* ReaderClozeCreateViewModel.swift */, A01200000000000000000117 /* ReaderClozeCreateView.swift */,); path = Reader; sourceTree = "<group>"; };
 		A01300000000000000000103 /* Statistics */ = {isa = PBXGroup; children = (A01200000000000000000112 /* StatisticsInsightSource.swift */, A01200000000000000000113 /* StatisticsView.swift */, A01200000000000000000114 /* StatisticsViewModel.swift */, A01200000000000000000118 /* ReaderAnalyticsSource.swift */, A01200000000000000000119 /* ReaderAnalyticsView.swift */, A01200000000000000000120 /* ReaderAnalyticsViewModel.swift */,); path = Statistics; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
@@ -839,6 +845,8 @@
 				A0010000000000000000005D /* ReviewSubmissionCoordinator.swift in Sources */,
 				A0010000000000000000005E /* ReviewAudioController.swift in Sources */,
 				A0010000000000000000005F /* ReviewPresentationState.swift in Sources */,
+				A001000000000000000000C0 /* LearningUnitFlagSupport.swift in Sources */,
+				A001000000000000000000C1 /* ReviewTooEasyDriver.swift in Sources */,
 				A00100000000000000000043 /* DeckNameEditor.swift in Sources */,
 				EAC9B13BE0244EE0AA7407E6 /* SecondaryPage.swift in Sources */,
 				167AD75A2AF644799D703AA9 /* AIModelPickerView.swift in Sources */,
@@ -904,6 +912,7 @@
 				A00100000000000000000096 /* DictionarySearchViewModelTests.swift in Sources */,
 				A00100000000000000000099 /* DictionaryCardPrefillTests.swift in Sources */,
 				A0010000000000000000009E /* CustomStudyReviewDriverTests.swift in Sources */,
+				A001000000000000000000C2 /* TooEasyReviewDriverTests.swift in Sources */,
 				A001000000000000000000A5 /* BackupImportCoordinatorTests.swift in Sources */,
 				A0010000000000000000006A /* StatisticsViewModelTests.swift in Sources */,
 				A0010000000000000000006B /* ReaderAnalyticsViewModelTests.swift in Sources */,

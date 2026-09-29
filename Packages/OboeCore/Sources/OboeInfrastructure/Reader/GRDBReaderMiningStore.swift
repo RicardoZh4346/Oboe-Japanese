@@ -34,6 +34,13 @@ public struct GRDBReaderMiningStore: ReaderMiningStore, Sendable {
         self.pool = pool
     }
 
+    /// v0.7.5 S16：同 pool 的 learning-unit flag 门面派生点——
+    /// Reader Inspector 经 `ReaderMiningService.miningStore` 直达
+    /// flag CAS/事件 API，无需改动 Reader 依赖装配文件。
+    public var learningUnitFlags: GRDBLearningUnitRepository {
+        GRDBLearningUnitRepository(pool: pool)
+    }
+
     // MARK: - 读
 
     public func noteSummaries(
