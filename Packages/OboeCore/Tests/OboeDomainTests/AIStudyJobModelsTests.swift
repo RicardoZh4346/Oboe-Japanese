@@ -601,7 +601,11 @@ final class AIStudyJobModelsTests: XCTestCase {
     /// scope 编码：集合语义（章节序无关）、scope_json kind 判别、
     /// round-trip 保真。
     func testScopeCodableNormalizedEncoding() throws {
+        // .sortedKeys：字节级相等断言只在排序键编码下确定；
+        // 裸 JSONEncoder 的 keyed-container 键序不稳定（此测试曾
+        // 因 kind/chapterKeys 序抖动 flaky 失败）。
         let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
         let decoder = JSONDecoder()
 
         // 集合语义：不同序编码同形
