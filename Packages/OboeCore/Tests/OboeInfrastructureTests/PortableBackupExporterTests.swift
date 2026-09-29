@@ -26,13 +26,13 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(result.exportedAt, exportedAt)
         XCTAssertEqual(
             Set(result.recordCounts.keys),
-            Set(PortableBackupFormatV8.recordTypes)
+            Set(PortableBackupFormatV9.recordTypes)
         )
-        // 种子覆盖 v7 的 21 类（各 1 行）；v8 新增类型未播种为 0。
+        // 种子覆盖 v7 的 21 类（各 1 行）；v8/v9 新增类型未播种为 0。
         for type in Self.recordTypes {
             XCTAssertEqual(result.recordCounts[type], 1, "\(type) count")
         }
-        for type in PortableBackupFormatV8.recordTypes
+        for type in PortableBackupFormatV9.recordTypes
         where !Self.recordTypes.contains(type) {
             XCTAssertEqual(result.recordCounts[type], 0, "\(type) count")
         }
@@ -49,12 +49,13 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(manifest["checksumAlgorithm"] as? String, "sha256")
         XCTAssertEqual(
             manifest["recordOrder"] as? [String],
-            PortableBackupFormatV8.recordTypes
+            PortableBackupFormatV9.recordTypes
         )
         XCTAssertEqual(
             manifest["excludedScopes"] as? [String],
             PortableBackupFormat.excludedScopes
                 + PortableBackupFormatV8.additionalExcludedScopes
+                + PortableBackupFormatV9.additionalExcludedScopes
         )
 
         let bodyRecords = parsed.records.dropFirst().dropLast()
@@ -190,7 +191,7 @@ final class PortableBackupExporterTests: XCTestCase {
         XCTAssertEqual(result.recordCounts["deck"], 1)
         XCTAssertEqual(
             Set(result.recordCounts.keys),
-            Set(PortableBackupFormatV8.recordTypes)
+            Set(PortableBackupFormatV9.recordTypes)
         )
         XCTAssertEqual(result.recordCounts["inboxItem"], 0)
         XCTAssertEqual(result.recordCounts["inboxProcessingContext"], 0)

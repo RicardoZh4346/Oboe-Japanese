@@ -49,7 +49,7 @@ public actor PortableBackupExporter {
         self.snapshotCreatedHook = snapshotCreatedHook
     }
 
-    /// 默认导出当前协议版本（`PortableBackupFormat.currentVersion` = v8）。
+    /// 默认导出当前协议版本（`PortableBackupFormat.currentVersion` = v9）。
     public func export(
         appVersion: String,
         at exportedAt: Date = Date()
@@ -63,7 +63,7 @@ public actor PortableBackupExporter {
 
     /// 显式指定记录协议版本（设计 §14.1 registry）。只允许
     /// `PortableBackupFormatRegistry.isExportable` 放行的版本——
-    /// 当前默认 v8 + opt-in 的 v9；v1–v7 只能读入恢复，不可再生成。
+    /// 当前默认 v9；v1–v8 只能读入恢复，不可再生成。
     public func export(
         appVersion: String,
         at exportedAt: Date = Date(),

@@ -17,12 +17,11 @@ public enum PortableBackupPackageFormat {
     /// v8 包版本：v8 包恒携带 v8 记录流（合法版本对见
     /// `isSupportedVersionPair`）。
     public static let formatVersionV8 = 8
-    /// v9 包版本：v9 包恒携带 v9 记录流。可读入/恢复 + opt-in 导出
-    /// （`export(formatVersion:)` 显式传入）；默认包版本不变——v9
-    /// 默认切换是独立 gate。
+    /// v9 包版本：v9 包恒携带 v9 记录流。可读入/恢复；v0.7.5
+    /// （S22 RC 签核）起新导出即 v9——v8 只读不可再生成。
     public static let formatVersionV9 = 9
-    /// 当前默认包版本：v0.7.0（S30 签核）起新导出即 v8。
-    public static let formatVersion = formatVersionV8
+    /// 当前默认包版本：v0.7.5（S22 签核）起新导出即 v9。
+    public static let formatVersion = formatVersionV9
     /// 读取端可接受的最高包版本——超出即 `futurePackageVersion`。
     public static let maximumSupportedFormatVersion = formatVersionV9
     /// 全部已知包版本；之外的版本号报 `unsupportedPackageVersion`。
@@ -35,7 +34,7 @@ public enum PortableBackupPackageFormat {
     public static let checksumsEntryName = "checksums.json"
     public static let attachmentsDirectoryName = "attachments"
 
-    /// 内嵌 `records.ndjson` 遵循的记录流版本（当前默认 v8）。v7 的
+    /// 内嵌 `records.ndjson` 遵循的记录流版本（当前默认 v9）。v7 的
     /// 增量只在容器层（附件 sidecar + checksums），其记录契约与 v6
     /// 完全一致——故历史上存在 (7,6) 合法版本对。
     public static let recordsFormatVersion = PortableBackupFormat.currentVersion

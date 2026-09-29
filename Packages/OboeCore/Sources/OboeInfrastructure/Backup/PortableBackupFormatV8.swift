@@ -290,9 +290,8 @@ enum PortableBackupFormatRegistry {
     static let v8Version = 8
 
     /// v9 记录协议版本号（v0.7.5 S19，backup-v9-wire.md）：登记为可读
-    /// 恢复源 + opt-in 导出版本（`recordFormatVersion:` 显式传入）。
-    /// 默认导出仍由 `PortableBackupFormat.currentVersion` 控制——v9
-    /// 默认切换是独立 gate，不在本结构内决定。
+    /// 恢复源 + 当前默认导出版本（`PortableBackupFormat.currentVersion`
+    /// = 9——v0.7.5 S22 签核切换；v8 只读不可再生成）。
     static let v9Version = 9
 
     /// 恢复端可接受的最高记录协议版本——超出即判 future。
@@ -329,8 +328,8 @@ enum PortableBackupFormatRegistry {
     static let targetSpecificationByRecordType =
         PortableBackupFormatV9.specificationByRecordType
 
-    /// 导出允许的版本集合：当前默认版本 + opt-in 登记的 v9。
-    /// 早于当前默认的版本不可再生成——旧格式只能读不能写。
+    /// 导出允许的版本集合：当前默认版本（v9）。早于当前默认的版本
+    /// 不可再生成——旧格式只能读不能写。
     static func isExportable(version: Int) -> Bool {
         version == PortableBackupFormat.currentVersion || version == v9Version
     }

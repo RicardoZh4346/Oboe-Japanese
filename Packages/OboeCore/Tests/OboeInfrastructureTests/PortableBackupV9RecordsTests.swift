@@ -50,27 +50,26 @@ final class PortableBackupV9RecordsTests: XCTestCase {
         XCTAssertFalse(text.contains("ai_study_cache"))
     }
 
-    /// v9 不是可冒名顶替的旧版本：显式声明 v8 的导出仍是 v8。
-    /// （默认导出保持 v8 由 V8 套件 `testDefaultExportIsV8` 锁定。）
-    func testExplicitV8ExportStaysV8() async throws {
+    /// v9 起 v8 只读：显式声明 v8 的导出被拒绝（旧格式不可再生成；
+    /// 默认导出为 v9 由 V8 套件 `testDefaultExportIsV9` 锁定）。
+    func testExplicitV8ExportIsRejected() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source)
-        let backup = try await PortableBackupExporter(
-            database: source,
-            workingDirectoryURL: fixture.exportsURL
-        ).export(
-            appVersion: "test",
-            at: fixture.exportedAt,
-            recordFormatVersion: 8
-        )
-        let manifest = try XCTUnwrap(fixture.backupObjects(backup.url).first)
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 8)
-        XCTAssertEqual(
-            manifest["recordOrder"] as? [String],
-            PortableBackupFormatV8.recordTypes
-        )
+        do {
+            _ = try await PortableBackupExporter(
+                database: source,
+                workingDirectoryURL: fixture.exportsURL
+            ).export(
+                appVersion: "test",
+                at: fixture.exportedAt,
+                recordFormatVersion: 8
+            )
+            XCTFail("v8 记录版本不得再被生成")
+        } catch let error as PortableBackupExportError {
+            XCTAssertEqual(error, .unsupportedRecordFormatVersion(8))
+        }
     }
 
     // MARK: - round trip

@@ -8,28 +8,29 @@ import OboeDomain
 /// 元数据、lexical knowledge、Cloze 独立快照、Reader/Import/活用历史
 /// 的导出—恢复往返，以及排除红线和坏记录预检。
 ///
-/// v8 是 opt-in：默认导出仍是 v7，本套测试显式传
-/// `recordFormatVersion: 8` / `formatVersion: 8` 走新协议。
+/// v8 记录类型在当前协议（v9）下继续导出/恢复；v8 版本号本身自
+/// v0.7.5 起只读不可再生成（见 `testLegacyRecordFormatVersionIsNotExportable`）。
 final class PortableBackupV8RecordsTests: XCTestCase {
 
     // MARK: - 导出与记录序
 
-    /// v8 NDJSON：manifest 声明 v8、recordOrder/counts 覆盖全部 36 类
-    /// 记录、父先子后顺序逐对成立、v7 记录的相对顺序不漂移，且实际
-    /// 记录行严格按声明顺序排列。
-    func testV8ExportManifestAndRecordOrder() async throws {
+    /// 当前协议（v9）NDJSON：manifest 声明当前版本、recordOrder/counts
+    /// 覆盖全部 50 类记录、父先子后顺序逐对成立、v7 记录的相对顺序
+    /// 不漂移，且实际记录行严格按声明顺序排列。
+    func testCurrentExportManifestAndRecordOrder() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source)
-        let backup = try await fixture.exportV8(source)
+        let backup = try await fixture.exportCurrent(source)
 
         let objects = try fixture.backupObjects(backup.url)
         let manifest = try XCTUnwrap(objects.first)
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 8)
+        XCTAssertEqual(manifest["formatVersion"] as? Int,
+                       PortableBackupFormat.currentVersion)
         let recordOrder = try XCTUnwrap(manifest["recordOrder"] as? [String])
-        XCTAssertEqual(recordOrder, PortableBackupFormatV8.recordTypes)
-        XCTAssertEqual(recordOrder.count, 36)
+        XCTAssertEqual(recordOrder, PortableBackupFormatV9.recordTypes)
+        XCTAssertEqual(recordOrder.count, 50)
         let counts = try XCTUnwrap(manifest["counts"] as? [String: Any])
         XCTAssertEqual(Set(counts.keys), Set(recordOrder))
         let scopes = try XCTUnwrap(manifest["excludedScopes"] as? [String])
@@ -94,9 +95,9 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         XCTAssertEqual(objects.last?["recordType"] as? String, "footer")
     }
 
-    /// 默认导出即 v8：v0.7.0 起 currentVersion=8，记录序覆盖全部
-    /// 36 类（数据为空的类型照常进 recordOrder/counts）。
-    func testDefaultExportIsV8() async throws {
+    /// 默认导出即 v9：v0.7.5 起 currentVersion=9，记录序覆盖全部
+    /// 50 类（数据为空的类型照常进 recordOrder/counts）。
+    func testDefaultExportIsV9() async throws {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
@@ -107,22 +108,23 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         ).export(appVersion: "test", at: fixture.exportedAt)
         let objects = try fixture.backupObjects(backup.url)
         let manifest = try XCTUnwrap(objects.first)
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 8)
+        XCTAssertEqual(manifest["formatVersion"] as? Int, 9)
         XCTAssertEqual(
             manifest["recordOrder"] as? [String],
-            PortableBackupFormatV8.recordTypes
+            PortableBackupFormatV9.recordTypes
         )
         XCTAssertEqual(
             manifest["excludedScopes"] as? [String],
             PortableBackupFormat.excludedScopes
                 + PortableBackupFormatV8.additionalExcludedScopes
+                + PortableBackupFormatV9.additionalExcludedScopes
         )
     }
 
-    /// 早于当前默认的版本不可再生成：v6/v7 opt-in 都必须报错
+    /// 早于当前默认的版本不可再生成：v6/v7/v8 opt-in 都必须报错
     /// 而不是静默降级。
     func testLegacyRecordFormatVersionIsNotExportable() async throws {
-        for version in [6, 7] {
+        for version in [6, 7, 8] {
             let fixture = try Fixture()
             defer { fixture.remove() }
             let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
@@ -155,7 +157,7 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source)
-        let backup = try await fixture.exportV8(source)
+        let backup = try await fixture.exportCurrent(source)
         let text = try String(contentsOf: backup.url, encoding: .utf8)
 
         // 表名不得作为记录类型出现。
@@ -192,14 +194,16 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source)
-        let backup = try await fixture.exportV8(source)
+        let backup = try await fixture.exportCurrent(source)
 
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
         try await fixture.seedCurrent(current)
         let prepared = try await fixture.preparer(current: current)
             .prepare(fileURL: backup.url)
-        XCTAssertEqual(prepared.sourceFormatVersion, 8)
-        XCTAssertEqual(prepared.preparedFormatVersion, 8)
+        XCTAssertEqual(prepared.sourceFormatVersion,
+                       PortableBackupFormat.currentVersion)
+        XCTAssertEqual(prepared.preparedFormatVersion,
+                       PortableBackupFormat.currentVersion)
         XCTAssertEqual(prepared.backup.recordCounts["readerDocument"], 1)
 
         let queue = try DatabaseQueue(path: prepared.temporaryDatabaseURL.path)
@@ -414,7 +418,7 @@ final class PortableBackupV8RecordsTests: XCTestCase {
             let fixture = try Fixture()
             let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
             try await fixture.seed(source)
-            let backup = try await fixture.exportV8(source)
+            let backup = try await fixture.exportCurrent(source)
             let corruptURL = fixture.uniqueURL("corrupt-\(name).oboe-backup")
             try rewriteBackup(backup.url, to: corruptURL) { objects in
                 let index = objects.firstIndex {
@@ -560,7 +564,7 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         defer { fixture.remove() }
         let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
         try await fixture.seed(source)
-        let backup = try await fixture.exportV8(source)
+        let backup = try await fixture.exportCurrent(source)
         let corruptedURL = fixture.uniqueURL("\(name).oboe-backup")
         try rewriteBackup(backup.url, to: corruptedURL, transform: transform)
         let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
@@ -595,7 +599,7 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         let export = try await exporter.export(
             appVersion: "8.0-test",
             at: fixture.exportedAt,
-            formatVersion: 8
+            formatVersion: 9
         )
 
         let files = try fixture.unzip(export.url)
@@ -603,11 +607,11 @@ final class PortableBackupV8RecordsTests: XCTestCase {
             JSONSerialization.jsonObject(with: files["manifest.json"]!)
                 as? [String: Any]
         )
-        XCTAssertEqual(manifest["formatVersion"] as? Int, 8)
-        XCTAssertEqual(manifest["recordFormatVersion"] as? Int, 8)
+        XCTAssertEqual(manifest["formatVersion"] as? Int, 9)
+        XCTAssertEqual(manifest["recordFormatVersion"] as? Int, 9)
         XCTAssertEqual(
             manifest["recordOrder"] as? [String],
-            PortableBackupFormatV8.recordTypes
+            PortableBackupFormatV9.recordTypes
         )
         let scopes = try XCTUnwrap(manifest["excludedScopes"] as? [String])
         XCTAssertTrue(scopes.contains("readerContent"))
@@ -625,7 +629,8 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         try await fixture.seedCurrent(current)
         let prepared = try await fixture.preparer(current: current)
             .preparePackage(fileURL: export.url)
-        XCTAssertEqual(prepared.sourceFormatVersion, 8)
+        XCTAssertEqual(prepared.sourceFormatVersion,
+                       PortableBackupFormat.currentVersion)
         let queue = try DatabaseQueue(path: prepared.temporaryDatabaseURL.path)
         defer { try? queue.close() }
         try await queue.read { db in
@@ -664,7 +669,7 @@ final class PortableBackupV8RecordsTests: XCTestCase {
         let export = try await exporter.export(
             appVersion: "8.0-test",
             at: fixture.exportedAt,
-            formatVersion: 8
+            formatVersion: 9
         )
         for (packageVersion, recordVersion) in [(8, 6), (7, 8), (8, 7)] {
             let mutatedURL = fixture.uniqueURL(
@@ -840,14 +845,14 @@ private extension PortableBackupV8RecordsTests {
             )
         }
 
-        func exportV8(_ database: OboeDatabase) async throws -> PortableBackupExport {
+        func exportCurrent(_ database: OboeDatabase) async throws -> PortableBackupExport {
             try await PortableBackupExporter(
                 database: database,
                 workingDirectoryURL: exportsURL
             ).export(
                 appVersion: "test",
                 at: exportedAt,
-                recordFormatVersion: 8
+                recordFormatVersion: PortableBackupFormat.currentVersion
             )
         }
 

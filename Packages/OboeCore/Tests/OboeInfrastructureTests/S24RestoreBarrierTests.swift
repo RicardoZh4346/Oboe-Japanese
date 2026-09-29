@@ -869,7 +869,7 @@ final class S24RestoreBarrierTests: XCTestCase {
                 ).export(
                     appVersion: "test",
                     at: clock,
-                    recordFormatVersion: 8
+                    recordFormatVersion: 9
                 )
                 let downgraded = iter.appendingPathComponent(
                     "backup-v\(version).ndjson"
@@ -949,7 +949,7 @@ final class S24RestoreBarrierTests: XCTestCase {
         let exported = try await PortableBackupExporter(
             database: source,
             workingDirectoryURL: iter.appendingPathComponent("e")
-        ).export(appVersion: "test", at: clock, recordFormatVersion: 8)
+        ).export(appVersion: "test", at: clock, recordFormatVersion: 9)
         try await source.close()
         let bumped = iter.appendingPathComponent("v99.ndjson")
         try rewriteBackup(exported.url, to: bumped) { objects in
@@ -1063,7 +1063,7 @@ final class S24RestoreBarrierTests: XCTestCase {
         )
         _ = try await cards.commitSentence(commit, capture: nil)
 
-        // v8 备份（reader 元数据随行；blocks/assets 不导出）。
+        // v9 备份（reader 元数据随行；blocks/assets 不导出）。
         let exportsURL = root.appendingPathComponent("e2e-exports")
         let package = try await PortableBackupPackageExporter(
             database: database,
@@ -1071,7 +1071,7 @@ final class S24RestoreBarrierTests: XCTestCase {
                 rootDirectoryURL: root.appendingPathComponent("e2e-images")
             ),
             workingDirectoryURL: exportsURL
-        ).export(appVersion: "test", at: clock, formatVersion: 8)
+        ).export(appVersion: "test", at: clock, formatVersion: 9)
 
         // 新库（模拟另一台设备/重装）：无 ReaderFiles 目录。
         let deviceRoot = root.appendingPathComponent(

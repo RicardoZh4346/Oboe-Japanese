@@ -3,9 +3,9 @@ import Foundation
 public enum PortableBackupFormat {
     public static let identifier = "oboe-portable-backup"
     /// 记录协议默认版本（D05）：外层 ZIP 包格式与记录契约共用本值。
-    /// v0.7.0（S23/S30 签核）起默认为 v8；v1–v7 备份继续可读，
+    /// v0.7.5（S22 签核）起默认为 v9；v1–v8 备份继续可读，
     /// 旧版本不可再生成（`PortableBackupFormatRegistry.isExportable`）。
-    public static let currentVersion = 8
+    public static let currentVersion = 9
     public static let fileExtension = "oboe-backup"
     public static let checksumAlgorithm = "sha256"
 

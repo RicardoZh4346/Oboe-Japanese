@@ -49,7 +49,40 @@ func rewriteBackup(
 /// additionally lose the Inbox records, `excludedScopes`, and (for v1) the
 /// note `source_ref` column.
 func downgradeBackupToLegacyFormat(_ objects: inout [[String: Any]], version: Int) {
-    precondition((1...7).contains(version), "downgrade only produces v1–v7 files")
+    precondition((1...8).contains(version), "downgrade only produces v1–v8 files")
+
+    // v9 → v8：剥离 v9 新增记录类型（学习单元/翻译/AI 作业等 14 类）
+    // 与 readerDocument/sourceContext 的 v9 新增列，manifest 的
+    // recordOrder/counts/excludedScopes 回退到 v8 口径。
+    let v9OnlyTypes = Set(PortableBackupFormatV9.recordTypes)
+        .subtracting(PortableBackupFormatV8.recordTypes)
+    for index in objects.indices where objects[index]["recordType"] as? String == "manifest" {
+        if var recordOrder = objects[index]["recordOrder"] as? [String] {
+            recordOrder.removeAll { v9OnlyTypes.contains($0) }
+            objects[index]["recordOrder"] = recordOrder
+        }
+        if var counts = objects[index]["counts"] as? [String: Any] {
+            for key in v9OnlyTypes { counts.removeValue(forKey: key) }
+            objects[index]["counts"] = counts
+        }
+        objects[index]["excludedScopes"] = PortableBackupFormat.excludedScopes
+            + PortableBackupFormatV8.additionalExcludedScopes
+    }
+    objects.removeAll {
+        v9OnlyTypes.contains($0["recordType"] as? String ?? "")
+    }
+    for index in objects.indices where objects[index]["recordType"] as? String == "readerDocument" {
+        for key in PortableBackupFormatV9.readerDocumentColumnsAddedInV9 {
+            objects[index].removeValue(forKey: key)
+        }
+    }
+    for index in objects.indices where objects[index]["recordType"] as? String == "sourceContext" {
+        for key in PortableBackupFormatV9.sourceContextColumnsAddedInV9 {
+            objects[index].removeValue(forKey: key)
+        }
+    }
+    objects[0]["formatVersion"] = version
+    if version == 8 { return }
 
     // v8 → v7：剥离 v8 新增记录类型与 sourceContext 的 Reader 定位列，
     // manifest 的 recordOrder/counts/excludedScopes 一并回退到 v7 口径。

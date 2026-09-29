@@ -83,9 +83,8 @@ public actor PortableBackupPackageExporter {
         self.snapshotCreatedHook = snapshotCreatedHook
     }
 
-    /// `formatVersion` 默认 v8（v0.7.0 起）；显式传 7 仍可产出
-    /// (7,7) 版本对包供兼容测试/内部验证，显式传 9 产出 opt-in 的
-    /// (9,9) 记录流包——导出端只写合法对，见
+    /// `formatVersion` 默认 v9（v0.7.5 起）；显式传 7 仍可产出
+    /// (7,7) 版本对包供兼容测试/内部验证——导出端只写合法对，见
     /// `PortableBackupPackageFormat.isSupportedVersionPair`。
     public func export(
         appVersion: String,
