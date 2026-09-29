@@ -191,4 +191,95 @@ final class SceneNavigationStateTests: XCTestCase {
         XCTAssertNil(state.selectedInboxItemID)
         XCTAssertNil(state.selectedSettingsRoute)
     }
+
+    // MARK: - v0.7.5 S18 跨 Feature 路由
+
+    /// Reader → Deck：openDeck 切到 decks section、选中 sidebar 条目、
+    /// 三栏全显（regular），同时向 compact 栈压入 deckID（详情页由
+    /// DecksView 的 navigationDestination 解析）。
+    func testOpenDeckSelectsSidebarAndPushesPath() {
+        let state = SceneNavigationState()
+        state.selectNote(id: UUID(), kind: .vocabulary)
+        let deckID = UUID()
+
+        state.openDeck(deckID)
+
+        XCTAssertEqual(state.section, .decks)
+        XCTAssertEqual(state.selectedDeck, .deck(deckID))
+        XCTAssertNil(state.selectedNoteID)
+        XCTAssertNil(state.selectedNoteKind)
+        XCTAssertEqual(state.splitVisibility, .all)
+        XCTAssertEqual(state.preferredCompactColumn, .sidebar)
+        XCTAssertEqual(state.decksPath.count, 1)
+    }
+
+    /// openDeck 清掉旧栈再压目标——重复跳转不叠加历史深度。
+    func testOpenDeckReplacesExistingPath() {
+        let state = SceneNavigationState()
+        let first = UUID()
+        let second = UUID()
+
+        state.openDeck(first)
+        state.openDeck(second)
+
+        XCTAssertEqual(state.decksPath.count, 1)
+        XCTAssertEqual(state.selectedDeck, .deck(second))
+    }
+
+    /// Deck → Reader：openReaderDocument 切到 reader section、记录
+    /// detail 列选择、两栏 split，同时向 compact 栈压入 documentID。
+    func testOpenReaderDocumentSelectsAndPushesPath() {
+        let state = SceneNavigationState()
+        state.selectTab(.decks)
+        let documentID = UUID()
+
+        state.openReaderDocument(documentID)
+
+        XCTAssertEqual(state.section, .reader)
+        XCTAssertEqual(state.selectedReaderDocumentID, documentID)
+        XCTAssertEqual(state.splitVisibility, .doubleColumn)
+        XCTAssertEqual(state.preferredCompactColumn, .detail)
+        XCTAssertEqual(state.readerPath.count, 1)
+    }
+
+    /// Reader 区内部点行：只记当前文档，不改 section、不动栈。
+    func testSelectReaderDocumentKeepsSectionAndPath() {
+        let state = SceneNavigationState()
+        state.selectTab(.reader)
+        let documentID = UUID()
+
+        state.selectReaderDocument(id: documentID)
+
+        XCTAssertEqual(state.section, .reader)
+        XCTAssertEqual(state.selectedReaderDocumentID, documentID)
+        XCTAssertTrue(state.readerPath.isEmpty)
+
+        state.selectReaderDocument(id: nil)
+        XCTAssertNil(state.selectedReaderDocumentID)
+    }
+
+    /// 文档删除：选中的是该文档 → 清空；别的文档 → 保留。
+    func testReaderDocumentDeletionClearsOnlyMatchingSelection() {
+        let state = SceneNavigationState()
+        let documentID = UUID()
+        state.selectReaderDocument(id: documentID)
+
+        state.readerDocumentWasDeleted(UUID())
+        XCTAssertEqual(state.selectedReaderDocumentID, documentID)
+
+        state.readerDocumentWasDeleted(documentID)
+        XCTAssertNil(state.selectedReaderDocumentID)
+    }
+
+    /// 世代变更清空 Reader 选择与栈——旧实体引用不得带入新容器。
+    func testGenerationChangeClearsReaderState() {
+        let state = SceneNavigationState()
+        let documentID = UUID()
+        state.openReaderDocument(documentID)
+
+        state.databaseGenerationDidChange(to: 1)
+
+        XCTAssertNil(state.selectedReaderDocumentID)
+        XCTAssertTrue(state.readerPath.isEmpty)
+    }
 }

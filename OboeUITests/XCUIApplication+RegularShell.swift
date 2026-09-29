@@ -300,6 +300,13 @@ extension XCUIApplication {
             selectSidebarDeck(named: name, file: file, line: line)
             return
         }
+        // S18：compact TabView 懒挂载——牌组列表只在选中该 Tab 后
+        // 进入无障碍树。openDeck 语义是「从任意位置打开牌组」，
+        // 故先切 Tab（已选中时等价于 pop 回列表根，再点名行）。
+        let decksTab = tabBars.buttons["牌组"]
+        if decksTab.waitForExistence(timeout: 3) {
+            decksTab.tap()
+        }
         let row = staticTexts[name]
         revealElement(row)
         XCTAssertTrue(
@@ -513,6 +520,10 @@ extension XCUIApplication {
         var containers = collectionViews.allElementsBoundByIndex
         containers += tables.allElementsBoundByIndex
         containers += scrollViews.allElementsBoundByIndex
+        // S18：观察流驱动的列表重载会在「枚举→读 frame」的间隙
+        // 卸载容器（lazy query 元素读到已消失的快照即断言失败）——
+        // 先滤掉不可解析者，把竞态窗口收窄到可忽略范围。
+        containers = containers.filter { $0.exists }
         // 目标可能多匹配（同名文本同时挂在 content/detail 列）——
         // 取 firstMatch 再读 frame，否则 snapshot 取单元素直接失败。
         let single = element.firstMatch
@@ -616,7 +627,18 @@ extension XCUIApplication {
             NSPredicate(format: "label CONTAINS %@", "已正式保存")
         ).firstMatch
         let ok = tapUntil(save) { saved.exists }
-        XCTAssertTrue(ok, "正式保存未生效（\(kind)）", file: file, line: line)
+        if !ok {
+            // S18：状态行挂在表单顶部 Section——滚到底部「正式保存」
+            // 按钮后已被 List 卸载（提交本身已落库，只是断言看不到）。
+            // 向下扫回顶部让状态行重新挂载，再判定一次。
+            revealElementBySwipingDown(saved, requireHittable: false, passes: 6)
+        }
+        XCTAssertTrue(
+            ok || saved.exists,
+            "正式保存未生效（\(kind)）",
+            file: file,
+            line: line
+        )
     }
 
     /// 对容器做「下扫」（露出上方内容）。

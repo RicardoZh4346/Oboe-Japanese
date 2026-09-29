@@ -16,13 +16,17 @@ import Observation
 @MainActor
 @Observable
 final class ReaderLibraryViewModel {
-    /// 行模型：文档元数据 + 覆盖率徽章（可选快照）。
+    /// 行模型：文档元数据 + 覆盖率徽章（可选快照）+ 学习牌组
+    /// 绑定（v0.7.5 S18——有绑定即可跳「学习牌组」）。
     struct Row: Identifiable, Equatable {
         let document: ReaderDocumentMetadata
         /// unique 口径「已知或学习中」覆盖率（0…1）；nil = 无快照。
         let coverageFraction: Double?
         /// 快照是 partial（analyzed < total）时徽章弱化显示。
         let coverageIsPartial: Bool
+        /// 绑定的学习牌组 id（`reader_documents.study_deck_id`；
+        /// nil = 未绑定）。
+        var studyDeckID: UUID?
         var id: UUID { document.id }
     }
 
@@ -46,7 +50,13 @@ final class ReaderLibraryViewModel {
     private let workGate: RestorationWorkGate?
     /// S24 缺原文重链服务（hash 确认 + 稳定 ID 重建在包内）。
     private let relinkService: (any ReaderRelinking)?
+    /// v0.7.5 S18：学习表面观察流——绑定增删/文档集合变化驱动
+    /// 行级同步（不重跑分析）。
+    private let learningProgress: (any LearningProgressProviding)?
     private let now: @Sendable () -> Date
+
+    /// documentID → 绑定的学习牌组 id（观察流载荷直接落盘）。
+    private(set) var studyDeckByDocument: [UUID: UUID] = [:]
 
     init(
         repository: any ReaderDocumentStore,
@@ -55,6 +65,7 @@ final class ReaderLibraryViewModel {
         coverage: (any ReaderCoverageProviding)? = nil,
         workGate: RestorationWorkGate? = nil,
         relink: (any ReaderRelinking)? = nil,
+        learningProgress: (any LearningProgressProviding)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
@@ -63,6 +74,7 @@ final class ReaderLibraryViewModel {
         self.coverage = coverage
         self.workGate = workGate
         self.relinkService = relink
+        self.learningProgress = learningProgress
         self.now = now
     }
 
@@ -78,8 +90,46 @@ final class ReaderLibraryViewModel {
             coverage: dependencies.coverage,
             workGate: dependencies.workGate,
             relink: dependencies.relink,
+            learningProgress: dependencies.learningProgress,
             now: now
         )
+    }
+
+    /// S18：订阅共享学习表面流——发射即「绑定/文档集合可能变」，
+    /// 仅按载荷差异更新行（绑定变化 → 就地补 studyDeckID；文档
+    /// 集合变化 → 重新拉取行）。不触发任何分析/写路径。
+    func observeLearningSurface() async {
+        guard let learningProgress else { return }
+        do {
+            for try await update in learningProgress.observeProgress() {
+                guard !Task.isCancelled else { return }
+                let links = Dictionary(
+                    uniqueKeysWithValues: update.studyDeckLinks.map {
+                        ($0.documentID, $0.deckID)
+                    }
+                )
+                if links != studyDeckByDocument {
+                    studyDeckByDocument = links
+                    patchStudyDeckIDs()
+                }
+                let currentIDs = Set(rows.map(\.document.id))
+                if update.readerDocumentIDs != currentIDs {
+                    await refresh()
+                }
+            }
+        } catch is CancellationError {
+        } catch {
+            // 失流降级为手动刷新（refreshable 仍在）。
+        }
+    }
+
+    /// 把最新绑定映射写回已渲染行（不重建 document/覆盖率字段）。
+    private func patchStudyDeckIDs() {
+        rows = rows.map { row in
+            var patched = row
+            patched.studyDeckID = studyDeckByDocument[row.document.id]
+            return patched
+        }
     }
 
     /// 恢复屏障登记（S24）：把长任务交给闸门。闸门开着 → 登记后
@@ -130,7 +180,8 @@ final class ReaderLibraryViewModel {
                 var row = Row(
                     document: document,
                     coverageFraction: nil,
-                    coverageIsPartial: false
+                    coverageIsPartial: false,
+                    studyDeckID: studyDeckByDocument[document.id]
                 )
                 if let snapshot = try? await coverage?
                     .documentSnapshot(documentID: document.id) {
@@ -138,7 +189,8 @@ final class ReaderLibraryViewModel {
                         document: document,
                         coverageFraction: snapshot
                             .uniqueKnownOrLearningCoverage,
-                        coverageIsPartial: snapshot.isPartial
+                        coverageIsPartial: snapshot.isPartial,
+                        studyDeckID: studyDeckByDocument[document.id]
                     )
                 }
                 rows.append(row)
@@ -222,7 +274,8 @@ final class ReaderLibraryViewModel {
         rows[index] = Row(
             document: mutate(rows[index].document),
             coverageFraction: rows[index].coverageFraction,
-            coverageIsPartial: rows[index].coverageIsPartial
+            coverageIsPartial: rows[index].coverageIsPartial,
+            studyDeckID: rows[index].studyDeckID
         )
     }
 

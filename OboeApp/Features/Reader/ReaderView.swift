@@ -36,17 +36,22 @@ struct ReaderView: View {
     @State private var translationModel: ReaderTranslationViewModel?
     /// 模式切换/外部跳转下发的滚动锚（块序；消费后清零）。
     @State private var scrollAnchor: Int?
+    /// v0.7.5 S18：工具栏「学习牌组」按钮 → 跨区路由到 Decks 区
+    /// （`SceneNavigationState.openDeck`）。nil = 隐藏入口。
+    private let onOpenDeck: ((UUID) -> Void)?
 
     init(
         model: ReaderDocumentViewModel,
         mining: ReaderMiningDependencies? = nil,
         aiStudy: ReaderAIStudyDependencies? = nil,
-        translation: ReaderTranslationDependencies? = nil
+        translation: ReaderTranslationDependencies? = nil,
+        onOpenDeck: ((UUID) -> Void)? = nil
     ) {
         _model = State(initialValue: model)
         self.mining = mining
         self.aiStudy = aiStudy
         self.translation = translation
+        self.onOpenDeck = onOpenDeck
         _translationModel = State(
             initialValue: translation.map {
                 ReaderTranslationViewModel(dependencies: $0)
@@ -238,6 +243,16 @@ struct ReaderView: View {
                     }
                     .accessibilityIdentifier("reader-ai-study-button")
                 }
+                // S18：已绑定学习牌组 → 「打开牌组」入口（跨区
+                // 路由由壳层回调执行）。
+                if let onOpenDeck, let deckID = model.studyDeckID {
+                    Button {
+                        onOpenDeck(deckID)
+                    } label: {
+                        Label("学习牌组", systemImage: "rectangle.stack")
+                    }
+                    .accessibilityIdentifier("reader-open-study-deck")
+                }
                 if mining != nil {
                     Button {
                         isBatchSelecting.toggle()
@@ -352,6 +367,9 @@ struct ReaderView: View {
             }
         }
         .task { await model.load() }
+        // S18：绑定变化（AI 学习建组/牌组删除 SET NULL/恢复替换）
+        // 经共享流驱动——只重取绑定单行，不触发任何分析。
+        .task { await model.observeLearningSurface() }
         // S17：章块集合变化（载入/切章/重链后重新取块）→ 译文
         // 水合——纯本地行重锚，零网络。
         .onChange(of: model.blocks, initial: true) { _, _ in

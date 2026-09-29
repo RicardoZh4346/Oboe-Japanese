@@ -72,19 +72,32 @@ final class ReaderDocumentViewModel {
     private let repository: any ReaderDocumentStore
     private let morphology: (any JapaneseMorphologyService)?
     private let tokenStates: (any ReaderTokenStateProvider)?
+    /// v0.7.5 S18：绑定读门面 + 学习表面流——「打开学习牌组」
+    /// 入口的数据源。
+    private let studyDecks: (any StudyDeckSurfacing)?
+    private let learningProgress: (any LearningProgressProviding)?
     private let now: @Sendable () -> Date
+
+    /// v0.7.5 S18：本文档绑定的学习牌组 id（nil = 未绑定/依赖
+    /// 缺席）。观察流发射即重取——AI 学习确认建组后工具栏按钮
+    /// 无需重开文档即出现。
+    private(set) var studyDeckID: UUID?
 
     init(
         documentID: UUID,
         repository: any ReaderDocumentStore,
         morphology: (any JapaneseMorphologyService)? = nil,
         tokenStates: (any ReaderTokenStateProvider)? = nil,
+        studyDecks: (any StudyDeckSurfacing)? = nil,
+        learningProgress: (any LearningProgressProviding)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.documentID = documentID
         self.repository = repository
         self.morphology = morphology
         self.tokenStates = tokenStates
+        self.studyDecks = studyDecks
+        self.learningProgress = learningProgress
         self.now = now
     }
 
@@ -99,7 +112,33 @@ final class ReaderDocumentViewModel {
             repository: dependencies.repository,
             morphology: dependencies.morphology,
             tokenStates: dependencies.tokenStates,
+            studyDecks: dependencies.studyDecks,
+            learningProgress: dependencies.learningProgress,
             now: now
+        )
+    }
+
+    /// S18：订阅共享学习表面流——发射即重取本文档的牌组绑定
+    /// （单行 SELECT，纯读路径；不触发分析）。
+    func observeLearningSurface() async {
+        guard let learningProgress else { return }
+        do {
+            for try await _ in learningProgress.observeProgress() {
+                guard !Task.isCancelled else { return }
+                await refreshStudyDeckBinding()
+            }
+        } catch is CancellationError {
+        } catch {
+            // 失流静默——绑定徽标退化为「只随 load 更新」。
+        }
+    }
+
+    /// 重取本文档的 study_deck_id（含「由有到无」——牌组删除
+    /// 时 FK SET NULL，绑定随之消失）。
+    private func refreshStudyDeckBinding() async {
+        guard let studyDecks else { return }
+        studyDeckID = try? await studyDecks.studyDeckID(
+            forDocument: documentID
         )
     }
 
@@ -146,6 +185,7 @@ final class ReaderDocumentViewModel {
             try await selectChapter(
                 index: targetChapter, keepRestore: true
             )
+            await refreshStudyDeckBinding()
             try? await repository.touchLastOpened(
                 id: documentID, at: now()
             )

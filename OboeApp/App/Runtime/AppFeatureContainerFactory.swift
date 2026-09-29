@@ -279,6 +279,14 @@ enum AppFeatureContainerFactory {
         // Reader deps——准备/预览/确认 UI 的全部持久化与派发
         // 组件按世代绑定，恢复替换时随容器整体重建。
         let learningUnits = GRDBLearningUnitRepository(database: database)
+        // S18：全库进度投影 + 观察流、文档↔牌组绑定门面各一只，
+        // 经 shared 注入所有壳层（同实例共享，不各自建流）。
+        let learningProgress = GRDBLearningProgressRepository(
+            database: database
+        )
+        let readerStudyDecks = GRDBReaderStudyDeckRepository(
+            database: database
+        )
         let aiStudyDependencies = ReaderAIStudyDependencies(
             store: GRDBAIStudyJobStore(pool: database.pool),
             applier: AIStudyApplyService(
@@ -363,7 +371,9 @@ enum AppFeatureContainerFactory {
                 clozeRepository: GRDBClozeRepository(database: database),
                 customStudyRepository: customStudyRepository,
                 customStudyService: CustomStudyService(),
-                learningUnits: learningUnits
+                learningUnits: learningUnits,
+                learningProgress: learningProgress,
+                studyDecks: readerStudyDecks
             ),
             dictionary: DictionaryFeatureDependencies(
                 queryService: dictionaryQueryService
@@ -378,7 +388,9 @@ enum AppFeatureContainerFactory {
                 mining: miningDependencies,
                 relink: readerRelinkService,
                 workGate: workGate,
-                aiStudy: aiStudyDependencies
+                aiStudy: aiStudyDependencies,
+                learningProgress: learningProgress,
+                studyDecks: readerStudyDecks
             )
         )
         let runtime = RuntimeServices(

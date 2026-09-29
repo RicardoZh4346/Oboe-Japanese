@@ -47,6 +47,18 @@ struct DecksView: View {
     /// S09：专项学习驱动（详情页复习/专项入口透传）。
     private let customStudyRepository: (any CustomStudyRepository)?
     private let customStudyService: CustomStudyService?
+    /// S18：壳层持有的栈路径（`SceneNavigationState.decksPath`）——
+    /// `openDeck` 跨区路由把 deckID 压栈后由本栈解析。nil = 本地
+    /// 栈（测试/预览）。
+    private let externalPath: Binding<NavigationPath>?
+    /// S18：详情页文章覆盖区 → 打开绑定文档的跨区回调。
+    private let onOpenDocument: ((UUID) -> Void)?
+    /// externalPath 缺席时的本地栈路径。
+    @State private var localPath = NavigationPath()
+
+    private var pathBinding: Binding<NavigationPath> {
+        externalPath ?? $localPath
+    }
 
     init(
         service: DeckManagementService,
@@ -75,7 +87,11 @@ struct DecksView: View {
         clozeRepository: (any ClozeRepository)? = nil,
         inboxImageStore: InboxImageStore? = nil,
         customStudyRepository: (any CustomStudyRepository)? = nil,
-        customStudyService: CustomStudyService? = nil
+        customStudyService: CustomStudyService? = nil,
+        learningProgress: (any LearningProgressProviding)? = nil,
+        studyDecks: (any StudyDeckSurfacing)? = nil,
+        externalPath: Binding<NavigationPath>? = nil,
+        onOpenDocument: ((UUID) -> Void)? = nil
     ) {
         deckService = service
         self.vocabularyService = vocabularyService
@@ -104,17 +120,21 @@ struct DecksView: View {
         self.inboxImageStore = inboxImageStore
         self.customStudyRepository = customStudyRepository
         self.customStudyService = customStudyService
+        self.externalPath = externalPath
+        self.onOpenDocument = onOpenDocument
         _model = State(
             initialValue: DeckListModel(
                 service: service,
                 studyService: studyService,
-                historyService: historyService
+                historyService: historyService,
+                learningProgress: learningProgress,
+                studyDecks: studyDecks
             )
         )
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: pathBinding) {
             List {
                 Section {
                     NavigationLink {
@@ -168,7 +188,9 @@ struct DecksView: View {
                                 DeckRow(
                                     deck: deck,
                                     today: model.todayTasks(for: deck.id),
-                                    isPrimary: model.primaryDeckID == deck.id
+                                    isPrimary: model.primaryDeckID == deck.id,
+                                    learningProgress: model
+                                        .learningProgress(for: deck.id)
                                 )
                             }
                             .accessibilityIdentifier("deck-row-\(deck.id.uuidString)")
@@ -269,7 +291,8 @@ struct DecksView: View {
                     inboxImageStore: inboxImageStore,
                     dictionaryQueryService: dictionaryQueryService,
                     customStudyRepository: customStudyRepository,
-                    customStudyService: customStudyService
+                    customStudyService: customStudyService,
+                    onOpenDocument: onOpenDocument
                 )
             }
             .sheet(isPresented: $isPresentingCreate) {
@@ -320,7 +343,9 @@ struct DecksView: View {
                 Text(model.errorMessage ?? "未知错误")
             }
             .task {
-                await model.observeDecks()
+                // S18：model 自持观察任务（decks 摘要 + 学习表面流），
+                // 幂等——详情页内再次调用不重复订阅。
+                model.startObserving()
             }
         }
     }

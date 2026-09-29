@@ -69,7 +69,9 @@ struct RegularShell: View {
             initialValue: DeckListModel(
                 service: decks.deckService,
                 studyService: decks.studyService,
-                historyService: decks.historyService
+                historyService: decks.historyService,
+                learningProgress: container.shared.learningProgress,
+                studyDecks: container.shared.studyDecks
             )
         )
         _inboxModel = State(
@@ -107,7 +109,8 @@ struct RegularShell: View {
         // 不得继续持有旧世代的 service 引用。
         .id(container.generation)
         .task {
-            await deckModel.observeDecks()
+            // S18：model 自持两条观察流（摘要 + 学习表面），幂等。
+            deckModel.startObserving()
         }
         .onAppear {
             updateColumnVisibility(for: navigation.section)
@@ -257,7 +260,9 @@ struct RegularShell: View {
                         DeckRow(
                             deck: deck,
                             today: deckModel.todayTasks(for: deck.id),
-                            isPrimary: deckModel.primaryDeckID == deck.id
+                            isPrimary: deckModel.primaryDeckID == deck.id,
+                            learningProgress: deckModel
+                                .learningProgress(for: deck.id)
                         )
                         .tag(SidebarItem.decks(.deck(deck.id)))
                         .accessibilityIdentifier("sidebar-deck-\(deck.id.uuidString)")
@@ -358,6 +363,10 @@ struct RegularShell: View {
                     },
                     onDeleted: {
                         navigation.deckWasDeleted(deckID)
+                    },
+                    // S18：文章覆盖区点击 → 跨区打开绑定文档。
+                    onOpenDocument: { documentID in
+                        navigation.openReaderDocument(documentID)
                     },
                     contentRefreshToken: deckContentRevision
                 )
@@ -578,13 +587,19 @@ struct RegularShell: View {
                 // 选中该 section，与 compact 的 sheet 入口同一触发点。
                 openSettings: { navigation.selectTab(.settings) },
                 statisticsSource: today.statisticsSource,
-                readerAnalyticsSource: today.readerAnalyticsSource
+                readerAnalyticsSource: today.readerAnalyticsSource,
+                learningProgress: container.shared.learningProgress
             )
         case .reader:
             // S10 Reader：内部两栏 split（库列表 → 阅读页），与
             // compact 的 ReaderRootView 同一实现；S11 挖词编辑器
             // 服务集由容器闭包注入（readerWithEditorFactory）。
-            ReaderRootView(dependencies: container.readerWithEditorFactory)
+            // S18：scene 导航状态传入——列选择写回 selection、
+            // 「打开牌组」走跨区 reducer。
+            ReaderRootView(
+                dependencies: container.readerWithEditorFactory,
+                navigation: navigation
+            )
         case .settings, .inbox, .decks:
             // 不可达：这三个区走三栏分支。
             EmptyView()

@@ -13,6 +13,10 @@ struct ReaderLibraryView: View {
     /// regular 壳层下点行不 push——通过该回调交给壳层做列选择；
     /// compact 壳层下传 nil，行内嵌 NavigationLink push。
     private let selectInSplit: ((UUID) -> Void)?
+    /// v0.7.5 S18：行「打开学习牌组」→ 跨区路由到 Decks 区。
+    private let onOpenDeck: ((UUID) -> Void)?
+    /// v0.7.5 S18：文档删除后通知壳层清掉指向它的选择/栈引用。
+    private let onDocumentDeleted: ((UUID) -> Void)?
 
     @State private var showFileImporter = false
     @State private var showPasteSheet = false
@@ -31,10 +35,14 @@ struct ReaderLibraryView: View {
 
     init(
         model: ReaderLibraryViewModel,
-        selectInSplit: ((UUID) -> Void)? = nil
+        selectInSplit: ((UUID) -> Void)? = nil,
+        onOpenDeck: ((UUID) -> Void)? = nil,
+        onDocumentDeleted: ((UUID) -> Void)? = nil
     ) {
         _model = State(initialValue: model)
         self.selectInSplit = selectInSplit
+        self.onOpenDeck = onOpenDeck
+        self.onDocumentDeleted = onDocumentDeleted
     }
 
     var body: some View {
@@ -86,6 +94,7 @@ struct ReaderLibraryView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("阅读")
         .task { await model.refresh() }
+        .task { await model.observeLearningSurface() }
         .refreshable { await model.refresh() }
         .fileImporter(
             isPresented: $showFileImporter,
@@ -124,7 +133,10 @@ struct ReaderLibraryView: View {
         ) {
             Button("删除文档与本地文件", role: .destructive) {
                 if let document = deletingDocument {
-                    Task { await model.delete(document) }
+                    Task {
+                        await model.delete(document)
+                        onDocumentDeleted?(document.id)
+                    }
                 }
                 deletingDocument = nil
             }
@@ -208,6 +220,17 @@ struct ReaderLibraryView: View {
             }
         }
         .contextMenu {
+            // S18：已绑定学习牌组的文档可直接跳牌组详情。
+            if let deckID = row.studyDeckID, let onOpenDeck {
+                Button {
+                    onOpenDeck(deckID)
+                } label: {
+                    Label("打开学习牌组", systemImage: "rectangle.stack")
+                }
+                .accessibilityIdentifier(
+                    "reader-open-deck-\(row.document.id.uuidString)"
+                )
+            }
             if row.document.availability == .missing {
                 Button {
                     model.beginRelink(row.document)
@@ -262,6 +285,14 @@ private struct ReaderDocumentRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     coverageBadge
+                    // S18：已绑定学习牌组的文档给一个小徽标（行点击
+                    // 仍进阅读页；牌组入口在长按菜单）。
+                    if row.studyDeckID != nil {
+                        Image(systemName: "rectangle.stack.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("已绑定学习牌组")
+                    }
                 }
             }
             Spacer()

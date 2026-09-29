@@ -181,6 +181,7 @@
 		A01100000000000000000124 /* ReaderTranslationViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000124 /* ReaderTranslationViewModel.swift */; };
 		A01100000000000000000125 /* ReaderTranslationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01200000000000000000125 /* ReaderTranslationViews.swift */; };
 		C0DE00000000000000B005 /* ReaderTranslationViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE00000000000000B006 /* ReaderTranslationViewModelTests.swift */; };
+		C0DE00000000000000B007 /* DeckListModelObservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DE00000000000000B008 /* DeckListModelObservationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -383,6 +384,7 @@
 		A01200000000000000000124 /* ReaderTranslationViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTranslationViewModel.swift; sourceTree = "<group>"; };
 		A01200000000000000000125 /* ReaderTranslationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTranslationViews.swift; sourceTree = "<group>"; };
 		C0DE00000000000000B006 /* ReaderTranslationViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderTranslationViewModelTests.swift; sourceTree = "<group>"; };
+		C0DE00000000000000B008 /* DeckListModelObservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeckListModelObservationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -583,6 +585,7 @@
 				C0DE00000000000000B002 /* ReaderTextViewComposeTests.swift */,
 				C0DE00000000000000B004 /* ReaderAIStudyFlowModelTests.swift */,
 				C0DE00000000000000B006 /* ReaderTranslationViewModelTests.swift */,
+				C0DE00000000000000B008 /* DeckListModelObservationTests.swift */,
 			);
 			path = OboeAppTests;
 			sourceTree = "<group>";
@@ -941,6 +944,7 @@
 				C0DE00000000000000B001 /* ReaderTextViewComposeTests.swift in Sources */,
 				C0DE00000000000000B003 /* ReaderAIStudyFlowModelTests.swift in Sources */,
 				C0DE00000000000000B005 /* ReaderTranslationViewModelTests.swift in Sources */,
+				C0DE00000000000000B007 /* DeckListModelObservationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

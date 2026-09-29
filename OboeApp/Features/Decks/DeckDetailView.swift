@@ -37,6 +37,10 @@ struct DeckDetailView: View {
     /// regular 壳层：删除成功后通知壳层清空 sidebar/detail 选择；
     /// compact 下为 nil，仅 dismiss() 出栈。
     let onDeleted: (() -> Void)?
+    /// S18：文章覆盖区/行点击 → 壳层切到 Reader 区打开绑定文档
+    /// （`SceneNavigationState.openReaderDocument`）。nil = 无
+    /// 跨区路由（测试/预览）→ 覆盖区只读展示。
+    let onOpenDocument: ((UUID) -> Void)?
     /// regular 壳层 detail 列编辑后由壳层递增触发本页内容重取；
     /// compact 恒为 0。
     let contentRefreshToken: Int
@@ -83,6 +87,7 @@ struct DeckDetailView: View {
         customStudyService: CustomStudyService? = nil,
         onSelectNote: ((KnowledgePointSummary) -> Void)? = nil,
         onDeleted: (() -> Void)? = nil,
+        onOpenDocument: ((UUID) -> Void)? = nil,
         contentRefreshToken: Int = 0
     ) {
         self.deckID = deckID
@@ -111,6 +116,7 @@ struct DeckDetailView: View {
         self.customStudyService = customStudyService
         self.onSelectNote = onSelectNote
         self.onDeleted = onDeleted
+        self.onOpenDocument = onOpenDocument
         self.contentRefreshToken = contentRefreshToken
         _contentModel = State(
             initialValue: DeckContentModel(
@@ -160,6 +166,7 @@ struct DeckDetailView: View {
                     primaryDeckSection(deck: deck)
                     managementSection(deck: deck)
                     overviewSection(deck: deck)
+                    articleCoverageSection(deck: deck)
                     contentSection(deck: deck)
 
                     todaySection(deck: deck)
@@ -320,7 +327,31 @@ struct DeckDetailView: View {
                     moveBeforeDeletionSheet(for: deck)
                 }
                 .task(id: deckID) {
+                    // S18：幂等启动 model 观察——共享 model 已订阅时
+                    // no-op；AI 摘要/外部路由新建的 model 在此开始
+                    // 同步。model 里还没有该 deck（新建的专用 model
+                    // 或绑定刚建立尚未回流）时主动重取一次。
+                    model.startObserving()
+                    if !model.decks.contains(where: { $0.id == deckID }) {
+                        await model.refreshDecks()
+                    }
                     await contentModel.load()
+                }
+                .task(id: model.studyDeckLink(for: deckID)?.documentID) {
+                    // S18：绑定文档变化时登记覆盖率观察——观察流每次
+                    // 发射重算 watched 集合内文档的 coverage v2。
+                    guard let documentID = model
+                        .studyDeckLink(for: deckID)?.documentID
+                    else { return }
+                    await model.watchCoverage(for: documentID)
+                }
+                .onChange(of: model.contentSignature) { _, _ in
+                    // S18：学习表面发射（评级/启用切换/撤销/成员增删/
+                    // 跨窗口写）→ 内容列重取。首载由上面 deckID task
+                    // 负责，这里只追增量。
+                    Task {
+                        await contentModel.load()
+                    }
                 }
                 .task(id: contentRefreshToken) {
                     // regular 壳层 detail 列保存后由壳层令牌触发重取；
@@ -523,6 +554,96 @@ struct DeckDetailView: View {
                 Text("\(deck.cardCount)")
                     .accessibilityIdentifier("deck-card-count")
             }
+            // S18：词义数 = 经成员 Note 覆盖到的去重学习单元数；
+            // 进度 = 单元进度均值（契约 §5.1——空/全非词汇 deck
+            // 显示「—」而非 0%）。依赖缺席时整行隐藏。
+            if let progress = model.learningProgress(for: deck.id) {
+                LabeledContent("词义") {
+                    Text("\(progress.unitCount)")
+                        .accessibilityIdentifier("deck-meaning-count")
+                }
+                LabeledContent("学习进度") {
+                    Text(
+                        progress.progress.map {
+                            "\(Int(($0 * 100).rounded()))%"
+                        } ?? "—"
+                    )
+                    .accessibilityIdentifier("deck-learning-progress")
+                }
+                if progress.anomalousCardCount > 0 {
+                    Text("\(progress.anomalousCardCount) 张卡片进度数据待修复")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// S18 文章覆盖区：本牌组是某 Reader 文档的学习牌组时展示
+    /// 「文档标题 + coverage v2 覆盖%」——独立于牌组学习进度（一
+    /// 个是「文章里已解析词掌握比例」，一个是「牌组卡推进度」，
+    /// 口径刻意分开）。点击经 `onOpenDocument` 跨区路由到阅读页。
+    @ViewBuilder
+    private func articleCoverageSection(deck: DeckSummary) -> some View {
+        if let link = model.studyDeckLink(for: deck.id) {
+            Section("文章覆盖") {
+                let row = HStack(spacing: OboeTheme.Spacing.sm) {
+                    Image(systemName: "book")
+                        .foregroundStyle(OboeTheme.Colors.accent)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(link.documentTitle)
+                            .font(.subheadline.weight(.medium))
+                            .lineLimit(1)
+                        coverageLine(for: link.documentID)
+                    }
+                    Spacer()
+                    if onOpenDocument != nil {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
+                    }
+                }
+                if let onOpenDocument {
+                    Button {
+                        onOpenDocument(link.documentID)
+                    } label: {
+                        row
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(
+                        "deck-article-coverage-\(link.documentID.uuidString)"
+                    )
+                } else {
+                    row
+                }
+            }
+        }
+    }
+
+    /// coverage v2 活算结果的单行呈现：resolvedCoverage 为 nil
+    /// （无已解析词）→ 显示「尚无覆盖数据」而非 0%。
+    @ViewBuilder
+    private func coverageLine(for documentID: UUID) -> some View {
+        if let result = model.coverage(forDocumentID: documentID) {
+            // 部分分析（isPartial：还有块未跑过 morphology）时必须
+            // 带「·部分」标记——不冒充全书口径（同 Reader 列表行）。
+            Text(
+                result.resolvedCoverage.map {
+                    "文章覆盖率 \(Int(($0 * 100).rounded()))%"
+                        + (result.isPartial ? "·部分" : "")
+                } ?? "尚无覆盖数据"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier(
+                "deck-article-coverage-value-\(documentID.uuidString)"
+            )
+        } else {
+            Text("覆盖率计算中…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

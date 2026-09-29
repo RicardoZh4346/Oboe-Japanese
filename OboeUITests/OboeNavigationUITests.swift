@@ -1113,6 +1113,10 @@ final class OboeNavigationUITests: XCTestCase {
         app.terminate()
         app.launch()
         XCTAssertTrue(app.waitForShellReady(timeout: 5))
+        // compact 重启落在「今日」Tab——牌组列表懒挂载，先切过去。
+        if !app.isRegularShell {
+            app.selectPrimarySection("牌组")
+        }
         XCTAssertTrue(app.deckRow(named: "日语基础").waitForExistence(timeout: 5))
         app.openDeck(named: "日语基础")
 

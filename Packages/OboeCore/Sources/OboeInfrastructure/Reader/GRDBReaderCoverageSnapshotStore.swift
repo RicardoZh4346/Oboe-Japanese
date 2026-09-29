@@ -92,19 +92,36 @@ public struct ReaderCoverageSnapshotRow: Equatable, Sendable {
 ///   `resolvedUnique == 0` 时 three-coverage 列均为 0——展示层按
 ///   `Result.resolvedCoverage == nil` 口径处理。
 public enum GRDBReaderCoverageSnapshotStore {
-    /// 计算整文档 coverage v2 并**幂等**落一行快照。
-    ///
-    /// - Returns: 计算出的 `ReaderCoverageV2.Result` 与是否实际插行。
-    ///   `document` 不存在时抛 `ReaderTranslationError` 风格错误？
-    ///   不——抛 `DatabaseError`/`documentMissing` 见下。
-    @discardableResult
-    public static func recordDocumentSnapshot(
+    /// `projectDocumentCoverage` 的返回载荷：Coverage v2 结果 +
+    /// 快照写入所需的投影上下文（分母 unit 集合供知识指纹计算）。
+    public struct DocumentCoverageProjection: Equatable, Sendable {
+        /// 文档当前 `content_revision`。
+        public let contentRevision: Int
+        /// 分母 unit 集合（去重后）。
+        public let resolvedUnitIDs: Set<UUID>
+        /// 按 `coverage-resolved-sense-2.0.0` 算出的整文档结果。
+        public let result: ReaderCoverageV2.Result
+
+        public init(
+            contentRevision: Int,
+            resolvedUnitIDs: Set<UUID>,
+            result: ReaderCoverageV2.Result
+        ) {
+            self.contentRevision = contentRevision
+            self.resolvedUnitIDs = resolvedUnitIDs
+            self.result = result
+        }
+    }
+
+    /// 整文档 coverage v2 的活算投影（S18）：occurrence 分组 +
+    /// `knowledgeStates` + `ReaderCoverageV2.compute`——纯持久态
+    /// 重放，不触形态分析/AI/分词。文档不存在抛
+    /// `StoreError.documentMissing`；空分母经
+    /// `Result.resolvedCoverage == nil` 表达（不落 0%/100%）。
+    public static func projectDocumentCoverage(
         documentID: UUID,
-        dictionaryVersion: String,
-        morphologyVersion: String,
-        at date: Date = Date(),
         in db: Database
-    ) throws -> (result: ReaderCoverageV2.Result, inserted: Bool) {
+    ) throws -> DocumentCoverageProjection {
         let documentIDValue = DatabaseValueCodec.encode(documentID)
         guard let document = try Row.fetchOne(
             db,
@@ -199,25 +216,45 @@ public enum GRDBReaderCoverageSnapshotStore {
                 totalBlocks: totalBlocks
             )
         )
+        return DocumentCoverageProjection(
+            contentRevision: contentRevision,
+            resolvedUnitIDs: resolvedUnitIDs,
+            result: result
+        )
+    }
 
+    /// 计算整文档 coverage v2 并**幂等**落一行快照。
+    ///
+    /// - Returns: 计算出的 `ReaderCoverageV2.Result` 与是否实际插行。
+    ///   `document` 不存在时抛 `StoreError.documentMissing`。
+    @discardableResult
+    public static func recordDocumentSnapshot(
+        documentID: UUID,
+        dictionaryVersion: String,
+        morphologyVersion: String,
+        at date: Date = Date(),
+        in db: Database
+    ) throws -> (result: ReaderCoverageV2.Result, inserted: Bool) {
+        let projection = try projectDocumentCoverage(
+            documentID: documentID, in: db)
         let knowledgeRevision = try Self.knowledgeRevision(
-            unitIDs: unitIDs, in: db)
+            unitIDs: Array(projection.resolvedUnitIDs), in: db)
         let scopeHash = AIStudyScope.fullDocument.scopeHash
 
         let inserted = try Self.insertSnapshot(
             documentID: documentID,
-            documentIDSnapshot: documentIDValue,
+            documentIDSnapshot: DatabaseValueCodec.encode(documentID),
             scopeHash: scopeHash,
-            contentRevision: contentRevision,
+            contentRevision: projection.contentRevision,
             knowledgeRevision: knowledgeRevision,
             metricVersion: ReaderCoverageV2.metricVersion,
             dictionaryVersion: dictionaryVersion,
             morphologyVersion: morphologyVersion,
-            result: result,
+            result: projection.result,
             at: date,
             in: db
         )
-        return (result, inserted)
+        return (projection.result, inserted)
     }
 
     /// 文档快照史（新→旧）；`documentID` 传 nil 匹配孤儿快照

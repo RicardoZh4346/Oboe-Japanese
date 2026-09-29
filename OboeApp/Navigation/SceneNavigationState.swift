@@ -29,6 +29,12 @@ final class SceneNavigationState {
     var todayPath = NavigationPath()
     var decksPath = NavigationPath()
     var settingsPath = NavigationPath()
+    /// v0.7.5 S18：compact 壳层 Reader Tab 的栈路径——
+    /// `openReaderDocument` 在切 Tab 的同时把文档 id 压栈。
+    var readerPath = NavigationPath()
+    /// v0.7.5 S18：Reader 区当前选中/打开的文档——regular 壳层
+    /// 列选择 + compact push 共用的「当前文档」语义。
+    var selectedReaderDocumentID: UUID?
 
     /// Review 会话按 scope 缓存：壳层在 compact/regular 间切换或窗口
     /// resize 重建视图树时，页面内 @State model 会随树销毁——缓存保证
@@ -52,9 +58,11 @@ final class SceneNavigationState {
         selectedNoteKind = nil
         selectedInboxItemID = nil
         selectedSettingsRoute = nil
+        selectedReaderDocumentID = nil
         todayPath = NavigationPath()
         decksPath = NavigationPath()
         settingsPath = NavigationPath()
+        readerPath = NavigationPath()
         sessionCache.removeAll()
     }
 
@@ -112,6 +120,52 @@ final class SceneNavigationState {
     func selectNote(id: UUID, kind: KnowledgePointKind) {
         selectedNoteID = id
         selectedNoteKind = kind
+    }
+
+    // MARK: - v0.7.5 S18 跨 Feature 路由
+
+    /// Reader → Deck：打开某牌组详情。compact 壳层切到牌组 Tab 并
+    /// 把 deckID 压入该 Tab 的栈（DecksView 的
+    /// `navigationDestination(for: UUID.self)` 解析为详情页）；
+    /// regular 壳层选择 sidebar 条目、三栏全显、清空 detail 选择。
+    /// 目标牌组已删除时壳层自然落「牌组已不存在」占位——不做预取
+    /// 校验（deck 列表观察流会随后收敛）。
+    func openDeck(_ deckID: UUID) {
+        section = .decks
+        selectedDeck = .deck(deckID)
+        selectedNoteID = nil
+        selectedNoteKind = nil
+        splitVisibility = .all
+        preferredCompactColumn = .sidebar
+        decksPath = NavigationPath()
+        decksPath.append(deckID)
+    }
+
+    /// Deck → Reader：打开某文档阅读页。compact 切到阅读 Tab 并压
+    /// 栈；regular 切 section + 记录 detail 列选择（Reader 内部两栏
+    /// split 的 selection 绑定读它）。
+    func openReaderDocument(_ documentID: UUID) {
+        section = .reader
+        selectedReaderDocumentID = documentID
+        splitVisibility = .doubleColumn
+        preferredCompactColumn = .detail
+        readerPath = NavigationPath()
+        readerPath.append(documentID)
+    }
+
+    /// Reader 区内部的文档选择（用户在库里点行/regular 列选择）——
+    /// 记录当前文档但不改 section、不清栈。
+    func selectReaderDocument(id: UUID?) {
+        selectedReaderDocumentID = id
+    }
+
+    /// 文档被删除后的 reducer：清空指向该文档的选择与栈内引用。
+    /// 栈内引用无法定点移除——NavigationPath 不可按下标删除；栈中
+    /// 目标由 ReaderView 载入失败自然呈现「文档不存在」。
+    func readerDocumentWasDeleted(_ documentID: UUID) {
+        if selectedReaderDocumentID == documentID {
+            selectedReaderDocumentID = nil
+        }
     }
 
     /// 取 scope 对应的 Review 会话；无缓存时用 make 创建并缓存。

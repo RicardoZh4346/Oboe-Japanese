@@ -36,6 +36,10 @@ struct TodayView: View {
     /// S22：「阅读分析」页数据源；nil 时统计页不显示入口。
     /// 装配见 AppFeatureContainerFactory → AppReaderAnalyticsSource）。
     let readerAnalyticsSource: (any ReaderAnalyticsFetching)?
+    /// v0.7.5 S18：学习表面观察流——评级/成员/绑定写发射即
+    /// `load()`，今日数字与牌组区始终同一口径同一时点。nil →
+    /// 退回既有 30s 轮询 + 返回页刷新。
+    let learningProgress: (any LearningProgressProviding)?
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -67,7 +71,8 @@ struct TodayView: View {
         importAwaitingSharedCaptures: @escaping @Sendable () async -> Void = {},
         openSettings: (() -> Void)? = nil,
         statisticsSource: (any StatisticsInsightFetching)? = nil,
-        readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil
+        readerAnalyticsSource: (any ReaderAnalyticsFetching)? = nil,
+        learningProgress: (any LearningProgressProviding)? = nil
     ) {
         self.studyService = studyService
         self.historyService = historyService
@@ -92,13 +97,15 @@ struct TodayView: View {
         self.openSettings = openSettings
         self.statisticsSource = statisticsSource
         self.readerAnalyticsSource = readerAnalyticsSource
+        self.learningProgress = learningProgress
         _model = State(
             initialValue: TodayViewModel(
                 studyService: studyService,
                 historyService: historyService,
                 deckService: deckService,
                 adaptiveCardService: adaptiveCardService,
-                adaptivePreferencesService: adaptivePreferencesService
+                adaptivePreferencesService: adaptivePreferencesService,
+                learningProgress: learningProgress
             )
         )
     }
@@ -173,6 +180,11 @@ struct TodayView: View {
             .task {
                 await model.load()
                 await model.refreshPeriodically()
+            }
+            // S18：学习表面写（评级/撤销/成员/绑定）→ 即时重取
+            // 计划与数字，今日页与牌组详情始终读同一口径。
+            .task {
+                await model.observeLearningSurface()
             }
             .task {
                 await observeInboxCount()
@@ -1014,6 +1026,8 @@ private final class TodayViewModel {
     private let deckService: DeckManagementService
     private let adaptiveCardService: AdaptiveCardService
     private let adaptivePreferencesService: AdaptivePreferencesService
+    /// S18：共享学习表面流（nil → 只走 30s 轮询 + 返回页刷新）。
+    private let learningProgress: (any LearningProgressProviding)?
 
     var plan: TodayPlan?
     /// 当前连续学习天数（只读派生值，不持久化）；载入失败时保持 nil，
@@ -1049,13 +1063,15 @@ private final class TodayViewModel {
         historyService: StudyHistoryService,
         deckService: DeckManagementService,
         adaptiveCardService: AdaptiveCardService,
-        adaptivePreferencesService: AdaptivePreferencesService
+        adaptivePreferencesService: AdaptivePreferencesService,
+        learningProgress: (any LearningProgressProviding)? = nil
     ) {
         self.studyService = studyService
         self.historyService = historyService
         self.deckService = deckService
         self.adaptiveCardService = adaptiveCardService
         self.adaptivePreferencesService = adaptivePreferencesService
+        self.learningProgress = learningProgress
     }
 
     /// T13（设计 §8.2）：plan/decks/settings 并发发出；连续天数快照依赖
@@ -1127,6 +1143,24 @@ private final class TodayViewModel {
                 return
             }
             await load()
+        }
+    }
+
+    /// v0.7.5 S18：共享学习表面流——发射即重走 `load()`（同一份
+    /// `buildTodayPlan` + 统计口径，与牌组区完全同源）。观察流
+    /// 只跟踪持久态读区——`buildTodayPlan` 自身写的
+    /// `daily_tasks`/`study_days`/`app_settings` 不在其跟踪区域，
+    /// 本方法不会形成「写→观察→再写」回环。
+    func observeLearningSurface() async {
+        guard let learningProgress else { return }
+        do {
+            for try await _ in learningProgress.observeProgress() {
+                guard !Task.isCancelled else { return }
+                await load()
+            }
+        } catch is CancellationError {
+        } catch {
+            // 失流不阻断——30s 轮询兜底。
         }
     }
 }

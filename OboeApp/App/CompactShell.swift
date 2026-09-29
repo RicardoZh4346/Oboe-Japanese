@@ -6,6 +6,25 @@ private enum PrimaryTab: Hashable {
     case today
     case decks
     case reader
+
+    /// compact 三 Tab 与 scene `AppSection` 的双向映射：inbox/
+    /// settings 在 compact 没有独立 Tab——落到今日（Inbox 挂
+    /// 今日页内、设置走 sheet）。
+    init(section: AppSection) {
+        switch section {
+        case .decks: self = .decks
+        case .reader: self = .reader
+        case .today, .inbox, .settings: self = .today
+        }
+    }
+
+    var section: AppSection {
+        switch self {
+        case .today: .today
+        case .decks: .decks
+        case .reader: .reader
+        }
+    }
 }
 
 /// compact 壳层：三 Tab `TabView`（今日 + 牌组 + 阅读）。v0.5.8 起设置收进
@@ -19,7 +38,9 @@ struct CompactShell: View {
     let sharedCapturesAwaitingImport: Int?
     let isDatabaseOperationInProgress: Bool
 
-    @State private var selectedTab = PrimaryTab.today
+    /// S18：Tab 选择改由 scene 导航状态驱动——`openDeck`/
+    /// `openReaderDocument` 跨区路由的「切 Tab」就是写它。
+    @Environment(SceneNavigationState.self) private var navigation
     @State private var isSettingsPresented = false
 
     var body: some View {
@@ -36,7 +57,11 @@ struct CompactShell: View {
     private var tabContent: some View {
         let today = container.today
         let decks = container.decks
-        return TabView(selection: $selectedTab) {
+        let tabSelection = Binding<PrimaryTab>(
+            get: { PrimaryTab(section: navigation.section) },
+            set: { navigation.selectTab($0.section) }
+        )
+        return TabView(selection: tabSelection) {
             TodayView(
                 studyService: today.studyService,
                 historyService: today.historyService,
@@ -62,7 +87,8 @@ struct CompactShell: View {
                 importAwaitingSharedCaptures: operations.importAwaitingSharedCaptures,
                 openSettings: { isSettingsPresented = true },
                 statisticsSource: today.statisticsSource,
-                readerAnalyticsSource: today.readerAnalyticsSource
+                readerAnalyticsSource: today.readerAnalyticsSource,
+                learningProgress: container.shared.learningProgress
             )
                 .id(container.generation)
                 .tabItem {
@@ -97,7 +123,16 @@ struct CompactShell: View {
                 clozeRepository: container.shared.clozeRepository,
                 inboxImageStore: container.shared.inboxImageStore,
                 customStudyRepository: container.shared.customStudyRepository,
-                customStudyService: container.shared.customStudyService
+                customStudyService: container.shared.customStudyService,
+                learningProgress: container.shared.learningProgress,
+                studyDecks: container.shared.studyDecks,
+                externalPath: Binding(
+                    get: { navigation.decksPath },
+                    set: { navigation.decksPath = $0 }
+                ),
+                onOpenDocument: { documentID in
+                    navigation.openReaderDocument(documentID)
+                }
             )
                 .id(container.generation)
                 .tabItem {
@@ -105,7 +140,10 @@ struct CompactShell: View {
                 }
                 .tag(PrimaryTab.decks)
 
-            ReaderRootView(dependencies: container.readerWithEditorFactory)
+            ReaderRootView(
+                dependencies: container.readerWithEditorFactory,
+                navigation: navigation
+            )
                 .id(container.generation)
                 .tabItem {
                     Label("阅读", systemImage: "book")

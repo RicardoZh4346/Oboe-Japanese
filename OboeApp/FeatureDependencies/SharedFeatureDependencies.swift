@@ -21,6 +21,14 @@ struct SharedFeatureDependencies {
     /// Review 按钮、Note 详情开关、Inspector 三态共用。nil =
     /// 装配缺席（测试容器）→ UI 隐藏 Too Easy 入口。
     let learningUnits: (any LearningUnitFlagProviding)?
+    /// v0.7.5 S18：deck/单元学习进度的批量投影 + 全库观察流。
+    /// 每世代一只实例注入各 Feature；nil = 装配缺席 → UI 隐藏
+    /// 进度行，仅退化为「无进度显示」，不阻塞页面。
+    let learningProgress: (any LearningProgressProviding)?
+    /// v0.7.5 S18：Reader 文档↔学习牌组绑定读 + coverage v2
+    /// 活算投影门面。nil = 装配缺席 → Deck 详情隐藏文章覆盖区、
+    /// Reader 行隐藏「打开牌组」。
+    let studyDecks: (any StudyDeckSurfacing)?
 }
 
 /// v0.7.5 S16 Too Easy UI 的窄依赖面——只暴露 UI 实际用到的方法，
@@ -56,3 +64,47 @@ protocol LearningUnitFlagProviding: Sendable {
 }
 
 extension GRDBLearningUnitRepository: LearningUnitFlagProviding {}
+
+/// v0.7.5 S18：牌组学习进度的投影 + 观察流门面——具体实现是
+/// `GRDBLearningProgressRepository`。订阅流发射即「持久态可能已
+/// 变」，订阅方再按需重投影，绝不反向触发 AI/morphology/全文
+/// 分词。`LearningProgressUpdate` 已含全库 deck 进度、文档↔牌组
+/// 绑定与知识指纹（Equatable 去重——无内容变化不发射）。
+protocol LearningProgressProviding: Sendable {
+    /// 全库学习表面更新流（`observeProgress()`——
+    /// WITHOUT ROWID 表经 rowid 审计代理触发，payload 内容去重）。
+    func observeProgress()
+        -> AsyncThrowingStream<LearningProgressUpdate, Error>
+    /// 指定牌组集合的进度投影（首轮/失流重取用）。
+    func deckProgress(
+        deckIDs: [UUID]
+    ) async throws -> [UUID: DeckLearningProgress]
+    /// unit 知识三态批量投影（文章 coverage 表面等场景按
+    /// `LearningKnowledgeState` 归约）。
+    func knowledgeStates(
+        unitIDs: [UUID]
+    ) async throws -> [UUID: LearningKnowledgeState]
+}
+
+extension GRDBLearningProgressRepository: LearningProgressProviding {}
+
+/// v0.7.5 S18：Reader 文档 ↔ 学习牌组绑定的窄读面 + 文档级
+/// coverage v2 活算——具体实现是 `GRDBReaderStudyDeckRepository`
+/// （绑定写语义仍在 `GRDBReaderStudyDeckService` 的单事务内）。
+protocol StudyDeckSurfacing: Sendable {
+    /// 文档 → 绑定牌组（nil = 未绑定/文档已不存在）。
+    func studyDeckID(forDocument documentID: UUID) async throws -> UUID?
+    /// 牌组 → 绑定文档（v24 UNIQUE 保证至多一行）。
+    func boundDocumentID(forDeck deckID: UUID) async throws -> UUID?
+    /// 文档 coverage v2 活算；文档不存在 → nil，空分母经
+    /// `Result.resolvedCoverage == nil` 表达（不展示 0%/100%）。
+    func documentCoverageResult(
+        forDocument documentID: UUID
+    ) async throws -> ReaderCoverageV2.Result?
+    /// 批量活算（Deck 详情文章覆盖区/Reader 列表行）。
+    func documentCoverageResults(
+        forDocumentIDs documentIDs: [UUID]
+    ) async throws -> [UUID: ReaderCoverageV2.Result]
+}
+
+extension GRDBReaderStudyDeckRepository: StudyDeckSurfacing {}

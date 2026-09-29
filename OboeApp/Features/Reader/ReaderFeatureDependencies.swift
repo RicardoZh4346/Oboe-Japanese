@@ -36,6 +36,13 @@ struct ReaderFeatureDependencies {
     /// 不受影响。默认 nil——`readerWithEditorFactory` 在容器就绪后
     /// 补注入（编排器要 morphology 版本组分 + resolver 实例）。
     var translation: ReaderTranslationDependencies? = nil
+    /// v0.7.5 S18：学习表面观察流——文档 VM/库列表订阅它感知
+    /// 「绑定建立/卡状态变化」，不各自直连 GRDB。nil → 绑定徽标
+    /// 只随本地刷新更新。
+    var learningProgress: (any LearningProgressProviding)? = nil
+    /// v0.7.5 S18：文档↔学习牌组绑定读门面（库行徽标、阅读页
+    /// 「打开牌组」按钮、Deck 详情反查共用）。nil → 隐藏入口。
+    var studyDecks: (any StudyDeckSurfacing)? = nil
 }
 
 /// v0.7.5 AI Study 的依赖包：UI 只消费窄面——准备/预览/确认经
@@ -291,12 +298,18 @@ extension AppFeatureContainer {
             }
             ai.deckDestination = { deckID in
                 AnyView(NavigationStack {
+                    // S18：这只 model 是目的地专用——`DeckDetailView`
+                    // 的 .task 会 `startObserving()`（幂等）并在
+                    // decks 未含目标时主动 refreshDecks，不再出现
+                    // 「牌组已不存在」的冷启动空态。
                     DeckDetailView(
                         deckID: deckID,
                         model: DeckListModel(
                             service: deckDeps.deckService,
                             studyService: deckDeps.studyService,
-                            historyService: deckDeps.historyService),
+                            historyService: deckDeps.historyService,
+                            learningProgress: shared.learningProgress,
+                            studyDecks: shared.studyDecks),
                         deckService: deckDeps.deckService,
                         vocabularyService: deckDeps.vocabularyService,
                         grammarService: deckDeps.grammarService,
