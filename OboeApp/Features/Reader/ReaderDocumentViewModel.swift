@@ -375,6 +375,13 @@ final class ReaderDocumentViewModel {
         return (loc.blockOrdinal, loc.utf16Offset)
     }
 
+    /// 恢复滚动已应用：清一次性恢复点——此后重组（字号/译文/
+    /// 折叠）锚定「当前可见块」而非开卷位置，字号变化/模式切换
+    /// 不再把用户拽回最初落点（S17 位置保持）。
+    func consumeRestoredLocation() {
+        restoredLocation = nil
+    }
+
     /// 恢复点命中校验：块 hash 不符 → 降级章首 + 提示。
     func restoreTargetIsValid(_ blockOrdinal: Int) -> Bool {
         guard let loc = restoredLocation else { return false }

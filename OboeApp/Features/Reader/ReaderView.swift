@@ -30,15 +30,27 @@ struct ReaderView: View {
     private let aiStudy: ReaderAIStudyDependencies?
     /// AI 学习流程模型——nil = 弹层关闭（值语义 @State 持有）。
     @State private var aiStudyModel: ReaderAIStudyFlowModel?
+    /// S17 译文依赖包；nil = 隐藏模式选择器/译文入口，原文阅读不变。
+    private let translation: ReaderTranslationDependencies?
+    /// S17 译文 VM（按文档实例持有——水合/折叠/占位态随章刷新）。
+    @State private var translationModel: ReaderTranslationViewModel?
+    /// 模式切换/外部跳转下发的滚动锚（块序；消费后清零）。
+    @State private var scrollAnchor: Int?
 
     init(
         model: ReaderDocumentViewModel,
         mining: ReaderMiningDependencies? = nil,
-        aiStudy: ReaderAIStudyDependencies? = nil
+        aiStudy: ReaderAIStudyDependencies? = nil,
+        translation: ReaderTranslationDependencies? = nil
     ) {
         _model = State(initialValue: model)
         self.mining = mining
         self.aiStudy = aiStudy
+        self.translation = translation
+        _translationModel = State(
+            initialValue: translation.map {
+                ReaderTranslationViewModel(dependencies: $0)
+            })
     }
 
     var body: some View {
@@ -60,6 +72,37 @@ struct ReaderView: View {
                         message: model.document == nil
                             ? nil : "该章节没有可显示的正文块。"
                     )
+                } else if displayMode == .translatedOnly,
+                          let translationModel {
+                    // S17 纯译文：块序锚与 ReaderTextView 同源——
+                    // 位置上报写回同一 updateVisiblePosition。
+                    ReaderTranslatedOnlyList(
+                        blocks: model.blocks,
+                        model: translationModel,
+                        onTopBlockChange: { ordinal in
+                            model.updateVisiblePosition(
+                                blockOrdinal: ordinal, utf16Offset: 0
+                            )
+                            scrollAnchor = nil
+                        },
+                        scrollAnchor: scrollAnchor
+                            ?? model.pendingRestore?.blockOrdinal,
+                        onTranslate: { blockID in
+                            Task {
+                                await translationModel.translate(blockID)
+                            }
+                        },
+                        onRetry: { blockID in
+                            Task {
+                                await translationModel.translate(blockID)
+                            }
+                        },
+                        onRetranslate: { blockID in
+                            Task {
+                                await translationModel.retranslate(blockID)
+                            }
+                        }
+                    )
                 } else {
                     ReaderTextView(
                         blocks: model.blocks,
@@ -76,6 +119,35 @@ struct ReaderView: View {
                             : [],
                         restoreBlockOrdinal: model.pendingRestore?.blockOrdinal,
                         restoreUTF16Offset: model.pendingRestore?.utf16Offset ?? 0,
+                        // 重组保持锚：模式切换锚 > 当前可见块——
+                        // 字号/译文水合/折叠重组都不丢原文位置。
+                        anchorOrdinal: scrollAnchor
+                            ?? model.visibleBlockOrdinal,
+                        anchorUTF16Offset: scrollAnchor != nil
+                            ? 0 : model.visibleUTF16Offset,
+                        onRestoreApplied: {
+                            model.consumeRestoredLocation()
+                            scrollAnchor = nil
+                        },
+                        translations: displayMode == .bilingual
+                            ? translationModel?.bilingualSegments ?? [:]
+                            : [:],
+                        onTranslationAction: { blockID, action in
+                            switch action {
+                            case .toggleCollapse:
+                                translationModel?.toggleCollapse(blockID)
+                            case .translate:
+                                Task {
+                                    await translationModel?.translate(
+                                        blockID)
+                                }
+                            case .retry:
+                                Task {
+                                    await translationModel?.retranslate(
+                                        blockID)
+                                }
+                            }
+                        },
                         onVisibleBlockChange: { ordinal, offset in
                             model.updateVisiblePosition(
                                 blockOrdinal: ordinal, utf16Offset: offset
@@ -110,6 +182,47 @@ struct ReaderView: View {
                 .accessibilityIdentifier("reader-chapter-list")
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
+                // S17 三模式菜单——译文依赖装配缺席时隐藏（原文
+                // 阅读路径完全不变）。
+                if let translationModel {
+                    Menu {
+                        Picker("显示模式", selection: modeBinding) {
+                            Text("原文").tag(
+                                ReaderTranslationViewModel.DisplayMode
+                                    .original)
+                            Text("对照").tag(
+                                ReaderTranslationViewModel.DisplayMode
+                                    .bilingual)
+                            Text("译文").tag(
+                                ReaderTranslationViewModel.DisplayMode
+                                    .translatedOnly)
+                        }
+                        Divider()
+                        Button {
+                            Task {
+                                await translationModel.translateChapter()
+                            }
+                        } label: {
+                            Label(
+                                "翻译本章缺失段落",
+                                systemImage: "character.bubble")
+                        }
+                        .disabled(translationModel.chapterTranslating)
+                        Button {
+                            Task {
+                                await translationModel.retranslateChapter()
+                            }
+                        } label: {
+                            Label(
+                                "重新翻译本章",
+                                systemImage: "arrow.clockwise")
+                        }
+                        .disabled(translationModel.chapterTranslating)
+                    } label: {
+                        Label("译文", systemImage: "text.alignleft")
+                    }
+                    .accessibilityIdentifier("reader-translation-menu")
+                }
                 // v0.7.5 S15：AI 学习入口——preparation 装配缺席
                 // （无形态分析）或文档未载入时隐藏。
                 if let aiStudy, aiStudy.preparation != nil,
@@ -239,6 +352,19 @@ struct ReaderView: View {
             }
         }
         .task { await model.load() }
+        // S17：章块集合变化（载入/切章/重链后重新取块）→ 译文
+        // 水合——纯本地行重锚，零网络。
+        .onChange(of: model.blocks, initial: true) { _, _ in
+            Task {
+                await translationModel?.refresh(
+                    document: model.document,
+                    chapterOrdinal: model.chapters.indices
+                        .contains(model.currentChapterIndex)
+                        ? model.chapters[model.currentChapterIndex].ordinal
+                        : 0,
+                    blocks: model.blocks)
+            }
+        }
         .onAppear {
             // S11 挂载点：token tap → Inspector（或批量入队）。
             // mining 缺席时静默——着色仍在，只是不可挖词。
@@ -291,6 +417,32 @@ struct ReaderView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        .alert("翻译", isPresented: .init(
+            get: { translationModel?.errorMessage != nil },
+            set: { if !$0 { translationModel?.clearError() } }
+        )) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(translationModel?.errorMessage ?? "")
+        }
+    }
+
+    /// 三模式当前值（无译文 VM 恒原文）。
+    private var displayMode: ReaderTranslationViewModel.DisplayMode {
+        translationModel?.mode ?? .original
+    }
+
+    /// 模式切换绑定：先锚定当前可见块序再切渲染容器——
+    /// 原文/对照同一 UITextView（译文间隙插入，原文坐标不动），
+    /// 纯译文换 SwiftUI 列表（scrollAnchor 下发 + 顶块序上报同源）。
+    private var modeBinding: Binding<ReaderTranslationViewModel.DisplayMode> {
+        Binding(
+            get: { displayMode },
+            set: { newMode in
+                scrollAnchor = model.visibleBlockOrdinal
+                translationModel?.mode = newMode
+            }
+        )
     }
 
     /// AI 流程上下文：当前章/当前可见块的定位快照——范围解析

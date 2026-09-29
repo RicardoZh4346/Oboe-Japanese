@@ -915,6 +915,20 @@ extension GRDBReaderRepository: ReaderRelinkStore {
             // 3) 文档 metadata 覆写 + availability=available。
             try Self.applyRelinkDocumentUpdate(plan, in: db)
 
+            // 3.5) S17 译文重挂：译文行锚点随新块集复核——序数直中
+            //    仅规范化 key，序数漂移按 (sourceHash, 相对顺序) 保序
+            //    迁移 locator_key/locator_json；sourceHash/current/
+            //    修订链不动（译文与原文的匹配仍在渲染侧按 hash 判定）。
+            let translationMoves = try ReaderTranslationReanchor.moves(
+                documentID: plan.documentID,
+                chapters: plan.chapters,
+                blocks: plan.blocks,
+                in: db)
+            try GRDBReaderTranslationStore.updateLocators(
+                documentID: plan.documentID,
+                moves: translationMoves,
+                in: db)
+
             // 4) 旧 installed 资产行先降级：relink 已整体换新
             //    `ReaderFiles/<documentID>/`——旧 relative_path 对应文件
             //    不复存在，留 'installed' 会让 fileURL 解析拿到双源

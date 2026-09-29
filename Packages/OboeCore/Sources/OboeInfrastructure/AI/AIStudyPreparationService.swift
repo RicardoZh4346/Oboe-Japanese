@@ -1025,7 +1025,8 @@ public struct AIStudyPreparationService: Sendable {
     ///    UTF-16 range 由 manifest replan 反查）。
     /// 2. 译文：`translationStatus == .done` 的块经
     ///    `GRDBReaderTranslationStore.publish` 落库（校验+历史保留
-    ///    由 publish 保证；locatorKey = subblockKey 稳定）。
+    ///    由 publish 保证；locatorKey 走 S17 `ReaderTranslationLocator`
+    ///    规范 `tr:` 形态——由 subblockKey/锚点 JSON 派生）。
     public func finalizeResults(jobID: UUID) async throws {
         guard let job = try await jobStore.fetchJob(id: jobID) else {
             throw PreparationError.jobNotFound(jobID)
@@ -1113,7 +1114,7 @@ public struct AIStudyPreparationService: Sendable {
                 else { continue }
                 _ = try GRDBReaderTranslationStore.publish(
                     documentID: job.documentID,
-                    locatorKey: block.subblockKey,
+                    locatorKey: Self.translationLocatorKey(for: block),
                     locatorJSON: block.locatorJSON,
                     sourceHash: block.sourceHash,
                     language: manifest.language,
@@ -1125,6 +1126,21 @@ public struct AIStudyPreparationService: Sendable {
                     at: now(), in: db)
             }
         }
+    }
+
+    /// job block → S17 译文 locator_key：`tr:ch:<co>:b:<bo>#r<s>-<e>`
+    /// （序数取块行 locatorJSON，区间取 subblockKey `#r` 后缀）。
+    /// 解析失败回落原 subblockKey——渲染侧按 locatorJSON 序数锚定，
+    /// key 形态差异不影响落位正确性。
+    static func translationLocatorKey(for block: AIStudyJobBlock) -> String {
+        guard let anchor = ReaderTranslationLocator.anchor(
+            locatorKey: block.subblockKey,
+            locatorJSON: block.locatorJSON
+        ) else { return block.subblockKey }
+        return ReaderTranslationLocator.key(
+            chapterOrdinal: anchor.chapterOrdinal,
+            blockOrdinal: anchor.blockOrdinal,
+            utf16Range: anchor.range)
     }
 
     // MARK: - 预览装配

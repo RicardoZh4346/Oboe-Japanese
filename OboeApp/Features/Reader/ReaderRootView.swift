@@ -38,7 +38,8 @@ struct ReaderRootView: View {
                             documentID: id, dependencies: dependencies
                         ),
                         mining: dependencies.mining,
-                        aiStudy: dependencies.aiStudy
+                        aiStudy: dependencies.aiStudy,
+                        translation: dependencies.translation
                     )
                 }
         }
@@ -57,7 +58,8 @@ struct ReaderRootView: View {
                         documentID: selection, dependencies: dependencies
                     ),
                     mining: dependencies.mining,
-                    aiStudy: dependencies.aiStudy
+                    aiStudy: dependencies.aiStudy,
+                    translation: dependencies.translation
                 )
                 .id(selection)
             } else {

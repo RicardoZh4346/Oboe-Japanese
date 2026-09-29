@@ -35,10 +35,28 @@ struct ReaderTextView: UIViewRepresentable {
     let highlights: [UUID: [ReaderDocumentViewModel.TokenHighlight]]
     /// 批量挖词已入队的 token（正文里的选中态着色）。
     var selectedTokens: Set<TokenRef> = []
-    /// 位置恢复目标（nil = 不滚动）；消费后 view 应清零回调由
-    /// coordinator 内一次性执行。
+    /// 位置恢复目标（nil = 回落 `anchorOrdinal`）；消费后经
+    /// `onRestoreApplied` 通知 view 清零。
     let restoreBlockOrdinal: Int?
     let restoreUTF16Offset: Int
+    /// S17：重组后保持的块序锚（模式切换/字号/译文水合等引发的
+    /// 重组都把当前可见块锚回视野——不丢原文阅读位置）。
+    /// `restoreBlockOrdinal`（一次性恢复点）优先于它。
+    var anchorOrdinal: Int? = nil
+    var anchorUTF16Offset: Int = 0
+    /// 恢复/锚定滚动已应用——view 据此清一次性恢复点与模式切换锚。
+    var onRestoreApplied: (() -> Void)? = nil
+    /// S17 双语译文注入：块 ID → 渲染段（原文坐标系不变——译文段
+    /// 插在块 `NSRange` 之间，永不进入块区间，token/位置判定不位移）。
+    var translations: [UUID: ReaderTranslationSegment] = [:]
+    /// S17 译文动作（伪链接命中）：折叠/展开、翻译、重试。
+    enum TranslationAction: Sendable {
+        case toggleCollapse
+        case translate
+        case retry
+    }
+    /// 译文伪链接命中回调；nil = 译文段不可交互。
+    var onTranslationAction: ((UUID, TranslationAction) -> Void)? = nil
     /// 顶部可见块/块内偏移回调（scrollViewDidScroll 驱动）。
     let onVisibleBlockChange: (Int, Int) -> Void
     /// token 命中回调。
@@ -79,23 +97,29 @@ struct ReaderTextView: UIViewRepresentable {
             blocks: blocks,
             highlights: highlights,
             selectedTokens: selectedTokens,
+            translations: translations,
             dynamicTypeSize: dynamicTypeSize,
             restoreBlockOrdinal: restoreBlockOrdinal,
             restoreUTF16Offset: restoreUTF16Offset,
+            anchorOrdinal: anchorOrdinal,
+            anchorUTF16Offset: anchorUTF16Offset,
             in: textView
         )
     }
 
     // MARK: - 组合
 
-    /// 块 + 着色 → NSAttributedString + 每块的 NSRange 索引。
-    /// 返回 ranges 按下标对应 blocks。
+    /// 块 + 着色 + 译文段 → NSAttributedString + 每块的 NSRange
+    /// 索引。返回 ranges 按下标对应 blocks——**只覆盖原文**：译文段
+    /// 插在 `ranges` 间隙，token 链接/位置/恢复三处判定全不受影响
+    /// （译文不位移原文坐标系）。
     /// nonisolated：长文全量组合（含逐 token 伪 URL）在 detached
     /// 任务里跑，不占主线程（S10 长粘贴文本卡死修复）。
     nonisolated static func compose(
         blocks: [ReaderBlock],
         highlights: [UUID: [ReaderDocumentViewModel.TokenHighlight]],
         selectedTokens: Set<TokenRef> = [],
+        translations: [UUID: ReaderTranslationSegment] = [:],
         dynamicTypeSize: DynamicTypeSize
     ) -> (NSAttributedString, [NSRange]) {
         let baseFont = UIFontMetrics(forTextStyle: .body).scaledFont(
@@ -171,8 +195,113 @@ struct ReaderTextView: UIViewRepresentable {
             ranges.append(NSRange(
                 location: start, length: string.length
             ))
+            // S17 译文段：原文块 `ranges` 已收录——译文插进间隙，
+            // 坐标系不动。折叠/缺失/失败/在途渲染为占位行（伪链接
+            // 承载交互：折叠↔展开、翻译、重试）。
+            if let segment = translations[block.id] {
+                appendTranslation(
+                    segment, blockID: block.id,
+                    to: composed,
+                    baseFont: baseFont,
+                    dynamicTypeSize: dynamicTypeSize)
+            }
         }
         return (composed, ranges)
+    }
+
+    /// 译文段排版：`\n` + 次级字级/弱色的译文行或占位行；交互
+    /// 态挂 `oboe-reader-tr://<action>/<blockID>` 伪链接。
+    nonisolated private static func appendTranslation(
+        _ segment: ReaderTranslationSegment,
+        blockID: UUID,
+        to composed: NSMutableAttributedString,
+        baseFont: UIFont,
+        dynamicTypeSize: DynamicTypeSize
+    ) {
+        let translationFont = UIFontMetrics(forTextStyle: .callout)
+            .scaledFont(for: .preferredFont(forTextStyle: .callout))
+        let placeholderFont = UIFontMetrics(forTextStyle: .caption1)
+            .scaledFont(for: .preferredFont(forTextStyle: .caption1))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = 1.25
+        paragraph.paragraphSpacingBefore = 2
+        let text: String
+        let font: UIFont
+        let color: UIColor
+        var action: String?
+        switch segment {
+        case let .text(translation):
+            text = translation
+            font = translationFont
+            color = .label
+            action = "toggle"
+        case let .partial(translation):
+            // 已译片段 + 缺段提示——点按补译（旧片段仍是 current
+            // 行的渲染结果，补译成功前不丢）。
+            text = translation
+                + "\n［部分段落未译——点按补译］"
+            font = translationFont
+            color = .label
+            action = "translate"
+        case .collapsed:
+            text = "［译文已折叠——点按展开］"
+            font = placeholderFont
+            color = .secondaryLabel
+            action = "toggle"
+        case .missing:
+            text = "［本段暂无译文——点按翻译］"
+            font = placeholderFont
+            color = .secondaryLabel
+            action = "translate"
+        case .failed:
+            text = "［本段翻译未完成——点按重试］"
+            font = placeholderFont
+            color = .secondaryLabel
+            action = "retry"
+        case .requesting:
+            text = "［翻译中…］"
+            font = placeholderFont
+            color = .secondaryLabel
+            action = nil
+        }
+        composed.append(NSAttributedString(
+            string: "\n",
+            attributes: [.font: baseFont, .paragraphStyle: paragraph]))
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph,
+        ]
+        if let action {
+            attributes[.link] = translationURL(
+                action: action, blockID: blockID)
+        }
+        composed.append(NSAttributedString(
+            string: text, attributes: attributes))
+    }
+
+    /// 译文伪链接：`oboe-reader-tr://<action>/<blockID>`。
+    nonisolated static func translationURL(
+        action: String, blockID: UUID
+    ) -> URL {
+        URL(string:
+            "oboe-reader-tr://\(action)/\(blockID.uuidString.lowercased())"
+        )!
+    }
+
+    static func parseTranslationURL(
+        _ url: URL
+    ) -> (UUID, TranslationAction)? {
+        guard url.scheme == "oboe-reader-tr",
+              let idPart = url.pathComponents.last,
+              let blockID = UUID(uuidString: idPart)
+        else { return nil }
+        switch url.host {
+        case "toggle": return (blockID, .toggleCollapse)
+        case "translate": return (blockID, .translate)
+        case "retry": return (blockID, .retry)
+        default: return nil
+        }
     }
 
     /// 状态图例颜色（§状态图例：known 默认色/learning 品牌蓝/
@@ -245,6 +374,7 @@ struct ReaderTextView: UIViewRepresentable {
             ReaderDocumentViewModel.TokenHighlight
         ]]?
         private var composedSelection: Set<TokenRef>?
+        private var composedTranslations: [UUID: ReaderTranslationSegment]?
         private var composedTypeSize: DynamicTypeSize?
         /// 合成代次：新输入作废旧结果，后到的不许回写。
         private var composeGeneration = 0
@@ -255,23 +385,32 @@ struct ReaderTextView: UIViewRepresentable {
         /// 输入变化 → detached 合成 attributed 串（逐 token
         /// `URL(string:)` 在长文上是秒级主线程占用，必须离主）→
         /// 回主线程应用并触发恢复滚动。输入没变 → 完全跳过。
+        ///
+        /// 恢复/锚定：一次性恢复点（`restoreBlockOrdinal`）优先；
+        /// 缺席时取 `anchorOrdinal`——重组改变上方布局（译文注入、
+        /// 折叠、字号变化）时把当前可见块锚回视野，不丢阅读位置。
         func enqueueComposeIfNeeded(
             blocks: [ReaderBlock],
             highlights: [UUID: [ReaderDocumentViewModel.TokenHighlight]],
             selectedTokens: Set<TokenRef>,
+            translations: [UUID: ReaderTranslationSegment],
             dynamicTypeSize: DynamicTypeSize,
             restoreBlockOrdinal: Int?,
             restoreUTF16Offset: Int,
+            anchorOrdinal: Int?,
+            anchorUTF16Offset: Int,
             in textView: UITextView
         ) {
             guard composedBlocks != blocks
                 || composedHighlights != highlights
                 || composedSelection != selectedTokens
+                || composedTranslations != translations
                 || composedTypeSize != dynamicTypeSize
             else { return }
             composedBlocks = blocks
             composedHighlights = highlights
             composedSelection = selectedTokens
+            composedTranslations = translations
             composedTypeSize = dynamicTypeSize
             composeGeneration += 1
             let generation = composeGeneration
@@ -281,6 +420,7 @@ struct ReaderTextView: UIViewRepresentable {
                     blocks: blocks,
                     highlights: highlights,
                     selectedTokens: selectedTokens,
+                    translations: translations,
                     dynamicTypeSize: dynamicTypeSize
                 )
                 return ComposedText(string: string, ranges: ranges)
@@ -291,8 +431,13 @@ struct ReaderTextView: UIViewRepresentable {
                       generation == self.composeGeneration else { return }
                 textView.attributedText = result.string
                 self.blockRanges = result.ranges
-                self.pendingRestore = restoreBlockOrdinal
-                self.pendingRestoreOffset = restoreUTF16Offset
+                if let restoreBlockOrdinal {
+                    self.pendingRestore = restoreBlockOrdinal
+                    self.pendingRestoreOffset = restoreUTF16Offset
+                } else {
+                    self.pendingRestore = anchorOrdinal
+                    self.pendingRestoreOffset = anchorUTF16Offset
+                }
                 // 恢复滚动在下一 runloop——attributedText 刚换、
                 // layout 未就绪。
                 if self.pendingRestore != nil {
@@ -301,20 +446,29 @@ struct ReaderTextView: UIViewRepresentable {
             }
         }
 
-        /// link 命中 → onTokenTap。iOS 17 起 text item 主动作取代
-        /// `shouldInteractWith`（点按与 VoiceOver 链接激活都走这里）；
-        /// 返回自定义 UIAction 即替代默认打开行为。
+        /// link 命中 → onTokenTap / onTranslationAction。iOS 17 起
+        /// text item 主动作取代 `shouldInteractWith`（点按与
+        /// VoiceOver 链接激活都走这里）；返回自定义 UIAction 即
+        /// 替代默认打开行为。
         func textView(
             _ textView: UITextView,
             primaryActionFor textItem: UITextItem,
             defaultAction: UIAction
         ) -> UIAction? {
-            guard case let .link(url) = textItem.content,
-                  let hit = ReaderTextView.parseTokenURL(url)
+            guard case let .link(url) = textItem.content
             else { return defaultAction }
-            return UIAction { [weak self] _ in
-                self?.parent.onTokenTap(hit.blockID, hit.range)
+            if let hit = ReaderTextView.parseTokenURL(url) {
+                return UIAction { [weak self] _ in
+                    self?.parent.onTokenTap(hit.blockID, hit.range)
+                }
             }
+            if let (blockID, action) =
+                ReaderTextView.parseTranslationURL(url) {
+                return UIAction { [weak self] _ in
+                    self?.parent.onTranslationAction?(blockID, action)
+                }
+            }
+            return defaultAction
         }
 
         /// S13：系统编辑菜单注入「挖句成卡」。仅当选区**完整落在
@@ -379,16 +533,33 @@ struct ReaderTextView: UIViewRepresentable {
                     break
                 }
             }
-            guard let index = hitIndex,
+            // 间隙命中（译文段/块间空行不在任何块 range 内）→
+            // 归到前一个块末尾：顶部落在第 k 块译文上时位置语义
+            // 仍是「读到第 k 块」，不会静默丢块。
+            var resolvedIndex = hitIndex
+            var resolvedOffset = 0
+            if let index = hitIndex {
+                resolvedOffset = charIndex - blockRanges[index].location
+            } else {
+                // 找最后一个 NSMaxRange <= charIndex 的块。
+                var fallback: Int?
+                for (index, range) in blockRanges.enumerated()
+                where NSMaxRange(range) <= charIndex {
+                    fallback = index
+                }
+                if let index = fallback {
+                    resolvedIndex = index
+                    resolvedOffset = blockRanges[index].length
+                }
+            }
+            guard let index = resolvedIndex,
                   parent.blocks.indices.contains(index) else { return }
-            let range = blockRanges[index]
-            let offset = charIndex - range.location
             let block = parent.blocks[index]
             if block.ordinal != lastReportedOrdinal
-                || abs(offset - lastReportedOffset) >= 64 {
+                || abs(resolvedOffset - lastReportedOffset) >= 64 {
                 lastReportedOrdinal = block.ordinal
-                lastReportedOffset = offset
-                parent.onVisibleBlockChange(block.ordinal, offset)
+                lastReportedOffset = resolvedOffset
+                parent.onVisibleBlockChange(block.ordinal, resolvedOffset)
             }
         }
 
@@ -401,6 +572,7 @@ struct ReaderTextView: UIViewRepresentable {
             DispatchQueue.main.async { [weak self, weak textView] in
                 guard let self, let textView else { return }
                 self.pendingRestore = nil
+                defer { self.parent.onRestoreApplied?() }
                 guard let index = self.parent.blocks.firstIndex(where: {
                     $0.ordinal == ordinal
                 }), self.blockRanges.indices.contains(index) else {

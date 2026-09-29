@@ -31,6 +31,11 @@ struct ReaderFeatureDependencies {
     /// 候选打包器 + S10 resolver）；nil = 装配缺席 → 隐藏 AI
     /// 学习入口。
     var aiStudy: ReaderAIStudyDependencies?
+    /// v0.7.5 S17 三模式译文依赖包（编排器 + 目标语言）；nil =
+    /// 装配缺席（AI 未装配/无形态分析）→ 隐藏译文入口，原文阅读
+    /// 不受影响。默认 nil——`readerWithEditorFactory` 在容器就绪后
+    /// 补注入（编排器要 morphology 版本组分 + resolver 实例）。
+    var translation: ReaderTranslationDependencies? = nil
 }
 
 /// v0.7.5 AI Study 的依赖包：UI 只消费窄面——准备/预览/确认经
@@ -326,6 +331,49 @@ extension AppFeatureContainer {
                 })
             }
             deps.aiStudy = ai
+
+            // v0.7.5 S17：译文编排器在同一闸门下装配（morphology
+            // 提供 requestHash 环境组分；AI Study 缺席时译文入口
+            // 同样隐藏——水合本可行，但没有任何派发来源时译文菜单
+            // 也只是空壳）。
+            let aiConfiguration = ai.aiConfiguration
+            let credentialStore = ai.credentialStore
+            deps.translation = ReaderTranslationDependencies(
+                orchestrator: ReaderTranslationOrchestrator(
+                    pool: ai.store.databasePool,
+                    contextProvider: {
+                        // 与 AIStudyRunner.sendRequest 同纪律：配置
+                        // 快照 + 凭据只在派发时读取，不落缓存。
+                        let status = try await aiConfiguration.load(
+                            defaultTimeZoneID: TimeZone
+                                .autoupdatingCurrent.identifier)
+                        guard status.configuration.isEnabled,
+                              let resolved = ResolvedAIConfiguration(
+                                  configuration: status.configuration)
+                        else {
+                            throw ReaderTranslationOrchestrator
+                                .OrchestratorError.contextUnavailable
+                        }
+                        guard let credential = try await credentialStore
+                            .readCredential(
+                                for: resolved.credentialReference),
+                              !credential.isEmpty
+                        else {
+                            throw ReaderTranslationOrchestrator
+                                .OrchestratorError.contextUnavailable
+                        }
+                        return ReaderTranslationOrchestrator
+                            .RequestContext(
+                                resolved: resolved,
+                                credential: credential,
+                                dictionaryDatasetVersion:
+                                    morphology.dictionaryDatasetVersion,
+                                morphologyVersion:
+                                    morphology.morphologyVersion,
+                                osBuild: morphology.osBuild)
+                    },
+                    sender: ReaderTranslationOrchestrator.sender(
+                        resolver: ai.resolver)))
         }
         return deps
     }
