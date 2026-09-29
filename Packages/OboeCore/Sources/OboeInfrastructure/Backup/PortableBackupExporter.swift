@@ -63,7 +63,7 @@ public actor PortableBackupExporter {
 
     /// 显式指定记录协议版本（设计 §14.1 registry）。只允许
     /// `PortableBackupFormatRegistry.isExportable` 放行的版本——
-    /// 当前仅 v8；v1–v7 只能读入恢复，不可再生成。
+    /// 当前默认 v8 + opt-in 的 v9；v1–v7 只能读入恢复，不可再生成。
     public func export(
         appVersion: String,
         at exportedAt: Date = Date(),
@@ -176,12 +176,16 @@ public actor PortableBackupExporter {
             }
 
             var hasher = SHA256()
-            // v8 起 manifest 追加声明本版新增的排除范围（Reader 正文/
-            // 派生数据、词典数据、导入 staging），预览据此解释边界。
-            let excludedScopes = recordFormatVersion >= PortableBackupFormatRegistry.v8Version
-                ? PortableBackupFormat.excludedScopes
-                    + PortableBackupFormatV8.additionalExcludedScopes
-                : PortableBackupFormat.excludedScopes
+            // 各版本 manifest 追加声明该版新增的排除范围，预览据此解释
+            // 边界：v8 起 Reader 正文/派生数据、词典数据、导入 staging；
+            // v9 起再追加 aiStudyRuntime/providerSecrets（wire §2.3）。
+            var excludedScopes = PortableBackupFormat.excludedScopes
+            if recordFormatVersion >= PortableBackupFormatRegistry.v8Version {
+                excludedScopes += PortableBackupFormatV8.additionalExcludedScopes
+            }
+            if recordFormatVersion >= PortableBackupFormatRegistry.v9Version {
+                excludedScopes += PortableBackupFormatV9.additionalExcludedScopes
+            }
             let manifest: [String: Any] = [
                 "recordType": "manifest",
                 "format": PortableBackupFormat.identifier,

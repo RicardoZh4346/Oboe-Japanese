@@ -118,22 +118,21 @@ public struct CustomStudyFilter: Codable, Equatable, Hashable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         preset = try container.decodeIfPresent(CustomStudyPreset.self, forKey: .preset)
-        deckIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .deckIDs) ?? []
-        tagIDs = try container.decodeIfPresent(Set<UUID>.self, forKey: .tagIDs) ?? []
-        jlptLevels = try container.decodeIfPresent(Set<JLPTLevel>.self, forKey: .jlptLevels) ?? []
-        favoriteOnly = try container.decodeIfPresent(Bool.self, forKey: .favoriteOnly) ?? false
+        deckIDs = try container.decode(Set<UUID>.self, forKey: .deckIDs)
+        tagIDs = try container.decode(Set<UUID>.self, forKey: .tagIDs)
+        jlptLevels = try container.decode(Set<JLPTLevel>.self, forKey: .jlptLevels)
+        favoriteOnly = try container.decode(Bool.self, forKey: .favoriteOnly)
+        // earlyReviewWindowDays 同样晚于 v0.6.0 落库格式——缺省回退
+        // 服务默认窗口，缺失键不等于坏数据。
         earlyReviewWindowDays = try container.decodeIfPresent(
             Int.self,
             forKey: .earlyReviewWindowDays
         ) ?? CustomStudyService.defaultEarlyReviewWindowDays
-        limit = try container.decodeIfPresent(
-            Int.self,
-            forKey: .limit
-        ) ?? CustomStudyService.defaultQueueLimit
-        order = try container.decodeIfPresent(
+        limit = try container.decode(Int.self, forKey: .limit)
+        order = try container.decode(
             CustomStudyOrder.self,
             forKey: .order
-        ) ?? .due
+        )
         randomSeed = try container.decodeIfPresent(Int64.self, forKey: .randomSeed)
         includeMastered = try container.decodeIfPresent(
             Bool.self,

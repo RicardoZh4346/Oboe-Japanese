@@ -84,8 +84,9 @@ public actor PortableBackupPackageExporter {
     }
 
     /// `formatVersion` 默认 v8（v0.7.0 起）；显式传 7 仍可产出
-    /// (7,7) 版本对包供兼容测试/内部验证——导出端只写合法对，
-    /// 见 `PortableBackupPackageFormat.isSupportedVersionPair`。
+    /// (7,7) 版本对包供兼容测试/内部验证，显式传 9 产出 opt-in 的
+    /// (9,9) 记录流包——导出端只写合法对，见
+    /// `PortableBackupPackageFormat.isSupportedVersionPair`。
     public func export(
         appVersion: String,
         at exportedAt: Date = Date(),
@@ -277,10 +278,18 @@ public actor PortableBackupPackageExporter {
             }
 
             // 所有 descriptor/digest 已知后才写 manifest 与 checksums。
-            // 版本对契约：导出端只写 (7,7)/(8,8)；recordOrder/排除清单
-            // 全部按 registry 中该版本的冻结规格生成。
+            // 版本对契约：导出端只写 (7,7)/(8,8)/(9,9)；recordOrder/排除
+            // 清单全部按 registry 中该版本的冻结规格生成。
             let recordOrder = PortableBackupFormatRegistry
                 .recordTypes(forVersion: formatVersion) ?? []
+            let excludedScopes: [String]
+            if formatVersion >= PortableBackupFormatRegistry.v9Version {
+                excludedScopes = PortableBackupPackageFormat.excludedScopesV9
+            } else if formatVersion >= PortableBackupFormatRegistry.v8Version {
+                excludedScopes = PortableBackupPackageFormat.excludedScopesV8
+            } else {
+                excludedScopes = PortableBackupPackageFormat.excludedScopes
+            }
             let manifest = PortableBackupPackageManifest(
                 format: PortableBackupFormat.identifier,
                 formatVersion: formatVersion,
@@ -295,9 +304,7 @@ public actor PortableBackupPackageExporter {
                 recordFormatVersion: formatVersion,
                 recordOrder: recordOrder,
                 counts: recordCounts,
-                excludedScopes: formatVersion >= PortableBackupFormatRegistry.v8Version
-                    ? PortableBackupPackageFormat.excludedScopesV8
-                    : PortableBackupPackageFormat.excludedScopes,
+                excludedScopes: excludedScopes,
                 attachments: attachments
             )
             try writer.beginEntry(

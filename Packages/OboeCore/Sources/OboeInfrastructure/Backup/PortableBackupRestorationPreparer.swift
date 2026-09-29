@@ -303,9 +303,10 @@ public actor PortableBackupRestorationPreparer {
         }
     }
 
-    /// v1–v6 与 v7 共用的导入主体：临时库 → 校验汇总 → 备份成 prepared 库。
-    /// `sourceFormatVersionOverride`/`excludedScopesOverride` 只影响回报值
-    /// （v7 的 sourceFormatVersion 是包版本 7，内嵌记录流仍是 v6 契约）。
+    /// v1–v6 明文与 v7+ 包共用的导入主体：临时库 → 校验汇总 → 备份成
+    /// prepared 库。`sourceFormatVersionOverride`/`excludedScopesOverride`
+    /// 只影响回报值（v7 的 sourceFormatVersion 是包版本 7，内嵌记录流
+    /// 是 v6/v7 契约；v8/v9 包的包版本与记录版本一致）。
     private func importPreparedBackup(
         fileURL: URL,
         preparationID: UUID,
@@ -361,6 +362,19 @@ public actor PortableBackupRestorationPreparer {
                     in: db,
                     restoredAt: manifest.exportedAt
                 )
+                // v9 learning-unit 恢复语义（wire §2.1）：alias 的
+                // `current` 绑定断言的是源设备词典状态，词典数据不进
+                // 备份——恢复端不能当真，落地即 needsConfirmation。
+                // v1–v8 库中该表为空，调用是无操作。
+                try Self.finalizeImportedLearningUnitData(in: db)
+                // v9 aiStudy 恢复语义（wire §4.2 闸门类）：在途 Job 在
+                // 新设备上没有运行态——落库即 paused + missingSource；
+                // requesting 中块无已存结果归一 retryScheduled。v1–v8
+                // 库中各表为空，调用是无操作。
+                try Self.finalizeImportedAIStudyData(
+                    in: db,
+                    restoredAt: manifest.exportedAt
+                )
                 // v7：manifest 声明的附件元数据随恢复一并登记。所有 descriptor
                 // 已通过包校验，这里只做幂等插入（临时库为空表，不会冲突）。
                 if !attachmentDescriptors.isEmpty {
@@ -412,8 +426,9 @@ public actor PortableBackupRestorationPreparer {
                 sourceFilename: sourceFilename,
                 sourceFormatVersion: sourceFormatVersionOverride
                     ?? manifest.sourceFormatVersion,
-                // 源是 v8 时报 8（数据已按当前 schema 恢复）；v1–v7 源
-                // 维持既有语义——升级到当前默认版本回报。
+                // 源版本不低于当前默认时报源版本（v8/v9 数据均已按当前
+                // schema 恢复）；v1–v7 源维持既有语义——升级到当前默认
+                // 版本回报。
                 preparedFormatVersion: max(
                     sourceFormatVersionOverride
                         ?? manifest.sourceFormatVersion,
@@ -612,7 +627,139 @@ private extension PortableBackupRestorationPreparer {
         "conjugation_sessions.id",
         "conjugation_practice_attempts.id", "conjugation_practice_attempts.event_id",
         "conjugation_practice_attempts.session_id",
-        "conjugation_practice_attempts.question_id"
+        "conjugation_practice_attempts.question_id",
+        // v9：learning-unit / Reader 派生 / aiStudy / 覆盖快照各表的
+        // UUID 形列（wire §2 全部 id/FK/快照列均为小写 UUID——形状
+        // 检查先于任何存在性裁决；快照列只验形态不验存在）。
+        "lexical_learning_units.id",
+        "learning_unit_dictionary_aliases.unit_id",
+        "learning_unit_note_links.unit_id", "learning_unit_note_links.note_id",
+        "learning_unit_flags.unit_id",
+        "learning_unit_events.id", "learning_unit_events.operation_id",
+        "learning_unit_events.unit_id", "learning_unit_events.unit_id_snapshot",
+        "learning_unit_migration_items.note_id",
+        "learning_unit_migration_items.legacy_lexeme_id",
+        "learning_unit_migration_items.target_unit_id",
+        "reader_documents.study_deck_id",
+        "reader_study_occurrences.id", "reader_study_occurrences.document_id",
+        "reader_study_occurrences.unit_id", "reader_study_occurrences.resolution_id",
+        "reader_translation_blocks.id", "reader_translation_blocks.document_id",
+        "ai_study_jobs.id", "ai_study_jobs.document_id",
+        "ai_study_jobs.study_deck_id",
+        "ai_study_job_blocks.id", "ai_study_job_blocks.job_id",
+        "ai_study_job_blocks.result_id",
+        "ai_study_resolutions.id", "ai_study_resolutions.job_id",
+        "ai_study_resolutions.job_block_id", "ai_study_resolutions.document_id",
+        "ai_study_resolutions.unit_id",
+        "ai_study_receipts.operation_id",
+        "ai_study_selections.job_id", "ai_study_selections.applied_receipt_id",
+        "reader_learning_coverage_snapshots.id",
+        "reader_learning_coverage_snapshots.document_id",
+        "reader_learning_coverage_snapshots.document_id_snapshot"
+    ]
+
+    /// v9 弱引用列契约（wire §2.1/§4.1）：SET NULL 语义列上的悬空引用
+    /// 落库前归一为 NULL——审计/历史行留史，不拒绝整包；
+    /// `isForwardReference` 标记目标记录在源记录序上晚于本记录落库的
+    /// 前向引用（首遍写 NULL、第二遍目标存在才回填——「首遍插基础行、
+    /// 第二遍填弱关联」，技术文档 §15.2）。
+    struct WeakReferenceColumn {
+        /// 本表持有引用的列。
+        let column: String
+        /// 存在性判定的目标表 + 列。
+        let targetTable: String
+        let targetColumn: String
+        /// 目标记录序晚于本记录 → 两遍插入。
+        let isForwardReference: Bool
+    }
+
+    /// 按 recordType 分组的弱引用契约；`keyColumn` 供前向引用第二遍
+    /// 回填时定位本表行。
+    struct WeakReferenceSpec {
+        let tableName: String
+        let keyColumn: String
+        let columns: [WeakReferenceColumn]
+    }
+
+    /// 第二遍回填的登记项：行主键 + 列 + 原值。
+    struct DeferredWeakReferenceFill {
+        let spec: WeakReferenceSpec
+        let column: WeakReferenceColumn
+        let key: DatabaseValue
+        let value: DatabaseValue
+    }
+
+    /// v9 SET NULL 列全集（v8 的 source_contexts Reader 定位列无 FK、
+    /// 原样落库不参与本表）。除 `legacy_lexeme_id`（learningUnit-
+    /// MigrationItem 排在 lexeme 之前）外全部目标记录序在前。
+    static let weakReferenceSpecs: [String: WeakReferenceSpec] = [
+        "readerDocument": WeakReferenceSpec(
+            tableName: "reader_documents", keyColumn: "id",
+            columns: [WeakReferenceColumn(
+                column: "study_deck_id",
+                targetTable: "decks", targetColumn: "id",
+                isForwardReference: false)]),
+        "learningUnitEvent": WeakReferenceSpec(
+            tableName: "learning_unit_events", keyColumn: "id",
+            columns: [WeakReferenceColumn(
+                column: "unit_id",
+                targetTable: "lexical_learning_units", targetColumn: "id",
+                isForwardReference: false)]),
+        "learningUnitMigrationItem": WeakReferenceSpec(
+            tableName: "learning_unit_migration_items",
+            keyColumn: "source_key",
+            columns: [
+                WeakReferenceColumn(
+                    column: "note_id",
+                    targetTable: "notes", targetColumn: "id",
+                    isForwardReference: false),
+                WeakReferenceColumn(
+                    column: "legacy_lexeme_id",
+                    targetTable: "lexemes", targetColumn: "id",
+                    isForwardReference: true),
+                WeakReferenceColumn(
+                    column: "target_unit_id",
+                    targetTable: "lexical_learning_units", targetColumn: "id",
+                    isForwardReference: false),
+            ]),
+        "readerStudyOccurrence": WeakReferenceSpec(
+            tableName: "reader_study_occurrences", keyColumn: "id",
+            columns: [WeakReferenceColumn(
+                column: "unit_id",
+                targetTable: "lexical_learning_units", targetColumn: "id",
+                isForwardReference: false)]),
+        "aiStudyJob": WeakReferenceSpec(
+            tableName: "ai_study_jobs", keyColumn: "id",
+            columns: [WeakReferenceColumn(
+                column: "study_deck_id",
+                targetTable: "decks", targetColumn: "id",
+                isForwardReference: false)]),
+        "aiStudyResolution": WeakReferenceSpec(
+            tableName: "ai_study_resolutions", keyColumn: "id",
+            columns: [
+                WeakReferenceColumn(
+                    column: "job_id",
+                    targetTable: "ai_study_jobs", targetColumn: "id",
+                    isForwardReference: false),
+                WeakReferenceColumn(
+                    column: "job_block_id",
+                    targetTable: "ai_study_job_blocks", targetColumn: "id",
+                    isForwardReference: false),
+                WeakReferenceColumn(
+                    column: "document_id",
+                    targetTable: "reader_documents", targetColumn: "id",
+                    isForwardReference: false),
+                WeakReferenceColumn(
+                    column: "unit_id",
+                    targetTable: "lexical_learning_units", targetColumn: "id",
+                    isForwardReference: false),
+            ]),
+        "readerLearningCoverageSnapshot": WeakReferenceSpec(
+            tableName: "reader_learning_coverage_snapshots", keyColumn: "id",
+            columns: [WeakReferenceColumn(
+                column: "document_id",
+                targetTable: "reader_documents", targetColumn: "id",
+                isForwardReference: false)]),
     ]
 
     static func fileSize(at url: URL) throws -> Int64 {
@@ -657,6 +804,9 @@ private extension PortableBackupRestorationPreparer {
         )
         var lastRecordIndex = -1
         var actualTotal = 0
+        // v9 两遍插入登记（wire §3）：前向弱引用首遍落 NULL，
+        // footer 校验后目标行已齐再回填。
+        var deferredFills: [DeferredWeakReferenceFill] = []
 
         while true {
             try Task.checkCancellation()
@@ -686,6 +836,9 @@ private extension PortableBackupRestorationPreparer {
                         )
                     }
                 }
+                // 第二遍回填前向弱关联：目标行存在才写——悬空弱引用
+                // 保持 NULL（SET NULL 语义留史），不拒绝整包。
+                try applyDeferredWeakReferenceFills(deferredFills, in: db)
                 return manifest
             }
 
@@ -722,9 +875,20 @@ private extension PortableBackupRestorationPreparer {
                     reason: "\(recordType) 字段集合不符合 v\(manifest.sourceFormatVersion)。"
                 )
             }
-            let migratedObject = try migrateRecordToCurrentFormat(
+            var migratedObject = try migrateRecordToCurrentFormat(
                 object,
                 sourceVersion: manifest.sourceFormatVersion
+            )
+            // v9 弱引用裁决（wire §4.1）：SET NULL 列上的悬空引用归一
+            // 为 NULL；前向引用登记后改 NULL，footer 校验后第二遍回填。
+            migratedObject = try resolveWeakReferences(
+                migratedObject,
+                recordType: recordType,
+                metadata: metadata[currentSpecification.tableName, default: [:]],
+                lineNumber: lineNumber,
+                limits: limits,
+                deferredFills: &deferredFills,
+                in: db
             )
             do {
                 try insert(
@@ -899,7 +1063,119 @@ private extension PortableBackupRestorationPreparer {
                 migrated[column] = NSNull()
             }
         }
+        if sourceVersion < PortableBackupFormatRegistry.v9Version,
+           migrated["recordType"] as? String == "readerDocument" {
+            // v9 起 readerDocument 带牌组绑定列（v24 schema，wire §2.2）。
+            // study_deck_id 填 NULL = 未绑定（不伪造绑定）；
+            // study_deck_name_follows_title 是 NOT NULL DEFAULT 1 列，
+            // 目标规格要求逐列有值——落 1 = 「跟随标题」默认语义。
+            migrated["study_deck_id"] = NSNull()
+            migrated["study_deck_name_follows_title"] = 1
+        }
+        if sourceVersion < PortableBackupFormatRegistry.v9Version,
+           migrated["recordType"] as? String == "sourceContext" {
+            // v9 起 sourceContext 带 study_dedup_key（v24 schema，wire
+            // §2.2）。旧备份无 → 填 NULL（不复制旧行、不伪造去重来源）。
+            for column in PortableBackupFormatV9.sourceContextColumnsAddedInV9 {
+                migrated[column] = NSNull()
+            }
+        }
         return migrated
+    }
+
+    /// v9 弱引用裁决（wire §4.1）：SET NULL 列上的悬空引用在落库前
+    /// 归一为 NULL——SET NULL 语义本来就是「目标没了引用清空、行
+    /// 本体留史」，恢复沿用同一语义不拒绝整包。列值仍先过
+    /// `databaseValue` 的列级校验（类型/长度/UUID 形状），非法值
+    /// 照样拒绝——弱引用容忍的是「悬空」不是「坏形态」。
+    ///
+    /// 前向引用（`isForwardReference`，目标记录在源记录序上晚于本
+    /// 记录落库）无法在本遍判定存在性——登记 deferredFill、本遍
+    /// 写 NULL，第二遍目标存在才回填。
+    static func resolveWeakReferences(
+        _ object: [String: Any],
+        recordType: String,
+        metadata: [String: ColumnMetadata],
+        lineNumber: Int,
+        limits: PortableBackupPreparationLimits,
+        deferredFills: inout [DeferredWeakReferenceFill],
+        in db: Database
+    ) throws -> [String: Any] {
+        guard let spec = weakReferenceSpecs[recordType] else { return object }
+        var migrated = object
+        for weak in spec.columns {
+            let rawValue = migrated[weak.column] ?? NSNull()
+            guard !(rawValue is NSNull) else { continue }
+            guard let columnMetadata = metadata[weak.column] else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "临时库缺少 \(spec.tableName).\(weak.column)。"
+                )
+            }
+            let value = try databaseValue(
+                rawValue,
+                table: spec.tableName,
+                column: weak.column,
+                metadata: columnMetadata,
+                lineNumber: lineNumber,
+                limits: limits
+            )
+            if weak.isForwardReference {
+                guard let keyMetadata = metadata[spec.keyColumn] else {
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "临时库缺少 \(spec.tableName).\(spec.keyColumn)。"
+                    )
+                }
+                let key = try databaseValue(
+                    migrated[spec.keyColumn] ?? NSNull(),
+                    table: spec.tableName,
+                    column: spec.keyColumn,
+                    metadata: keyMetadata,
+                    lineNumber: lineNumber,
+                    limits: limits
+                )
+                deferredFills.append(DeferredWeakReferenceFill(
+                    spec: spec,
+                    column: weak,
+                    key: key,
+                    value: value
+                ))
+                migrated[weak.column] = NSNull()
+                continue
+            }
+            let exists = (try Int.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM \(weak.targetTable) "
+                    + "WHERE \(weak.targetColumn) = ?)",
+                arguments: [value]
+            ) ?? 0) > 0
+            if !exists {
+                migrated[weak.column] = NSNull()
+            }
+        }
+        return migrated
+    }
+
+    /// 第二遍弱关联回填（wire §3「首遍插基础行、第二遍填弱关联」）：
+    /// 目标行存在才写；悬空弱引用保持 NULL，不拒绝整包。
+    static func applyDeferredWeakReferenceFills(
+        _ fills: [DeferredWeakReferenceFill],
+        in db: Database
+    ) throws {
+        for fill in fills {
+            let exists = (try Int.fetchOne(
+                db,
+                sql: "SELECT EXISTS(SELECT 1 FROM \(fill.column.targetTable) "
+                    + "WHERE \(fill.column.targetColumn) = ?)",
+                arguments: [fill.value]
+            ) ?? 0) > 0
+            guard exists else { continue }
+            try db.execute(
+                sql: "UPDATE \(fill.spec.tableName) "
+                    + "SET \(fill.column.column) = ? "
+                    + "WHERE \(fill.spec.keyColumn) = ?",
+                arguments: [fill.value, fill.key]
+            )
+        }
     }
 
     static func validateFooter(_ object: [String: Any], checksum: SHA256.Digest) throws {
@@ -948,7 +1224,7 @@ private extension PortableBackupRestorationPreparer {
         in db: Database
     ) throws -> [String: [String: ColumnMetadata]] {
         var result: [String: [String: ColumnMetadata]] = [:]
-        // 写入目标是当前 schema 对应的记录协议（registry target = v8）。
+        // 写入目标是当前 schema 对应的记录协议（registry target = v9）。
         for specification in PortableBackupFormatRegistry.targetSpecifications {
             let rows = try Row.fetchAll(
                 db,
@@ -1098,6 +1374,8 @@ private extension PortableBackupRestorationPreparer {
         try validateLexemeData(in: db)
         try validateClozeData(in: db)
         try validateImportJobData(in: db)
+        // v9 域（§4.1）：v1–v8 源各表为空 → 无操作。
+        try validateAIStudyData(in: db)
         return try summarizeDatabase(db)
     }
 
@@ -1472,6 +1750,56 @@ private extension PortableBackupRestorationPreparer {
         )
     }
 
+    /// v9 learning-unit 恢复语义（wire §2.1/§4.1）：词典数据不进备份，
+    /// alias 的 `current` 只断言源设备上的绑定——恢复端无法当真，
+    /// 落地即 `needsConfirmation`，本地词典复核通过后由重绑定流程
+    /// 转回 current。`stale`/`superseded`/`needsConfirmation` 本身是
+    /// 历史态原样保留；`resolved_at_ms` 保留为上次解析时刻的史实。
+    static func finalizeImportedLearningUnitData(in db: Database) throws {
+        try db.execute(
+            sql: """
+                UPDATE learning_unit_dictionary_aliases
+                SET status = 'needsConfirmation'
+                WHERE status = 'current'
+                """
+        )
+    }
+
+    /// v9 aiStudy 恢复语义（wire §4.2 闸门类）：
+    /// - 在途 Job（analyzing/waitingForAI/applying）在新设备上没有运行态
+    ///   可言——落库即 `paused` + `resume_reason = missingSource`（恢复
+    ///   语义使全部文档 availability 降为 missing——缺原文是恒真原因），
+    ///   `updated_at_ms` 记恢复时刻；不自动派发网络。pending（未启动）
+    ///   与 awaitingConfirmation（等用户）原样保留。
+    /// - requesting 中块若无已存结果（result_id IS NULL）是「未知窗口」
+    ///   响应——D10 不承诺远端 exactly-once，归一为 retryScheduled 等
+    ///   用户显式续跑；next_retry_at_ms 清空（由续跑时刻再排期）。
+    ///   其余块状态（含 result_id 已持久化的 requesting——恢复后可走
+    ///   usePersistedResult 路径）与 receipt/selection 原样保留。
+    static func finalizeImportedAIStudyData(
+        in db: Database,
+        restoredAt: Date
+    ) throws {
+        let restoredAtMilliseconds = try DatabaseValueCodec.encode(restoredAt)
+        try db.execute(
+            sql: """
+                UPDATE ai_study_jobs
+                SET status = 'paused',
+                    resume_reason = 'missingSource',
+                    updated_at_ms = ?
+                WHERE status IN ('analyzing', 'waitingForAI', 'applying')
+                """,
+            arguments: [restoredAtMilliseconds]
+        )
+        try db.execute(
+            sql: """
+                UPDATE ai_study_job_blocks
+                SET status = 'retryScheduled', next_retry_at_ms = NULL
+                WHERE status = 'requesting' AND result_id IS NULL
+                """
+        )
+    }
+
     /// v8 Reader 元数据语义校验（§14.2-3/4）：hash 形态、chapter→document
     /// 归属一致性、locator 结构。无正文时定位只能做结构/数值校验——
     /// 不声称验证了「位置在原文内」，重关联后才做文本匹配。
@@ -1787,6 +2115,61 @@ private extension PortableBackupRestorationPreparer {
         }
     }
 
+    /// v9 aiStudy/派生域的语义校验（wire §4.1）：schema CHECK 覆盖
+    /// enum/唯一性/JSON 合法性，此处补 CHECK 表达不了的两类约束——
+    /// 计数/修订列非负（epoch、attempt_count、各 revision 等）与
+    /// 全文 SHA-256 形态的 payload_hash。enum/唯一锚点/双 primary
+    /// 由唯一索引与 CHECK 在插入期已拦截。
+    static func validateAIStudyData(in db: Database) throws {
+        let nonNegativeColumns: [(table: String, column: String)] = [
+            ("ai_study_jobs", "epoch"),
+            ("ai_study_jobs", "selection_revision"),
+            ("ai_study_jobs", "processed_blocks"),
+            ("ai_study_jobs", "applied_units"),
+            ("ai_study_jobs", "confirmed_units"),
+            ("ai_study_jobs", "failed_blocks"),
+            ("ai_study_job_blocks", "attempt_count"),
+            ("ai_study_resolutions", "revision"),
+            ("ai_study_selections", "selection_revision"),
+            ("ai_study_selections", "evidence_revision"),
+            ("reader_study_occurrences", "content_revision"),
+            ("reader_translation_blocks", "translation_revision"),
+            ("reader_learning_coverage_snapshots", "content_revision"),
+            ("reader_learning_coverage_snapshots", "knowledge_revision"),
+        ]
+        for (table, column) in nonNegativeColumns {
+            let violations = try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM \(table) WHERE \(column) < 0"
+            ) ?? 0
+            guard violations == 0 else {
+                throw PortableBackupPreparationError.databaseValidation(
+                    "\(table).\(column) 存在 \(violations) 个负值。"
+                )
+            }
+        }
+        // payload_hash 是 sha256Hex 摘要（仓储/契约侧统一
+        // `AIStudyCanonicalJSON.sha256Hex`）——NULL 允许（events 列
+        // 可空），非 NULL 必须是小写 64 hex。
+        let hashColumns: [(table: String, column: String)] = [
+            ("learning_unit_events", "payload_hash"),
+            ("ai_study_receipts", "payload_hash"),
+        ]
+        for (table, column) in hashColumns {
+            let values = try String.fetchAll(
+                db,
+                sql: "SELECT \(column) FROM \(table) WHERE \(column) IS NOT NULL"
+            )
+            for value in values {
+                guard isLowercaseSHA256Hex(value) else {
+                    throw PortableBackupPreparationError.databaseValidation(
+                        "\(table).\(column) 不是小写 SHA-256 hex。"
+                    )
+                }
+            }
+        }
+    }
+
     /// Attachment references are opaque resource IDs, never filesystem paths —
     /// reject anything that could traverse or address the local file system.
     static func isControlledInboxResourceID(_ value: String) -> Bool {
@@ -1929,7 +2312,7 @@ private extension PortableBackupRestorationPreparer {
 
     static func summarizeDatabase(_ db: Database) throws -> PortableBackupDataSummary {
         var counts: [String: Int] = [:]
-        // 汇总按当前 schema 对应的目标规格（registry target = v8）统计。
+        // 汇总按当前 schema 对应的目标规格（registry target = v9）统计。
         for specification in PortableBackupFormatRegistry.targetSpecifications {
             counts[specification.recordType] = try Int.fetchOne(
                 db,

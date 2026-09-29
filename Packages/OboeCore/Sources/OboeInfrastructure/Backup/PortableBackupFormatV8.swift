@@ -283,14 +283,20 @@ enum PortableBackupFormatV8 {
 
 /// 记录协议 registry（设计 §14.1）：按 source version 返回不可变表规格，
 /// 替换 exporter/preparer 里对 `PortableBackupFormatV7` 的当前版本硬编码。
-/// 旧 V1–V7 规格保持冻结、不随现行表结构漂移。
+/// 旧 V1–V8 规格保持冻结、不随现行表结构漂移。
 enum PortableBackupFormatRegistry {
     /// v8 记录/包协议版本号（v0.7.0 起为导出默认；v1–v7 只读——
     /// 见 docs/v0.7/s23-backup-v8-records.md）。
     static let v8Version = 8
 
+    /// v9 记录协议版本号（v0.7.5 S19，backup-v9-wire.md）：登记为可读
+    /// 恢复源 + opt-in 导出版本（`recordFormatVersion:` 显式传入）。
+    /// 默认导出仍由 `PortableBackupFormat.currentVersion` 控制——v9
+    /// 默认切换是独立 gate，不在本结构内决定。
+    static let v9Version = 9
+
     /// 恢复端可接受的最高记录协议版本——超出即判 future。
-    static let maximumSupportedVersion = v8Version
+    static let maximumSupportedVersion = v9Version
 
     /// 按源版本取不可变表规格；未知版本返回 nil（由调用方报
     /// unsupportedFormatVersion）。
@@ -306,6 +312,7 @@ enum PortableBackupFormatRegistry {
         case 6: return PortableBackupFormatV6.tableSpecifications
         case 7: return PortableBackupFormatV7.tableSpecifications
         case 8: return PortableBackupFormatV8.tableSpecifications // v8Version
+        case 9: return PortableBackupFormatV9.tableSpecifications // v9Version
         default: return nil
         }
     }
@@ -315,16 +322,16 @@ enum PortableBackupFormatRegistry {
         tableSpecifications(forVersion: version)?.map(\.recordType)
     }
 
-    /// 恢复写入目标规格：当前库 schema（v22）对应的记录协议 = v8。
-    /// v1–v7 源记录由 migrateRecordToCurrentFormat 补齐缺列后按此规格
-    /// 严格插入；v8 源记录的列集合与本规格逐字一致。
-    static let targetSpecifications = PortableBackupFormatV8.tableSpecifications
+    /// 恢复写入目标规格：当前库 schema（v26）对应的记录协议 = v9。
+    /// v1–v8 源记录由 migrateRecordToCurrentFormat 补齐缺列后按此规格
+    /// 严格插入；v9 源记录的列集合与本规格逐字一致。
+    static let targetSpecifications = PortableBackupFormatV9.tableSpecifications
     static let targetSpecificationByRecordType =
-        PortableBackupFormatV8.specificationByRecordType
+        PortableBackupFormatV9.specificationByRecordType
 
-    /// 导出允许的版本集合：仅当前默认版本。早于当前的版本不可再
-    /// 生成——旧格式只能读不能写。
+    /// 导出允许的版本集合：当前默认版本 + opt-in 登记的 v9。
+    /// 早于当前默认的版本不可再生成——旧格式只能读不能写。
     static func isExportable(version: Int) -> Bool {
-        version == PortableBackupFormat.currentVersion
+        version == PortableBackupFormat.currentVersion || version == v9Version
     }
 }

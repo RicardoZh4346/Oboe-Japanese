@@ -17,13 +17,17 @@ public enum PortableBackupPackageFormat {
     /// v8 包版本：v8 包恒携带 v8 记录流（合法版本对见
     /// `isSupportedVersionPair`）。
     public static let formatVersionV8 = 8
+    /// v9 包版本：v9 包恒携带 v9 记录流。可读入/恢复 + opt-in 导出
+    /// （`export(formatVersion:)` 显式传入）；默认包版本不变——v9
+    /// 默认切换是独立 gate。
+    public static let formatVersionV9 = 9
     /// 当前默认包版本：v0.7.0（S30 签核）起新导出即 v8。
     public static let formatVersion = formatVersionV8
     /// 读取端可接受的最高包版本——超出即 `futurePackageVersion`。
-    public static let maximumSupportedFormatVersion = formatVersionV8
+    public static let maximumSupportedFormatVersion = formatVersionV9
     /// 全部已知包版本；之外的版本号报 `unsupportedPackageVersion`。
     public static let supportedFormatVersions: Set<Int> = [
-        formatVersionV7, formatVersionV8
+        formatVersionV7, formatVersionV8, formatVersionV9
     ]
     public static let container = "zip"
     public static let manifestEntryName = "manifest.json"
@@ -37,14 +41,14 @@ public enum PortableBackupPackageFormat {
     public static let recordsFormatVersion = PortableBackupFormat.currentVersion
 
     /// 包/记录版本的合法组合（设计 §14.1）：v7 容器可携带 v6（历史
-    /// 导出）或 v7 记录流；v8 包恒携带 v8 记录。其余组合一律拒绝——
-    /// 不猜测、不静默降级。
+    /// 导出）或 v7 记录流；v8/v9 包恒携带同版本记录流。其余组合一律
+    /// 拒绝——不猜测、不静默降级。
     public static func isSupportedVersionPair(
         packageVersion: Int,
         recordVersion: Int
     ) -> Bool {
         switch (packageVersion, recordVersion) {
-        case (7, 6), (7, 7), (8, 8):
+        case (7, 6), (7, 7), (8, 8), (9, 9):
             return true
         default:
             return false
@@ -64,6 +68,11 @@ public enum PortableBackupPackageFormat {
     /// 导入 staging（见 `PortableBackupFormatV8.additionalExcludedScopes`）。
     public static let excludedScopesV8: [String] =
         excludedScopes + PortableBackupFormatV8.additionalExcludedScopes
+
+    /// v9 包的排除范围：v8 集合 + aiStudyRuntime/providerSecrets
+    /// （见 `PortableBackupFormatV9.additionalExcludedScopes`）。
+    public static let excludedScopesV9: [String] =
+        excludedScopesV8 + PortableBackupFormatV9.additionalExcludedScopes
 
     /// 接受的图片 MIME → 允许的包内扩展名（小写）。
     /// 与 `InboxImageValidator` 接受的源格式一致；当前导出端只写 JPEG 预览，
