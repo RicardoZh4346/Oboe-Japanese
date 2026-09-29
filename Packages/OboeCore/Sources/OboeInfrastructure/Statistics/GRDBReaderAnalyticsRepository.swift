@@ -10,10 +10,14 @@ import OboeDomain
 ///   的有效事件按 kind/学习日聚合；撤销事件单列 `undoneCount`。
 ///   事件是历史行为量——同一 lexeme 反复切换状态每次切换都各算一次
 ///   事件（如实呈现操作量），绝不与「当前掌握词数」混用。
-/// - **当前掌握词数**（`vocabulary_knowledge_overrides` +
-///   `lexeme_note_links`）：每 lexeme 至多一行 override，天然按
-///   lexeme 去重；反复切换只是行迁移，不放大计数。learning 只数
-///   `notes.kind='vocabulary'` 的关联（与 `state()` 真值表一致）。
+/// - **当前掌握词数**（D19：learning unit 三态聚合）：
+///   词→unit 解析与 `GRDBVocabularyKnowledgeRepository
+///   .wordKnowledgeStates` 同规则（current 义项 ∪ note 链路
+///   载体）；每 lexeme 取其 unit 最小态聚合（任一 unknown →
+///   词级 unknown、全部 mastered → known）——不再读
+///   `vocabulary_knowledge_overrides` 作运行态真值。
+///   `ignored_count` 仅回传该表的历史存档行数（审计信息，
+///   不参与任何运行态判定；D04：ignored 已退出运行态）。
 /// - **学习日分桶**：事件无 `study_day_id` 列——按
 ///   `created_at_ms ∈ [starts_at_ms, ends_at_ms)` 归桶；多时区行
 ///   重叠窗口取 starts_at_ms 最新一行（每事件恰好归一天，不重数）；
@@ -143,20 +147,48 @@ public struct GRDBReaderAnalyticsRepository: ReaderAnalyticsRepository, Sendable
 
     // MARK: - 当前知识态（真值表聚合）
 
-    /// 四桶互斥：override 优先（known/ignored 每 lexeme 至多一行），
-    /// learning 只数 vocabulary 关联且无 override 的 lexeme。
+    /// 词级聚合（与 `wordKnowledgeStates` 同一 merge）：unit 最小态
+    /// ——任一 unknown → 词级 unknown；全部 mastered → known。
+    /// `ignored_count` 读历史存档行数仅作审计展示（D19/D04）。
     static let knowledgeSummarySQL = """
+        WITH lex_state AS (
+            SELECT x.lexeme_id AS lexeme_id,
+                   MIN(CASE
+                       WHEN COALESCE(f.too_easy, 0) = 1 THEN 2
+                       WHEN EXISTS(
+                           SELECT 1 FROM learning_unit_note_links nl
+                           JOIN notes n ON n.id = nl.note_id
+                                AND n.kind = 'vocabulary'
+                           WHERE nl.unit_id = x.unit_id) THEN 1
+                       ELSE 0
+                   END) AS st
+            FROM (
+                SELECT l.id AS lexeme_id, u.id AS unit_id
+                FROM lexemes l
+                JOIN lexical_learning_units u
+                  ON u.identity_kind = 'dictionarySense'
+                 AND u.binding_status = 'current'
+                 AND u.dictionary_entry_id = COALESCE(
+                       (SELECT b.entry_id
+                          FROM lexeme_dictionary_bindings b
+                         WHERE b.lexeme_id = l.id
+                           AND b.status = 'current'),
+                       l.entry_id)
+                UNION
+                SELECT x.lexeme_id, ul.unit_id
+                FROM lexeme_note_links x
+                JOIN learning_unit_note_links ul
+                  ON ul.note_id = x.note_id
+            ) x
+            LEFT JOIN learning_unit_flags f ON f.unit_id = x.unit_id
+            GROUP BY x.lexeme_id
+        )
         SELECT
-            (SELECT COUNT(*) FROM vocabulary_knowledge_overrides
-                WHERE state = 'known') AS known_count,
-            (SELECT COUNT(*) FROM vocabulary_knowledge_overrides
-                WHERE state = 'ignored') AS ignored_count,
-            (SELECT COUNT(DISTINCT l.lexeme_id)
-                FROM lexeme_note_links l
-                JOIN notes n ON n.id = l.note_id AND n.kind = 'vocabulary'
-                LEFT JOIN vocabulary_knowledge_overrides o
-                    ON o.lexeme_id = l.lexeme_id
-                WHERE o.lexeme_id IS NULL) AS learning_count,
+            (SELECT COUNT(*) FROM lex_state WHERE st = 2) AS known_count,
+            -- D19：ignored 无运行时载体；字段保留恒 0，
+            -- unmarkedCount = tracked - known - learning。
+            0 AS ignored_count,
+            (SELECT COUNT(*) FROM lex_state WHERE st = 1) AS learning_count,
             (SELECT COUNT(*) FROM lexemes) AS tracked_count
         """
 

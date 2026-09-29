@@ -54,6 +54,14 @@ protocol LearningUnitFlagProviding: Sendable {
     func setFlagTooEasy(
         _ command: TooEasyCommand, at date: Date
     ) async throws -> LearningUnitFlag
+    /// D19 词级标记：lexeme 的全部活 unit → tooEasy（词条绑定
+    /// current 义项 ∪ note 链路载体，与词级状态推导同规则）。
+    /// 返回实际写入 flag 变更的 unit 数；0 = 无可标记 unit——
+    /// 调用方如实提示，绝不臆造义项归属。
+    @discardableResult
+    func setWordTooEasy(
+        lexemeID: UUID, value: Bool, operationID: UUID, at date: Date
+    ) async throws -> Int
     /// CAS 撤销（凭 eventID + revision——覆盖另一窗口新设置被拒）。
     @discardableResult
     func undoTooEasy(

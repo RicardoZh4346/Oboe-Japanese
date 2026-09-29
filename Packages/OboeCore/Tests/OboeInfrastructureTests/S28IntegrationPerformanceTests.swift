@@ -190,8 +190,8 @@ final class S28IntegrationPerformanceTests: XCTestCase {
         }
         _ = try await f.service.analyze(documentID: docID)
 
-        _ = try await f.knowledge.setOverride(
-            lexemeID: lexA, override: .known, at: Date())
+        // D19：known = unit flag（entry 1 绑定 lexA）。
+        try await f.flagLexemeTooEasy(entryID: 1, lemma: "会")
 
         var samples: [Int64] = []
         for _ in 0..<21 {
@@ -501,6 +501,36 @@ private struct CoverageFixture {
                 ])
         }
         return id
+    }
+
+    /// D19 fixture：绑定 entry 的 dictionarySense unit + tooEasy
+    /// flag——词级「known」运行时态的唯一来源。
+    func flagLexemeTooEasy(entryID: Int64, lemma: String) async throws {
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'dictionarySense', ?, 'jmdict', ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1',
+                        ?, NULL, '{}', 'current', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "ds:\(unitID.uuidString)", entryID, lemma])
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_flags(
+                        unit_id, too_easy, revision, updated_at_ms)
+                    VALUES (?, 1, 1, 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(unitID)])
+        }
     }
 }
 

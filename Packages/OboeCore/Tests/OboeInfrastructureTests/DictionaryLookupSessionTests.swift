@@ -107,11 +107,12 @@ final class DictionaryLookupSessionTests: XCTestCase {
     // MARK: - 知识态标注 + fallback
 
     func testItemsCarryKnowledgeAndGloss() async throws {
-        // entry 1 → lexeme + known override；entry 2 → 无 lexeme。
+        // entry 1 → lexeme + unit tooEasy flag（D19 known 口径）；
+        // entry 2 → 无 lexeme。
         let key = LexicalIdentityKey.jmdict(
             entryID: 1, normalizedForm: "事", reading: "こと")
         let knowledgeRepo = GRDBVocabularyKnowledgeRepository(pool: pool)
-        let lexeme = try await knowledgeRepo.resolveLexeme(
+        _ = try await knowledgeRepo.resolveLexeme(
             key: key,
             seed: Lexeme(
                 id: UUID(), key: key, writtenForm: "事",
@@ -119,7 +120,31 @@ final class DictionaryLookupSessionTests: XCTestCase {
                 dictionaryVersionAtResolution: "v1",
                 resolutionStatus: .resolved,
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000)))
-        _ = try await knowledgeService.markKnown(lexemeID: lexeme.id)
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'dictionarySense', ?, 'jmdict', 1, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1',
+                        '事', NULL, '{}', 'current', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "ds:\(unitID.uuidString)"])
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_flags(
+                        unit_id, too_easy, revision, updated_at_ms)
+                    VALUES (?, 1, 1, 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(unitID)])
+        }
 
         let session = makeSession(query: "事")
         let page = try await session.nextPage()
@@ -141,7 +166,8 @@ final class DictionaryLookupSessionTests: XCTestCase {
         let page1 = try await session.nextPage()
         XCTAssertEqual(page1.items.count, 2)
 
-        // 知识写（override）——经 service 走 invalidation center。
+        // 知识失效信号（D19：unit 写后由调用方显式 invalidate——
+        // 此处直接走同一 invalidation center 验证会话失效语义）。
         let key = LexicalIdentityKey.jmdict(
             entryID: 2, normalizedForm: "あか", reading: "あか")
         let knowledgeRepo = GRDBVocabularyKnowledgeRepository(pool: pool)
@@ -153,7 +179,7 @@ final class DictionaryLookupSessionTests: XCTestCase {
                 dictionaryVersionAtResolution: "v1",
                 resolutionStatus: .resolved,
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000)))
-        _ = try await knowledgeService.markKnown(lexemeID: lexeme.id)
+        await knowledgeService.invalidate(lexemeID: lexeme.id)
 
         await s19AssertThrowsAsync(try await session.nextPage()) { error in
             XCTAssertEqual(

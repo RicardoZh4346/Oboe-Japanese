@@ -3,7 +3,7 @@ import GRDB
 import OboeDomain
 
 /// v18 `VocabularyKnowledgeRepository` 的 GRDB 实现 +
-/// `VocabularyKnowledgeLinking` 原子扩展。
+/// `VocabularyKnowledgeLinking` 关联查询。
 ///
 /// 幂等模型（§11.2 + 冻结协议注释）：
 /// - 知识域内部操作的 operation_id 由语义指纹确定性派生
@@ -11,24 +11,23 @@ import OboeDomain
 ///   同一 receipt 行；
 /// - 写前检查：receipt 存在 **且** 当前存储态已等于请求态 → 纯回放，
 ///   直接返回该 receipt UUID，不写任何行、不新增事件；
-/// - receipt 存在但存储态已漂移（例：known→reset→known 的第二次
-///   known）→ 正常执行写，`ON CONFLICT DO UPDATE` 让 receipt 指向
-///   最新结果。所以「receipt 存在」单独不构成跳过条件，必须结合
-///   当前态判断；
-/// - `setOverride` 返回值 = 该确定性 receipt UUID（冻结签名约束下
-///   能让调用方稳定对齐的 receipt 身份）。
+/// - receipt 存在但存储态已漂移 → 正常执行写，
+///   `ON CONFLICT DO UPDATE` 让 receipt 指向最新结果。
 ///
 /// 事件映射（`ReaderActivityKind` 冻结枚举只有 5 态）：
-/// - override=known → `markedKnown`；override 清除（reset）→
-///   `resetKnowledge`；`userConfirmed` 关联与「加入学习」→
-///   `linkedExistingNote`；
-/// - override=ignored、backfill/自动关联、unlink → **不写事件**
-///   （枚举无对应 case——不臆造扩展值；这些操作只有 receipt 行，
-///   见 s08-lexical-knowledge.md Contract deltas）。
+/// - `userConfirmed` 关联 → `linkedExistingNote`；
+/// - backfill/自动关联、unlink → **不写事件**（枚举无对应 case——
+///   不臆造扩展值；这些操作只有 receipt 行）。
 ///
-/// 有效关联计数：`state()` 只数 `notes.kind = 'vocabulary'` 的 link
-/// （§6.3：关联 vocabulary Note 才进入 learning；grammar/cloze
-/// Note 的关联存在但不驱动知识态）。
+/// D19（v0.7.5）运行态真值切换：
+/// - 词级知识态唯一来源 = learning-unit flags/links
+///   （`wordKnowledgeStates`：词条绑定 current 义项 ∪
+///   note 链路载体 → 逐 unit 三态 → 最小值聚合）；
+/// - `vocabulary_knowledge_overrides` 仅供 v8 导入/兼容审计——
+///   本类型不读不写（`setOverride`/`addToLearning` 已删除，
+///   `lexeme_note_links` 仍随挖词镜像写入以供 v8 导出与审计）；
+/// - 词级「已知/重置」写路径 =
+///   `GRDBLearningUnitRepository.setWordTooEasy`。
 public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeRepository,
     VocabularyKnowledgeLinking, @unchecked Sendable {
 
@@ -43,29 +42,9 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
     // MARK: - 读
 
     public func state(lexemeID: UUID) async throws -> VocabularyKnowledgeState {
-        let encoded = DatabaseValueCodec.encode(lexemeID)
-        return try await pool.read { db in
-            let overrideRaw = try String.fetchOne(
-                db,
-                sql: """
-                    SELECT state FROM vocabulary_knowledge_overrides
-                    WHERE lexeme_id = ?
-                    """,
-                arguments: [encoded]
-            )
-            let linkedNoteCount = try Int.fetchOne(
-                db,
-                sql: """
-                    SELECT COUNT(*) FROM lexeme_note_links l
-                    JOIN notes n ON n.id = l.note_id AND n.kind = 'vocabulary'
-                    WHERE l.lexeme_id = ?
-                    """,
-                arguments: [encoded]
-            ) ?? 0
-            return VocabularyKnowledgeResolver.resolve(
-                override: overrideRaw.flatMap(KnowledgeOverride.init(rawValue:)),
-                linkedNoteCount: linkedNoteCount
-            )
+        try await pool.read { db in
+            try Self.wordKnowledgeStates(
+                lexemeIDs: [lexemeID], in: db)[lexemeID] ?? .unknown
         }
     }
 
@@ -113,150 +92,120 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
         }
     }
 
-    /// S09 批量状态解析：覆盖率/渲染路径的批量读口。两次 chunked
-    /// IN 查询（override + 有效关联计数）解析全部 id，不逐 lexeme
-    /// SQL。返回只含已入库 lexeme 的项——未入库/无覆盖信息由调用方
-    /// 按真值表记 unknown。
+    /// S09 批量状态解析：覆盖率/渲染路径的批量读口。
+    ///
+    /// D19（v0.7.5）：词级知识态唯一真值 = learning unit flags/links，
+    /// `vocabulary_knowledge_overrides` 仅供 v8 导入/兼容审计，
+    /// 运行态永不读取。词级聚合规则（word-level merge）：
+    /// - unit 集合 = 该 lexeme 词条绑定的 `current` dictionarySense
+    ///   units（`lexeme_dictionary_bindings.status='current'` 优先，
+    ///   回退 `lexemes.entry_id`）∪ 经 `lexeme_note_links →
+    ///   learning_unit_note_links` 触达的学习载体单元
+    ///   （localNote/legacyUnresolved/已绑义项）；
+    /// - 逐 unit 按 `LearningKnowledgeResolver` 求三态后取
+    ///   最小值聚合：任一 unknown → 词级 unknown；否则任一
+    ///   learning → learning；全部 mastered → known；
+    /// - 零 unit → unknown；ignored 运行态不再产生（D04）。
+    ///
+    /// 两次 chunked IN 查询解析全部 id，不逐 lexeme SQL。返回只含
+    /// 已入库 lexeme 的项——未入库/无 unit 由调用方按 unknown 处理。
     public func states(
         lexemeIDs: [UUID]
     ) async throws -> [UUID: VocabularyKnowledgeState] {
         let uniqueIDs = Array(Set(lexemeIDs))
         guard !uniqueIDs.isEmpty else { return [:] }
-        let encoded = uniqueIDs.map(DatabaseValueCodec.encode)
         return try await pool.read { db in
-            var overrides: [UUID: KnowledgeOverride] = [:]
-            var linkCounts: [UUID: Int] = [:]
-            for chunk in encoded.chunked(400) {
-                let placeholders = Array(repeating: "?", count: chunk.count)
-                    .joined(separator: ",")
-                let args = StatementArguments(Array(chunk))
-                for row in try Row.fetchAll(
-                    db,
-                    sql: """
-                        SELECT lexeme_id, state FROM vocabulary_knowledge_overrides
-                        WHERE lexeme_id IN (\(placeholders))
-                        """,
-                    arguments: args
-                ) {
-                    let id: String = row["lexeme_id"]
-                    let raw: String = row["state"]
-                    if let uuid = try? DatabaseValueCodec.decodeUUID(id),
-                       let state = KnowledgeOverride(rawValue: raw) {
-                        overrides[uuid] = state
-                    }
-                }
-                for row in try Row.fetchAll(
-                    db,
-                    sql: """
-                        SELECT l.lexeme_id, COUNT(*) AS n
-                        FROM lexeme_note_links l
-                        JOIN notes n ON n.id = l.note_id AND n.kind = 'vocabulary'
-                        WHERE l.lexeme_id IN (\(placeholders))
-                        GROUP BY l.lexeme_id
-                        """,
-                    arguments: args
-                ) {
-                    let id: String = row["lexeme_id"]
-                    if let uuid = try? DatabaseValueCodec.decodeUUID(id) {
-                        linkCounts[uuid] = row["n"]
-                    }
-                }
-            }
-            var result: [UUID: VocabularyKnowledgeState] = [:]
-            result.reserveCapacity(uniqueIDs.count)
-            for id in uniqueIDs {
-                result[id] = VocabularyKnowledgeResolver.resolve(
-                    override: overrides[id],
-                    linkedNoteCount: linkCounts[id] ?? 0
-                )
-            }
-            return result
+            try Self.wordKnowledgeStates(lexemeIDs: uniqueIDs, in: db)
         }
     }
 
-    // MARK: - 写（override）
-
-    @discardableResult
-    public func setOverride(
-        lexemeID: UUID,
-        override: KnowledgeOverride?,
-        at date: Date
-    ) async throws -> UUID {
-        let requested = override?.rawValue ?? "reset"
-        let operationID = GRDBReaderActivityStore.deterministicOperationID(
-            "knowledge_override", DatabaseValueCodec.encode(lexemeID), requested)
-        let payloadHash = GRDBReaderActivityStore.payloadHash(
-            "knowledge_override|\(lexemeID.uuidString.lowercased())|\(requested)")
-        let encodedLexeme = DatabaseValueCodec.encode(lexemeID)
-        let atMs = try DatabaseValueCodec.encode(date)
-        return try await pool.write { db in
-            guard try Self.lexemeExists(lexemeID: lexemeID, in: db) else {
-                throw VocabularyKnowledgeError.lexemeNotFound(lexemeID)
-            }
-            let current = try String.fetchOne(
+    /// 词级聚合的唯一实现点（覆盖率/着色/词典徽章/统计共用）。
+    /// 返回字典覆盖所有传入 id（含 unknown）——调用方无需补默认。
+    static func wordKnowledgeStates(
+        lexemeIDs: [UUID], in db: Database
+    ) throws -> [UUID: VocabularyKnowledgeState] {
+        let uniqueIDs = Array(Set(lexemeIDs))
+        guard !uniqueIDs.isEmpty else { return [:] }
+        var best: [UUID: Int] = [:]
+        best.reserveCapacity(uniqueIDs.count)
+        for chunk in uniqueIDs.map(DatabaseValueCodec.encode).chunked(400) {
+            let placeholders = Array(repeating: "?", count: chunk.count)
+                .joined(separator: ",")
+            // 两个 UNION 支路各绑定一份 lexeme id 列表。
+            let args = StatementArguments(Array(chunk) + Array(chunk))
+            for row in try Row.fetchAll(
                 db,
                 sql: """
-                    SELECT state FROM vocabulary_knowledge_overrides
-                    WHERE lexeme_id = ?
+                    SELECT x.lexeme_id AS lexeme_id, x.unit_id AS unit_id,
+                           COALESCE(f.too_easy, 0) AS too_easy,
+                           EXISTS(
+                               SELECT 1 FROM learning_unit_note_links nl
+                               JOIN notes n ON n.id = nl.note_id
+                                    AND n.kind = 'vocabulary'
+                               WHERE nl.unit_id = x.unit_id
+                           ) AS linked
+                    FROM (
+                        SELECT l.id AS lexeme_id, u.id AS unit_id
+                        FROM lexemes l
+                        JOIN lexical_learning_units u
+                          ON u.identity_kind = 'dictionarySense'
+                         AND u.binding_status = 'current'
+                         AND u.dictionary_entry_id = COALESCE(
+                               (SELECT b.entry_id
+                                  FROM lexeme_dictionary_bindings b
+                                 WHERE b.lexeme_id = l.id
+                                   AND b.status = 'current'),
+                               l.entry_id)
+                        WHERE l.id IN (\(placeholders))
+                        UNION
+                        SELECT x.lexeme_id, ul.unit_id
+                        FROM lexeme_note_links x
+                        JOIN learning_unit_note_links ul
+                          ON ul.note_id = x.note_id
+                        WHERE x.lexeme_id IN (\(placeholders))
+                    ) x
+                    LEFT JOIN learning_unit_flags f ON f.unit_id = x.unit_id
                     """,
-                arguments: [encodedLexeme]
-            )
-            // 纯回放：receipt 在 + 存储态已等于请求态 → 同 receipt，零写入。
-            if try GRDBReaderActivityStore.fetchReceipt(
-                operationID: operationID, in: db) != nil,
-               current == override?.rawValue {
-                return operationID
+                arguments: args
+            ) {
+                let lexemeRaw: String = row["lexeme_id"]
+                let tooEasy: Int = row["too_easy"]
+                let linked: Bool = row["linked"]
+                guard let lexemeID =
+                        try? DatabaseValueCodec.decodeUUID(lexemeRaw)
+                else { continue }
+                let unitState = LearningKnowledgeResolver.state(
+                    tooEasy: tooEasy != 0,
+                    hasVocabularyNoteLink: linked)
+                let rank: Int = switch unitState {
+                case .unknown: 0
+                case .learning: 1
+                case .mastered: 2
+                }
+                best[lexemeID] = min(best[lexemeID] ?? 2, rank)
             }
-            if let override {
-                try db.execute(
-                    sql: """
-                        INSERT INTO vocabulary_knowledge_overrides(
-                            lexeme_id, state, updated_at_ms
-                        ) VALUES (?, ?, ?)
-                        ON CONFLICT(lexeme_id) DO UPDATE SET
-                            state = excluded.state,
-                            updated_at_ms = excluded.updated_at_ms
-                        """,
-                    arguments: [encodedLexeme, override.rawValue, atMs]
-                )
-            } else {
-                try db.execute(
-                    sql: """
-                        DELETE FROM vocabulary_knowledge_overrides
-                        WHERE lexeme_id = ?
-                        """,
-                    arguments: [encodedLexeme]
-                )
-            }
-            // 事件：known→markedKnown，reset→resetKnowledge，
-            // ignored→无对应冻结枚举值，只记 receipt。
-            var eventID: UUID?
-            if let kind = Self.eventKind(forOverride: override) {
-                eventID = try Self.insertKnowledgeEvent(
-                    kind: kind,
-                    operationID: GRDBReaderActivityStore.deterministicOperationID(
-                        "knowledge_override_event", operationID.uuidString.lowercased(),
-                        String(atMs)),
-                    lexemeID: lexemeID, noteID: nil,
-                    at: date, in: db
-                )
-            }
-            let resultJSON = Self.jsonObject([
-                "lexeme_id": lexemeID.uuidString.lowercased(),
-                "state": requested,
-                "previous_state": current ?? NSNull(),
-                "event_id": eventID.map { $0.uuidString.lowercased() } ?? NSNull(),
-            ])
-            try GRDBReaderActivityStore.recordReceipt(
-                operationID: operationID, kind: "knowledge_override",
-                payloadHash: payloadHash, resultJSON: resultJSON,
-                at: date, in: db
-            )
-            return operationID
         }
+        var result: [UUID: VocabularyKnowledgeState] = [:]
+        result.reserveCapacity(uniqueIDs.count)
+        for id in uniqueIDs {
+            switch best[id] {
+            case .some(2): result[id] = .known
+            case .some(1): result[id] = .learning
+            default: result[id] = .unknown
+            }
+        }
+        return result
     }
 
     // MARK: - 写（关联）
+
+    /// D19（v0.7.5）：`setOverride`/`addToLearning` 已删除——
+    /// `vocabulary_knowledge_overrides` 仅供 v8 导入与兼容审计，
+    /// 运行态写一律走 learning-unit flags（词级「已知/重置」=
+    /// `GRDBLearningUnitRepository.setWordTooEasy`）。历史 receipt
+    /// （`knowledge_override`/`knowledge_add_to_learning`）仍可经
+    /// `knowledgeReceipt` 回查。
+
 
     public func linkNote(
         lexemeID: UUID,
@@ -386,96 +335,6 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
         }
     }
 
-    /// 「加入学习」原子提交（§6.3）：同事务清 override + 建关联 +
-    /// 事件 + receipt。重复调用（同 lexeme/note/origin）幂等回放。
-    @discardableResult
-    public func addToLearning(
-        lexemeID: UUID,
-        noteID: UUID,
-        origin: LexemeNoteLink.AssociationOrigin,
-        at date: Date
-    ) async throws -> UUID {
-        let operationID = GRDBReaderActivityStore.deterministicOperationID(
-            "knowledge_add_to_learning", DatabaseValueCodec.encode(lexemeID),
-            DatabaseValueCodec.encode(noteID), origin.rawValue)
-        let payloadHash = GRDBReaderActivityStore.payloadHash(
-            "knowledge_add_to_learning|\(lexemeID.uuidString.lowercased())"
-                + "|\(noteID.uuidString.lowercased())|\(origin.rawValue)")
-        let encodedLexeme = DatabaseValueCodec.encode(lexemeID)
-        let encodedNote = DatabaseValueCodec.encode(noteID)
-        let atMs = try DatabaseValueCodec.encode(date)
-        return try await pool.write { db in
-            guard try Self.lexemeExists(lexemeID: lexemeID, in: db) else {
-                throw VocabularyKnowledgeError.lexemeNotFound(lexemeID)
-            }
-            guard try Self.noteExists(noteID: noteID, in: db) else {
-                throw VocabularyKnowledgeError.noteNotFound(noteID)
-            }
-            let hadOverride = try String.fetchOne(
-                db,
-                sql: """
-                    SELECT state FROM vocabulary_knowledge_overrides
-                    WHERE lexeme_id = ?
-                    """,
-                arguments: [encodedLexeme]
-            )
-            let hadLink = try String.fetchOne(
-                db,
-                sql: """
-                    SELECT association_origin FROM lexeme_note_links
-                    WHERE lexeme_id = ? AND note_id = ?
-                    """,
-                arguments: [encodedLexeme, encodedNote]
-            )
-            if hadOverride == nil, hadLink == origin.rawValue,
-               try GRDBReaderActivityStore.fetchReceipt(
-                   operationID: operationID, in: db) != nil {
-                return operationID  // 纯回放
-            }
-            try db.execute(
-                sql: """
-                    DELETE FROM vocabulary_knowledge_overrides
-                    WHERE lexeme_id = ?
-                    """,
-                arguments: [encodedLexeme]
-            )
-            try db.execute(
-                sql: """
-                    INSERT INTO lexeme_note_links(
-                        lexeme_id, note_id, association_origin,
-                        confidence, created_at_ms
-                    ) VALUES (?, ?, ?, NULL, ?)
-                    ON CONFLICT(lexeme_id, note_id) DO UPDATE SET
-                        association_origin = excluded.association_origin
-                    """,
-                arguments: [encodedLexeme, encodedNote, origin.rawValue, atMs]
-            )
-            var eventID: UUID?
-            if origin == .userConfirmed {
-                eventID = try Self.insertKnowledgeEvent(
-                    kind: .linkedExistingNote,
-                    operationID: GRDBReaderActivityStore.deterministicOperationID(
-                        "knowledge_add_event", operationID.uuidString.lowercased(),
-                        String(atMs)),
-                    lexemeID: lexemeID, noteID: noteID, at: date, in: db
-                )
-            }
-            let resultJSON = Self.jsonObject([
-                "lexeme_id": lexemeID.uuidString.lowercased(),
-                "note_id": noteID.uuidString.lowercased(),
-                "cleared_override": hadOverride ?? NSNull(),
-                "previous_origin": hadLink ?? NSNull(),
-                "event_id": eventID.map { $0.uuidString.lowercased() } ?? NSNull(),
-            ])
-            try GRDBReaderActivityStore.recordReceipt(
-                operationID: operationID, kind: "knowledge_add_to_learning",
-                payloadHash: payloadHash, resultJSON: resultJSON,
-                at: date, in: db
-            )
-            return operationID
-        }
-    }
-
     // MARK: - 关联查询
 
     public func linksForNote(noteID: UUID) async throws -> [LexemeNoteLink] {
@@ -566,16 +425,6 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
     }
 
     // MARK: - 内部
-
-    private static func eventKind(
-        forOverride override: KnowledgeOverride?
-    ) -> ReaderActivityKind? {
-        switch override {
-        case .known: return .markedKnown
-        case nil: return .resetKnowledge
-        case .ignored: return nil  // 冻结枚举无对应值——见文件头注释
-        }
-    }
 
     private static func insertKnowledgeEvent(
         kind: ReaderActivityKind,

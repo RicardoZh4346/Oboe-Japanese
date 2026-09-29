@@ -10,9 +10,10 @@ import Foundation
 ///   kind 聚合；撤销事件计入 `undoneCount` 单列，绝不参与有效计数。
 ///   ignored/backfill/unlink 等操作按冻结枚举不产生事件（S08 裁决），
 ///   不出现「缺失的 markedIgnored 桶」。
-/// - 「当前掌握词数」是**当前态**：由 `vocabulary_knowledge_overrides`
-///   （每 lexeme 至多一行）+ `lexeme_note_links` 真值表直出，lexeme
-///   去重——known↔ignored 反复切换只是同一行的状态迁移，不放大计数。
+/// - 「当前掌握词数」是**当前态**：D19 起由学习单元派生——
+///   词条绑定 unit ∪ note 载体 unit 的 flag/link 聚合（min
+///   优先级），lexeme 去重；tooEasy 反复切换只是 flag 翻转，
+///   不放大计数。`vocabulary_knowledge_overrides` 不再参与。
 /// - 覆盖率趋势按快照持久化的版本三元组
 ///   `(metric_version, morphology_version, dictionary_version)` 分段，
 ///   跨版本永不连线（版本回退 A→B→A 也开新段，不跨时段回接）。

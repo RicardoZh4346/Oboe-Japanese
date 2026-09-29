@@ -255,10 +255,6 @@ final class ReaderClozeMiningTests: XCTestCase {
         func state(
             lexemeID: UUID
         ) async throws -> VocabularyKnowledgeState { .unknown }
-        @discardableResult
-        func setOverride(
-            lexemeID: UUID, override: KnowledgeOverride?, at date: Date
-        ) async throws -> UUID { lexemeID }
         func linkNote(
             lexemeID: UUID, noteID: UUID,
             origin: LexemeNoteLink.AssociationOrigin

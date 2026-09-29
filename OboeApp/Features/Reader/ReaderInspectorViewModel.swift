@@ -403,40 +403,28 @@ final class ReaderInspectorViewModel {
 
     // MARK: - 知识状态操作
 
-    /// Picker 的乐观选择：`.auto` 对应 override=nil。保留 pending
-    /// 值让分段控件立即回显——不等 DB 写+重查跑完。
+    /// Picker 的乐观选择：`.auto` = 无人工标记。D19 起 known/auto
+    /// 落到 learning-unit flags（词级：该词全部活 unit 的
+    /// tooEasy）——`vocabulary_knowledge_overrides` 仅供 v8 导入与
+    /// 审计，运行态不读写。保留 pending 值让分段控件立即回显——
+    /// 不等 DB 写+重查跑完。
     enum KnowledgeMark: Equatable {
-        case auto, known, ignored
-
-        init(_ override: KnowledgeOverride?) {
-            switch override {
-            case .known: self = .known
-            case .ignored: self = .ignored
-            case nil: self = .auto
-            }
-        }
-
-        var override: KnowledgeOverride? {
-            switch self {
-            case .auto: nil
-            case .known: .known
-            case .ignored: .ignored
-            }
-        }
+        case auto, known
     }
 
     /// 最近一次用户选择（尚未被 lookup 刷新覆盖前优先显示）。
     private(set) var pendingMark: KnowledgeMark?
     private var markTask: Task<Void, Never>?
 
-    /// 标为已知/忽略/重置（auto）。乐观更新：picker 立即回显；
-    /// 快速连点时取消前一次标记任务，最新值生效。候选未落库时先
-    /// ensureLexeme（OOV 也可标记）；完成后只内联重跑 lookup，
-    /// 不再顺带重查牌组目录。
-    func mark(_ override: KnowledgeOverride?) {
+    /// 标为已知/重置（auto）。D19：词级标记 = 该词全部活 unit 的
+    /// tooEasy flag（`setWordTooEasy`——词条绑定 current 义项 ∪
+    /// note 链路载体；歧义/未绑定不猜、无 unit 不写）。乐观更新：
+    /// picker 立即回显；快速连点时取消前一次标记任务，最新值生效。
+    /// 候选未落库时先 ensureLexeme；完成后内联重跑 lookup + 重解析
+    /// unit 三态，不再顺带重查牌组目录。
+    func mark(_ mark: KnowledgeMark) {
         guard let candidate = selectedCandidate else { return }
-        let choice = KnowledgeMark(override)
-        pendingMark = choice
+        pendingMark = mark
         markTask?.cancel()
         isBusy = true
         markTask = Task { [deps] in
@@ -457,25 +445,27 @@ final class ReaderInspectorViewModel {
                         )
                     ).id
                 }
-                switch choice.override {
-                case .known:
-                    _ = try await deps.knowledge.markKnown(
-                        lexemeID: lexemeID)
-                case .ignored:
-                    _ = try await deps.knowledge.markIgnored(
-                        lexemeID: lexemeID)
-                case nil:
-                    _ = try await deps.knowledge.resetKnowledge(
-                        lexemeID: lexemeID)
+                guard let units = learningUnits else {
+                    // 非 GRDB 装配（桩件）：无 unit 写面——如实提示。
+                    guard generationAlive(deps) else { return }
+                    if pendingMark == mark { pendingMark = nil }
+                    noticeMessage = "当前环境无学习单元写通路，未写入任何标记"
+                    return
                 }
+                let changed = try await units.setWordTooEasy(
+                    lexemeID: lexemeID, value: mark == .known,
+                    operationID: UUID(), at: Date())
                 try Task.checkCancellation()
                 markedLexemeID = lexemeID
-                noticeMessage = switch choice {
-                case .known: "已标记为已知"
-                case .ignored: "已忽略该词"
-                case .auto: "已重置知识状态"
+                noticeMessage = switch (mark, changed) {
+                case (.known, 0):
+                    "未定位到该词的学习单元，未写入任何标记——可先选义项标记「太简单」。"
+                case (.known, _): "已标记为已知"
+                case (.auto, 0): "该词没有需要重置的标记"
+                case (.auto, _): "已重置知识状态"
                 }
-                // 内联重查 lookup：徽章回到真值表结果后才撤乐观态，
+                await deps.knowledge.invalidate(lexemeID: lexemeID)
+                // 内联重查 lookup：徽章回到聚合结果后才撤乐观态，
                 // 避免「写完成→旧解析态闪回→新态」的抖动。
                 let fresh = try await deps.service.lookup(
                     surface: tap.surface,
@@ -485,12 +475,13 @@ final class ReaderInspectorViewModel {
                 )
                 try Task.checkCancellation()
                 lookup = fresh
-                if pendingMark == choice { pendingMark = nil }
+                if pendingMark == mark { pendingMark = nil }
+                await resolveUnitContext()
             } catch is CancellationError {
                 // 被更新的标记取代——pendingMark 由新任务接管。
             } catch {
                 guard generationAlive(deps) else { return }
-                if pendingMark == choice { pendingMark = nil }
+                if pendingMark == mark { pendingMark = nil }
                 errorMessage = error.localizedDescription
             }
         }

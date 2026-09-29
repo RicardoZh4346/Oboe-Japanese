@@ -579,6 +579,109 @@ public struct GRDBLearningUnitRepository: Sendable {
         return flag
     }
 
+    // MARK: - 词级标记（D19）
+
+    /// 词级「已知」写路径的唯一实现点（D19 替代旧
+    /// `vocabulary_knowledge_overrides` 行写——该表 v0.7.5 起仅作
+    /// v8 导入/兼容审计，运行态不读写）。
+    ///
+    /// unit 集合 = `wordUnitIDs`——与
+    /// `GRDBVocabularyKnowledgeRepository.wordKnowledgeStates`
+    /// 同一词→unit 解析规则。逐 unit 读 revision 后 CAS 置位
+    /// （单写事务内 DatabasePool 串行化，CAS 是防御性校验而非
+    /// 跨事务并发控制）；每个被改 unit 记一条 `tooEasySet` 事件，
+    /// child operationID 由 base opID+unitID+value 确定性派生
+    /// （SHA-256 → UUID v5 形态）——整体重试对已写 unit 命中
+    /// 幂等回放，对未写 unit 正常补写。
+    ///
+    /// 返回实际发生 flag 变更的 unit 数。0 = 未定位到活 unit 或
+    /// 全部已相符——调用方据此提示，绝不臆造义项也不静默成功。
+    @discardableResult
+    public static func setWordTooEasy(
+        lexemeID: UUID,
+        value: Bool,
+        operationID: UUID,
+        atMilliseconds: Int64,
+        in db: Database
+    ) throws -> Int {
+        let unitIDs = try wordUnitIDs(lexemeID: lexemeID, in: db)
+            .sorted { $0.uuidString < $1.uuidString }
+        var changed = 0
+        for unitID in unitIDs {
+            let before = try fetchFlag(unitID: unitID, in: db)
+            if (before?.tooEasy ?? false) == value { continue }
+            let childOpID = deterministicUUID(
+                "word_too_easy|\(operationID.uuidString.lowercased())"
+                    + "|\(unitID.uuidString.lowercased())|\(value)")
+            try setFlagTooEasy(
+                unitID: unitID, value: value,
+                expectedRevision: before?.revision ?? 0,
+                operationID: childOpID,
+                atMilliseconds: atMilliseconds, in: db)
+            changed += 1
+        }
+        return changed
+    }
+
+    /// 词→unit 解析（D19 唯一口径——
+    /// `GRDBVocabularyKnowledgeRepository.wordKnowledgeStates`
+    /// 复用同一规则，两侧变更必须同步）：
+    /// - 词条绑定义项：`lexeme_dictionary_bindings.status='current'`
+    ///   的 entry_id 优先（换库重绑后的活绑定），回退
+    ///   `lexemes.entry_id`；取其下全部 `binding_status='current'`
+    ///   的 dictionarySense units；
+    /// - 学习载体：经 `lexeme_note_links → learning_unit_note_links`
+    ///   触达的 unit（localNote/legacyUnresolved/义项——覆盖 OOV
+    ///   与未绑定的真实学习关系）；
+    /// - `needsConfirmation`/`stale`/`legacy` 绑定态的义项 unit
+    ///   不通过第一支路参与（歧义不猜、陈旧不算当前）。
+    public static func wordUnitIDs(
+        lexemeID: UUID, in db: Database
+    ) throws -> Set<UUID> {
+        let encoded = DatabaseValueCodec.encode(lexemeID)
+        return Set(try Row.fetchAll(
+            db,
+            sql: """
+                SELECT unit_id FROM (
+                    SELECT u.id AS unit_id
+                    FROM lexemes l
+                    JOIN lexical_learning_units u
+                      ON u.identity_kind = 'dictionarySense'
+                     AND u.binding_status = 'current'
+                     AND u.dictionary_entry_id = COALESCE(
+                           (SELECT b.entry_id
+                              FROM lexeme_dictionary_bindings b
+                             WHERE b.lexeme_id = l.id
+                               AND b.status = 'current'),
+                           l.entry_id)
+                    WHERE l.id = ?
+                    UNION
+                    SELECT ul.unit_id
+                    FROM lexeme_note_links x
+                    JOIN learning_unit_note_links ul
+                      ON ul.note_id = x.note_id
+                    WHERE x.lexeme_id = ?
+                )
+                """,
+            arguments: [encoded, encoded]
+        ).compactMap { try? DatabaseValueCodec.decodeUUID($0["unit_id"]) })
+    }
+
+    /// 确定性 operationID 派生（与 `LearningUnitBackfillService`
+    /// 同一 SHA-256 → UUID v5 形态——同种子同 opID，幂等回放
+    /// 零新增）。
+    private static func deterministicUUID(_ seed: String) -> UUID {
+        let digest = SHA256.hash(data: Data(seed.utf8))
+        var bytes = Array(digest.prefix(16))
+        bytes[6] = (bytes[6] & 0x0F) | 0x50   // version 5
+        bytes[8] = (bytes[8] & 0x3F) | 0x80   // variant 10
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]))
+    }
+
     // MARK: - 事件
 
     /// 写审计事件（组合事务共用：S05 迁移/S13 应用事务写
@@ -922,6 +1025,25 @@ public struct GRDBLearningUnitRepository: Sendable {
     ) async throws -> Set<UUID> {
         try await pool.read { db in
             try Self.linkedVocabularyUnitIDs(unitIDs: unitIDs, in: db)
+        }
+    }
+
+    /// D19 词级标记门面：lexeme 的全部活 unit → tooEasy
+    /// （`wordUnitIDs` 规则与 `wordKnowledgeStates` 一致）。
+    /// 返回实际发生 flag 变更的 unit 数；0 = 无可标记 unit。
+    @discardableResult
+    public func setWordTooEasy(
+        lexemeID: UUID,
+        value: Bool,
+        operationID: UUID,
+        at date: Date
+    ) async throws -> Int {
+        let atMs = try DatabaseValueCodec.encode(date)
+        return try await pool.write { db in
+            try Self.setWordTooEasy(
+                lexemeID: lexemeID, value: value,
+                operationID: operationID,
+                atMilliseconds: atMs, in: db)
         }
     }
 

@@ -207,13 +207,36 @@ final class GRDBDictionaryKnowledgeRepositoryTests: XCTestCase {
     // MARK: - entry 级知识态标注
 
     func testKnowledgeStatesForEntryIDs() async throws {
-        let lexeme = try await jmdictLexeme(entryID: 42, form: "事")
+        _ = try await jmdictLexeme(entryID: 42, form: "事")
         let states0 = try await repository.knowledgeStates(forEntryIDs: [42])
         XCTAssertEqual(states0[42], .unknown,
-                       "无 override/关联的 lexeme 记 unknown")
-        _ = try await knowledge.setOverride(
-            lexemeID: lexeme.id, override: .known,
-            at: Date(timeIntervalSince1970: 1_700_000_100))
+                       "无 unit flag/关联的 lexeme 记 unknown")
+        // D19：known = 绑定 entry 的 current unit 上 tooEasy flag。
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'dictionarySense', ?, 'jmdict', 42, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1',
+                        '事', NULL, '{}', 'current', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "ds:\(unitID.uuidString)"])
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_flags(
+                        unit_id, too_easy, revision, updated_at_ms)
+                    VALUES (?, 1, 1, 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(unitID)])
+        }
         let states = try await repository.knowledgeStates(
             forEntryIDs: [42, 999])
         XCTAssertEqual(states[42], .known)

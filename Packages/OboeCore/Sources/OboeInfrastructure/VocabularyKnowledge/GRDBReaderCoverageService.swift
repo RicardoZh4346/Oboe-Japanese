@@ -12,8 +12,10 @@ import OboeDomain
 ///   `tokenizer_version = "<parserVersion>|<morphologyVersion>|<osBuild>"`
 ///   + `dictionary_version = dictionaryDatasetVersion`——版本切换
 ///   自然 miss，旧版本行不混用（§6.1 五元组折叠进两列）。
-/// - 状态来源 = `lexemes` / `vocabulary_knowledge_overrides` /
-///   `lexeme_note_links`，全部走 `resolveLexemes` + `states` 的
+/// - 状态来源 = learning unit flags/links（D19：词级态唯一口径
+///   在 `states()` 内聚合义项 unit；`vocabulary_knowledge_overrides`
+///   仅供 v8 导入/审计，运行态不读），全部走 `resolveLexemes` +
+///   `states` 的
 ///   chunked-IN 批量通道，无逐 token/逐 lexeme SQL。
 /// - `reader_coverage_snapshots` 两种 scope：
 ///   `block:<uuid>` = 块级工作行（当前 metric/morphology/学习日的

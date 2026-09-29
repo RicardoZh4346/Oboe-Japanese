@@ -287,65 +287,18 @@ public final class GRDBDictionaryKnowledgeRepository: @unchecked Sendable {
                 }
             }
             guard !lexemeByEntry.isEmpty else { return [:] }
-            let states = try Self.batchStates(
-                lexemeIDs: Array(lexemeByEntry.values), in: db)
+            // D19：词级态唯一真值 = learning unit flags/links——
+            // `vocabulary_knowledge_overrides` 仅供 v8 导入/兼容
+            // 审计，运行态永不读取。
+            let states = try GRDBVocabularyKnowledgeRepository
+                .wordKnowledgeStates(
+                    lexemeIDs: Array(lexemeByEntry.values), in: db)
             var result: [Int64: VocabularyKnowledgeState] = [:]
             for (entryID, lexemeID) in lexemeByEntry {
                 result[entryID] = states[lexemeID] ?? .unknown
             }
             return result
         }
-    }
-
-    /// 与 `GRDBVocabularyKnowledgeRepository.states` 同口径的批量
-    /// 真值表解析（同事务内复用，不跨连接）。
-    private static func batchStates(
-        lexemeIDs: [UUID], in db: Database
-    ) throws -> [UUID: VocabularyKnowledgeState] {
-        var overrides: [UUID: KnowledgeOverride] = [:]
-        var linkCounts: [UUID: Int] = [:]
-        let encoded = lexemeIDs.map(DatabaseValueCodec.encode)
-        for chunk in encoded.chunked(400) {
-            let p = placeholders(chunk.count)
-            let args = StatementArguments(Array(chunk))
-            for row in try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT lexeme_id, state
-                    FROM vocabulary_knowledge_overrides
-                    WHERE lexeme_id IN (\(p))
-                    """,
-                arguments: args) {
-                let id: String = row["lexeme_id"]
-                let raw: String = row["state"]
-                if let uuid = try? DatabaseValueCodec.decodeUUID(id),
-                   let state = KnowledgeOverride(rawValue: raw) {
-                    overrides[uuid] = state
-                }
-            }
-            for row in try Row.fetchAll(
-                db,
-                sql: """
-                    SELECT l.lexeme_id, COUNT(*) AS n
-                    FROM lexeme_note_links l
-                    JOIN notes n ON n.id = l.note_id AND n.kind = 'vocabulary'
-                    WHERE l.lexeme_id IN (\(p))
-                    GROUP BY l.lexeme_id
-                    """,
-                arguments: args) {
-                let id: String = row["lexeme_id"]
-                if let uuid = try? DatabaseValueCodec.decodeUUID(id) {
-                    linkCounts[uuid] = row["n"]
-                }
-            }
-        }
-        var result: [UUID: VocabularyKnowledgeState] = [:]
-        for lexemeID in lexemeIDs {
-            result[lexemeID] = VocabularyKnowledgeResolver.resolve(
-                override: overrides[lexemeID],
-                linkedNoteCount: linkCounts[lexemeID] ?? 0)
-        }
-        return result
     }
 
     // MARK: - 行解码 / 共享写

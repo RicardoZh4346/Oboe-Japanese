@@ -93,6 +93,34 @@ final class GRDBLexemeBackfillTests: XCTestCase {
                         contextEntryID, contextDictVersion
                     ])
             }
+            // D19：生产上 vocabulary Note 建卡时由 WriteBridge 挂
+            // 学习单元——fixture 镜像该不变量，否则 note 不构成
+            // learning 信号（lexeme_note_links 单独不再驱动）。
+            let carrierUnit = UUID()
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'legacyUnresolved', ?, 'local', NULL, NULL,
+                        NULL, ?, NULL, NULL, 'legacy', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(carrierUnit),
+                    "lu:\(carrierUnit.uuidString)", headword])
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_note_links(
+                        unit_id, note_id, role, origin, created_at_ms)
+                    VALUES (?, ?, 'primary', 'manual', 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(carrierUnit),
+                    DatabaseValueCodec.encode(noteID)])
         }
         return noteID
     }

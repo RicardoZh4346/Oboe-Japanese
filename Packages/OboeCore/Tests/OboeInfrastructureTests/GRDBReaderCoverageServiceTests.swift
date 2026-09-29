@@ -157,6 +157,8 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         return id
     }
 
+    /// D19：vocabulary_knowledge_overrides 仅是历史行——写入只用于
+    /// 验证「不产生运行时效果」。改为插 unit flag 驱动 known。
     private func insertOverride(lexemeID: UUID, state: String) async throws {
         try await pool.write { db in
             try db.execute(
@@ -169,9 +171,68 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         }
     }
 
+    /// D19 fixture：插一条绑定 entry 的 dictionarySense unit。
+    @discardableResult
+    private func insertUnit(
+        entryID: Int64?,
+        bindingStatus: String = "current",
+        lemma: String = "w"
+    ) async throws -> UUID {
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'dictionarySense', ?, 'jmdict', ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1',
+                        ?, NULL, '{}', ?, 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "ds:\(unitID.uuidString)",
+                    entryID,
+                    lemma, bindingStatus])
+        }
+        return unitID
+    }
+
+    private func flagTooEasy(unitID: UUID) async throws {
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_flags(
+                        unit_id, too_easy, revision, updated_at_ms)
+                    VALUES (?, 1, 1, 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(unitID)])
+        }
+    }
+
     private func linkVocabularyNote(lexemeID: UUID) async throws {
         let deckID = UUID(); let noteID = UUID()
+        let unitID = UUID()
         try await pool.write { db in
+            // 学习载体 unit：note 携带，不绑词条 entry。
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'legacyUnresolved', ?, 'local', NULL, NULL,
+                        NULL, 'w', NULL, NULL, 'legacy', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "lu:\(unitID.uuidString)"])
             try db.execute(
                 sql: """
                     INSERT INTO decks(id, name, sort_order, created_at_ms,
@@ -200,6 +261,16 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
                     """,
                 arguments: [
                     DatabaseValueCodec.encode(lexemeID),
+                    DatabaseValueCodec.encode(noteID)])
+            // D19：note→unit 链使该 note 成为 unit 的载体 → learning。
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_note_links(
+                        unit_id, note_id, role, origin, created_at_ms)
+                    VALUES (?, ?, 'primary', 'userConfirmed', 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
                     DatabaseValueCodec.encode(noteID)])
         }
     }
@@ -289,11 +360,13 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         let keyL = jmdictKey("食べる", seq: 2)
         let keyU = jmdictKey("読む", seq: 3)
         let keyI = jmdictKey("行く", seq: 4)
-        let lexK = try await insertLexeme(key: keyK, writtenForm: "見る")
+        _ = try await insertLexeme(key: keyK, writtenForm: "見る")
         let lexL = try await insertLexeme(key: keyL, writtenForm: "食べる")
         _ = try await insertLexeme(key: keyU, writtenForm: "読む")
         let lexI = try await insertLexeme(key: keyI, writtenForm: "行く")
-        try await insertOverride(lexemeID: lexK, state: "known")
+        // D19：known = unit flag；ignored 仅存于历史行——运行时
+        // 不再产生 .ignored 桶，行く 落回 unknown。
+        try await flagTooEasy(unitID: try await insertUnit(entryID: 1))
         try await linkVocabularyNote(lexemeID: lexL)
         try await insertOverride(lexemeID: lexI, state: "ignored")
 
@@ -312,9 +385,9 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         let metrics = try await service.analyze(documentID: docID)
         XCTAssertEqual(metrics.known, 2)       // 見る ×2
         XCTAssertEqual(metrics.learning, 1)
-        XCTAssertEqual(metrics.unknown, 2)     // 読む + xyz(OOV)
-        XCTAssertEqual(metrics.ignored, 1)
-        XCTAssertEqual(metrics.eligible, 5)
+        XCTAssertEqual(metrics.unknown, 3)     // 読む + 行く(ignored 失效) + xyz(OOV)
+        XCTAssertEqual(metrics.ignored, 0)     // D19：无运行时 ignored
+        XCTAssertEqual(metrics.eligible, 6)    // ignored 失效恢复计入
         XCTAssertEqual(metrics.uniqueKnown, 1) // 見る 去重
         XCTAssertEqual(metrics.outOfVocabulary, 1)
         XCTAssertFalse(metrics.isPartial)
@@ -326,7 +399,7 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         XCTAssertFalse(doc.isPartial)
         XCTAssertEqual(doc.known, 2)
         XCTAssertEqual(doc.uniqueNumerator, 2)   // |{見る,食べる}|
-        XCTAssertEqual(doc.uniqueDenominator, 4) // +読む,unresolved|xyz
+        XCTAssertEqual(doc.uniqueDenominator, 5) // +読む,行く,unresolved|xyz
         XCTAssertEqual(doc.studyDayID.count, 10) // yyyy-MM-dd
         XCTAssertEqual(doc.morphologyVersion, "morph-1")
         XCTAssertEqual(doc.dictionaryVersion, "dict-v1")
@@ -334,7 +407,8 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         XCTAssertEqual(rows, 2)
     }
 
-    /// D04 样例端到端：534/31/42/12 → 87.97% / 93.08%。
+    /// D04 样例端到端（D19 口径）：known 534 / learning 31 /
+    /// unknown 54（含 12 个失效 ignored 行）→ 86.27% / 91.28%。
     /// 全部 key distinct（token 口径 == unique 口径）。
     func testD04SampleEndToEnd() async throws {
         let docID = try await insertDocument()
@@ -400,7 +474,40 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
                         DatabaseValueCodec.encode(row.lexemeID),
                         row.key.externalID, Int64(row.key.externalID)!,
                         row.surface, row.surface, row.key.identityKey])
-                if let overrideState = row.overrideState {
+                // D19：known = 词条绑定 unit 的 tooEasy flag；
+                // ignored 的 legacy 行惰性保留（运行态不落桶）。
+                if row.overrideState == "known" {
+                    let unitID = UUID()
+                    try db.execute(
+                        sql: """
+                            INSERT INTO lexical_learning_units(
+                                id, identity_kind, identity_key,
+                                provider, dictionary_entry_id,
+                                semantic_fingerprint,
+                                fingerprint_version, lemma, reading,
+                                sense_snapshot_json, binding_status,
+                                revision, created_at_ms, updated_at_ms)
+                            VALUES (
+                                ?, 'dictionarySense', ?, 'jmdict', ?,
+                                ?, 'v1', ?, NULL, NULL, 'current',
+                                0, 1, 1)
+                            """,
+                        arguments: [
+                            DatabaseValueCodec.encode(unitID),
+                            "ds:\(unitID.uuidString)",
+                            Int64(row.key.externalID)!,
+                            String(
+                                repeating: "ab", count: 32),
+                            row.surface])
+                    try db.execute(
+                        sql: """
+                            INSERT INTO learning_unit_flags(
+                                unit_id, too_easy, revision,
+                                updated_at_ms)
+                            VALUES (?, 1, 1, 1)
+                            """,
+                        arguments: [DatabaseValueCodec.encode(unitID)])
+                } else if let overrideState = row.overrideState {
                     try db.execute(
                         sql: """
                             INSERT INTO vocabulary_knowledge_overrides(
@@ -412,6 +519,7 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
                             overrideState])
                 }
                 if let noteID = row.noteID {
+                    let carrierUnit = UUID()
                     try db.execute(
                         sql: """
                             INSERT INTO notes(
@@ -434,6 +542,34 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
                         arguments: [
                             DatabaseValueCodec.encode(row.lexemeID),
                             DatabaseValueCodec.encode(noteID)])
+                    // note→unit 链：learning 态的载体。
+                    try db.execute(
+                        sql: """
+                            INSERT INTO lexical_learning_units(
+                                id, identity_kind, identity_key,
+                                provider, dictionary_entry_id,
+                                semantic_fingerprint,
+                                fingerprint_version, lemma, reading,
+                                sense_snapshot_json, binding_status,
+                                revision, created_at_ms, updated_at_ms)
+                            VALUES (
+                                ?, 'legacyUnresolved', ?, 'local',
+                                NULL, NULL, NULL, 'w', NULL, NULL,
+                                'legacy', 0, 1, 1)
+                            """,
+                        arguments: [
+                            DatabaseValueCodec.encode(carrierUnit),
+                            "lu:\(carrierUnit.uuidString)"])
+                    try db.execute(
+                        sql: """
+                            INSERT INTO learning_unit_note_links(
+                                unit_id, note_id, role, origin,
+                                created_at_ms)
+                            VALUES (?, ?, 'primary', 'backfill', 1)
+                            """,
+                        arguments: [
+                            DatabaseValueCodec.encode(carrierUnit),
+                            DatabaseValueCodec.encode(noteID)])
                 }
             }
         }
@@ -442,27 +578,29 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
             documentID: docID, chapterID: chapter, ordinal: 0,
             text: surfaces.joined(separator: " "))
 
+        // D19：12 个 legacy ignored 行惰性失效 → 计入 unknown 且
+        // 恢复 eligible（分母 619，不再被排除）。
         let metrics = try await service.analyze(documentID: docID)
         XCTAssertEqual(metrics.known, 534)
         XCTAssertEqual(metrics.learning, 31)
-        XCTAssertEqual(metrics.unknown, 42)
-        XCTAssertEqual(metrics.ignored, 12)
+        XCTAssertEqual(metrics.unknown, 54)   // 42 + 12(ignored 失效)
+        XCTAssertEqual(metrics.ignored, 0)
         XCTAssertEqual(
-            metrics.tokenCoverage ?? 0, 534.0 / 607.0, accuracy: 1e-12)
+            metrics.tokenCoverage ?? 0, 534.0 / 619.0, accuracy: 1e-12)
         XCTAssertEqual(
-            metrics.knownOrLearningCoverage ?? 0, 565.0 / 607.0,
+            metrics.knownOrLearningCoverage ?? 0, 565.0 / 619.0,
             accuracy: 1e-12)
         XCTAssertEqual(
             String(format: "%.2f%%",
-                   (metrics.tokenCoverage ?? 0) * 100), "87.97%")
+                   (metrics.tokenCoverage ?? 0) * 100), "86.27%")
         XCTAssertEqual(
             String(format: "%.2f%%",
-                   (metrics.knownOrLearningCoverage ?? 0) * 100), "93.08%")
-        // unique == token（全 distinct）：持久化分子分母 565/607。
+                   (metrics.knownOrLearningCoverage ?? 0) * 100), "91.28%")
+        // unique == token（全 distinct）：持久化分子分母 565/619。
         let docRaw = try await service.documentSnapshot(documentID: docID)
         let doc = try XCTUnwrap(docRaw)
         XCTAssertEqual(doc.uniqueNumerator, 565)
-        XCTAssertEqual(doc.uniqueDenominator, 607)
+        XCTAssertEqual(doc.uniqueDenominator, 619)
     }
 
     /// 取消：已提交批次保留为 partial；恢复后完成且不重复 tokenize。
@@ -556,8 +694,9 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
             scope: blockScope(b2), documentID: docID)
 
         clock.advance()
-        _ = try await knowledge.setOverride(
-            lexemeID: lexA, override: .known, at: Date())
+        // D19：unit flag → known；refreshKnowledge 消费派生状态。
+        try await flagTooEasy(
+            unitID: try await insertUnit(entryID: 1, lemma: "会"))
         let metrics = try await service.refreshKnowledge(
             documentID: docID, changedLexemeIDs: [lexA])
         XCTAssertEqual(metrics?.known, 1)
@@ -585,9 +724,10 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         let chapter = try await insertChapter(documentID: docID, ordinal: 0)
         let keyU = jmdictKey("読む", seq: 3)
         let keyK = jmdictKey("見る", seq: 1)
-        let lexK = try await insertLexeme(key: keyK, writtenForm: "見る")
+        _ = try await insertLexeme(key: keyK, writtenForm: "見る")
         _ = try await insertLexeme(key: keyU, writtenForm: "読む", reading: "よむ")
-        try await insertOverride(lexemeID: lexK, state: "known")
+        try await flagTooEasy(
+            unitID: try await insertUnit(entryID: 1, lemma: "見る"))
         morphology.specs = [
             "読む": .resolved(keyU), "見る": .resolved(keyK),
             "hello": .oov, "今日": .ambiguous]
@@ -655,8 +795,9 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         let ch1 = try await insertChapter(documentID: docID, ordinal: 0)
         let ch2 = try await insertChapter(documentID: docID, ordinal: 1)
         let keyK = jmdictKey("見る", seq: 1)
-        let lexK = try await insertLexeme(key: keyK, writtenForm: "見る")
-        try await insertOverride(lexemeID: lexK, state: "known")
+        _ = try await insertLexeme(key: keyK, writtenForm: "見る")
+        try await flagTooEasy(
+            unitID: try await insertUnit(entryID: 1, lemma: "見る"))
         morphology.specs = ["見る": .resolved(keyK), "x": .oov]
         _ = try await insertBlock(
             documentID: docID, chapterID: ch1, ordinal: 0, text: "見る x")
@@ -693,9 +834,10 @@ final class GRDBReaderCoverageServiceTests: XCTestCase {
         morphology.tokenizedBlockIDs = []
         let newKey = jmdictKey("会", seq: 9)
         morphology.specs["a"] = .resolved(newKey)
-        let lexeme = try await insertLexeme(
+        _ = try await insertLexeme(
             key: newKey, writtenForm: "会")
-        try await insertOverride(lexemeID: lexeme, state: "known")
+        try await flagTooEasy(
+            unitID: try await insertUnit(entryID: 9, lemma: "会"))
         let metrics = try await service.refreshBlocks(
             documentID: docID, blockIDs: [b1])
         XCTAssertEqual(morphology.tokenizedBlockIDs, [b1])

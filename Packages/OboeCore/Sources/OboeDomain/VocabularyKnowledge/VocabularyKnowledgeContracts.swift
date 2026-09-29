@@ -19,7 +19,9 @@ public enum VocabularyKnowledgeState: String, Codable, Sendable {
 }
 
 /// 人工覆盖（vocabulary_knowledge_overrides）：只存 known/ignored
-/// 两态；重置 = 删除 override 行，由关联重判回 learning/unknown。
+/// 两态。D19（v0.7.5）：该表退出运行态——仅供 v8 备份导入解码
+/// 与学习单元 backfill 审计；运行态「已知」= unit tooEasy flag，
+/// 「重置」= 清 flag，ignored 不再产生。
 public enum KnowledgeOverride: String, Codable, Sendable {
     case known
     case ignored
@@ -86,20 +88,21 @@ public struct LexemeNoteLink: Equatable, Sendable {
     }
 }
 
-/// 知识状态仓储边界（v18）。写路径必须产生事件+receipt
+/// 知识状态仓储边界（v18）。关联写路径必须产生事件+receipt
 /// （§11.2 reader_activity_events）；重复操作返回同 receipt，
 /// 不新增事件（幂等）。
+///
+/// D19（v0.7.5）：`vocabulary_knowledge_overrides` 仅供 v8 导入
+/// 与兼容审计——运行态不再提供 override 写 API，词级「已知」经
+/// learning-unit flags（`GRDBLearningUnitRepository.setWordTooEasy`）
+/// 表达；`state`/`states` 内部按 unit 聚合（ignored 不再产生）。
 public protocol VocabularyKnowledgeRepository: Sendable {
-    /// 按真值表解析当前状态。
+    /// 按词级聚合规则解析当前状态（unit flags/links 推导）。
     func state(lexemeID: UUID) async throws -> VocabularyKnowledgeState
-    /// 设置/清除人工 override。`nil` = 删除 override（重置）。
-    /// 在 known/ignored 上「加入学习」由调用方先预览提示，同一事务
-    /// 内清 override + 建关联。
-    @discardableResult
-    func setOverride(lexemeID: UUID, override: KnowledgeOverride?, at date: Date) async throws -> UUID
     /// 建立 Note 关联（同事务可随挖词命令执行）。
     func linkNote(lexemeID: UUID, noteID: UUID, origin: LexemeNoteLink.AssociationOrigin) async throws
-    /// 解除关联；最后一条解除后由真值表回落 unknown/override 态。
+    /// 解除关联；最后一条解除后词级态按 unit 聚合回落
+    /// （无活 unit 信号 → unknown）。
     func unlinkNote(lexemeID: UUID, noteID: UUID) async throws
     func fetchLexeme(key: LexicalKey) async throws -> Lexeme?
     /// 按 identity_key upsert；已存在时返回既有行（不重建 UUID）。
@@ -108,7 +111,10 @@ public protocol VocabularyKnowledgeRepository: Sendable {
     func resolveLexemes(keys: [LexicalKey]) async throws -> [LexicalKey: Lexeme]
 }
 
-/// 状态判定纯函数——真值表的唯一实现点，仓储与 UI 共用。
+/// 旧真值表纯函数（override + 关联计数 → 四态）。
+/// D19：运行态已切到 unit 聚合（`GRDBVocabularyKnowledgeRepository
+/// .wordKnowledgeStates`）——本 resolver 仅保留给 v8 解码语义、
+/// 迁移审计与测试对照，不得用于运行态状态判定。
 public enum VocabularyKnowledgeResolver {
     public static func resolve(
         override: KnowledgeOverride?,

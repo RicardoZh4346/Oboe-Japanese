@@ -224,6 +224,62 @@ final class GRDBReaderAnalyticsTests: XCTestCase {
         }
     }
 
+    /// D19 fixture：note→unit 链（learning_unit_note_links）——
+    /// lexeme 的知识态经由 unit flags/links 派生。
+    @discardableResult
+    private func insertUnit() async throws -> UUID {
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'legacyUnresolved', ?, 'local', NULL,
+                        '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1', 'w', NULL, '{}', 'legacy', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "lu:\(unitID.uuidString)"])
+        }
+        return unitID
+    }
+
+    private func linkUnit(unitID: UUID, noteID: UUID) async throws {
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_note_links(
+                        unit_id, note_id, role, origin, created_at_ms)
+                    VALUES (?, ?, 'primary', 'backfill', 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    DatabaseValueCodec.encode(noteID)])
+        }
+    }
+
+    private func flagTooEasy(unitID: UUID, value: Bool = true) async throws {
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO learning_unit_flags(
+                        unit_id, too_easy, revision, updated_at_ms)
+                    VALUES (?, ?, 1, 1)
+                    ON CONFLICT(unit_id) DO UPDATE SET
+                        too_easy = excluded.too_easy,
+                        revision = revision + 1,
+                        updated_at_ms = excluded.updated_at_ms
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID), value])
+        }
+    }
+
     // MARK: - 空库边界
 
     func testEmptyDatabaseReturnsZeroes() async throws {
@@ -326,87 +382,104 @@ final class GRDBReaderAnalyticsTests: XCTestCase {
 
     // MARK: - 当前态聚合（反复切状态不放大）
 
-    /// 验收项：known↔ignored↔reset 反复切换后掌握数只反映最终态。
-    /// 走真实 `setOverride` 写路径——事件照常记录（操作量），
-    /// 但 `knowledgeSummary` 的 known 桶是单行当前态。
+    /// 验收项：tooEasy 反复切换后掌握数只反映最终态。
+    /// 走真实 `setWordTooEasy` 写路径——`learning_unit_events`
+    /// 照常记录（操作量），但 `knowledgeSummary` 的 known 桶
+    /// 是派生当前态，不随切换次数放大。D19 起该写路径不再产生
+    /// `reader_activity_events` 的 markedKnown/resetKnowledge
+    /// 行（审计流迁往 learning_unit_events，两个桶如实归 0）。
     func testRepeatedStateTogglesDoNotInflateKnownCount() async throws {
         let lexeme = try await insertLexeme(writtenForm: "切替")
+        let noteID = try await insertNote(kind: "vocabulary")
+        try await link(lexemeID: lexeme, noteID: noteID)
+        let unitID = try await insertUnit()
+        try await linkUnit(unitID: unitID, noteID: noteID)
+        let units = GRDBLearningUnitRepository(pool: pool)
         var at: Int64 = 10_000
         func tick() -> Date {
             at += 1_000
             return Date(timeIntervalSince1970: Double(at) / 1_000)
         }
-        // known → ignored → known → ignored → known（终态 known）。
-        for target in [
-            KnowledgeOverride.known, .ignored, .known, .ignored, .known
-        ] {
-            _ = try await knowledge.setOverride(
-                lexemeID: lexeme, override: target, at: tick())
+        // tooEasy on → off → on → off → on（终态 known/mastered）。
+        for target in [true, false, true, false, true] {
+            _ = try await units.setWordTooEasy(
+                lexemeID: lexeme, value: target,
+                operationID: UUID(), at: tick())
         }
-        // 同态重放不写新事件；reset 再清掉。
-        _ = try await knowledge.setOverride(
-            lexemeID: lexeme, override: .known, at: tick())
-        _ = try await knowledge.setOverride(
-            lexemeID: lexeme, override: nil, at: tick())
-        _ = try await knowledge.setOverride(
-            lexemeID: lexeme, override: .known, at: tick())
+        // 同态重放不写新事件。
+        _ = try await units.setWordTooEasy(
+            lexemeID: lexeme, value: true,
+            operationID: UUID(), at: tick())
 
         let summary = try await repository.knowledgeSummary()
         XCTAssertEqual(summary.knownCount, 1)   // 只算当前态一次
         XCTAssertEqual(summary.ignoredCount, 0)
         XCTAssertEqual(summary.trackedLexemeCount, 1)
 
-        // 事件侧如实记录每次迁移（历史行为量与当前态分离）。
+        // 事件侧：tooEasySet 历史在 learning_unit_events。
+        let unitEvents = try await pool.read { db in
+            try Int.fetchOne(
+                db, sql: """
+                    SELECT COUNT(*) FROM learning_unit_events
+                    WHERE kind = 'tooEasySet'
+                    """) ?? 0
+        }
+        XCTAssertEqual(unitEvents, 5)
         let totals = try await repository.activityTotals()
-        XCTAssertEqual(totals.markedKnown, 4)   // 4 次有效 known 迁移
-        XCTAssertEqual(totals.resetKnowledge, 1)
-        XCTAssertEqual(totals.totalEffective, 5)
+        XCTAssertEqual(totals.markedKnown, 0)
+        XCTAssertEqual(totals.resetKnowledge, 0)
     }
 
-    /// 终态落在 ignored：事件里有 markedKnown 历史但当前态是 ignored。
-    func testTogglesEndingAtIgnoredYieldZeroKnown() async throws {
+    /// D19：legacy `vocabulary_knowledge_overrides` 的 ignored
+    /// 行对运行时状态零影响——不写 flag/link 的 lexeme 恒
+    /// unmarked；ignoredCount 恒 0。
+    func testLegacyIgnoredRowsYieldNoRuntimeState() async throws {
         let lexeme = try await insertLexeme()
-        var at: Int64 = 20_000
-        func tick() -> Date {
-            at += 1_000
-            return Date(timeIntervalSince1970: Double(at) / 1_000)
-        }
-        for _ in 0..<6 {
-            _ = try await knowledge.setOverride(
-                lexemeID: lexeme, override: .known, at: tick())
-            _ = try await knowledge.setOverride(
-                lexemeID: lexeme, override: .ignored, at: tick())
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO vocabulary_knowledge_overrides(
+                        lexeme_id, state, updated_at_ms)
+                    VALUES (?, 'ignored', 1)
+                    """,
+                arguments: [DatabaseValueCodec.encode(lexeme)])
         }
         let summary = try await repository.knowledgeSummary()
         XCTAssertEqual(summary.knownCount, 0)
-        XCTAssertEqual(summary.ignoredCount, 1)
-        let totals = try await repository.activityTotals()
-        XCTAssertEqual(totals.markedKnown, 6)
+        XCTAssertEqual(summary.ignoredCount, 0)
+        XCTAssertEqual(summary.unmarkedCount, 1)
     }
 
-    /// learning 口径：只数 vocabulary 关联；grammar 关联不进桶；
-    /// override 优先于关联（known+link → known，不重复计 learning）。
+    /// learning 口径：只数经 unit 链触达的 vocabulary 关联；
+    /// grammar 关联不进桶；tooEasy flag 优先于关联
+    /// （mastered+link → known，不重复计 learning）。
     func testLearningBucketFollowsTruthTable() async throws {
         let vocabLexeme = try await insertLexeme(writtenForm: "学習")
         let grammarLexeme = try await insertLexeme(writtenForm: "文法")
-        let overriddenLexeme = try await insertLexeme(writtenForm: "上書")
+        let masteredLexeme = try await insertLexeme(writtenForm: "上書")
         _ = try await insertLexeme(writtenForm: "未触")  // unknown 桶
 
         let vocabNote = try await insertNote(kind: "vocabulary")
         try await link(lexemeID: vocabLexeme, noteID: vocabNote)
+        try await linkUnit(
+            unitID: insertUnit(), noteID: vocabNote)
         let grammarNote = try await insertNote(kind: "grammar")
         try await link(lexemeID: grammarLexeme, noteID: grammarNote)
-        let overriddenNote = try await insertNote(kind: "vocabulary")
-        try await link(lexemeID: overriddenLexeme, noteID: overriddenNote)
-        _ = try await knowledge.setOverride(
-            lexemeID: overriddenLexeme, override: .known, at: Date())
+        // grammar note 即便挂 unit，kind ≠ vocabulary → 不计 learning。
+        try await linkUnit(
+            unitID: insertUnit(), noteID: grammarNote)
+        let masteredNote = try await insertNote(kind: "vocabulary")
+        try await link(lexemeID: masteredLexeme, noteID: masteredNote)
+        let masteredUnit = try await insertUnit()
+        try await linkUnit(unitID: masteredUnit, noteID: masteredNote)
+        try await flagTooEasy(unitID: masteredUnit)
 
         let summary = try await repository.knowledgeSummary()
-        XCTAssertEqual(summary.knownCount, 1)      // overridden
+        XCTAssertEqual(summary.knownCount, 1)      // mastered
         XCTAssertEqual(summary.learningCount, 1)   // vocabLexeme only
         XCTAssertEqual(summary.ignoredCount, 0)
         XCTAssertEqual(summary.trackedLexemeCount, 4)
-        // grammarLexeme（仅 grammar 关联）+ 未触 = 2 个 unmarked。
+        // grammarLexeme（unit 链无 vocabulary note）+ 未触 = 2。
         XCTAssertEqual(summary.unmarkedCount, 2)
     }
 

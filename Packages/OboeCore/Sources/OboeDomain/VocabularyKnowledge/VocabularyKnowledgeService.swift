@@ -1,21 +1,10 @@
 import Foundation
 
 /// S08 增补协议（不动 S02 冻结的 `VocabularyKnowledgeRepository`）：
-/// 「加入学习」原子提交与关联查询。GRDB 实现在同一事务里
-/// 清 override + 建关联（§6.3：用户在 known/ignored 上加入学习需
-/// 同一事务执行）；非原子的仓储实现只须满足冻结协议即可，
-/// `VocabularyKnowledgeService` 对无能力实现退化为顺序调用并在
-/// 文档中标注非原子。
+/// 关联查询。D19（v0.7.5）起不再包含 override 写面——
+/// 「加入学习」的「同事务清 override」语义随
+/// `vocabulary_knowledge_overrides` 退出运行态一并退役。
 public protocol VocabularyKnowledgeLinking: Sendable {
-    /// 同事务清除 override 并建立关联；返回操作 receipt UUID。
-    @discardableResult
-    func addToLearning(
-        lexemeID: UUID,
-        noteID: UUID,
-        origin: LexemeNoteLink.AssociationOrigin,
-        at date: Date
-    ) async throws -> UUID
-
     /// 某 Note 当前的全部关联（改选 UI / 审计）。
     func linksForNote(noteID: UUID) async throws -> [LexemeNoteLink]
 
@@ -89,10 +78,10 @@ public actor KnowledgeInvalidationCenter {
 /// S08 知识状态域服务（D05 真值表的唯一编排点）：
 /// - 读：`state(of:)` / `states(of:)` 按冻结协议走仓储，未入库的
 ///   key 一律 unknown——查询路径绝不创建 lexeme 行；
-/// - 写：known/ignored/reset → `setOverride`，关联确认/改选 →
-///   `linkNote`/`unlinkNote` + `resolveLexeme`；
-/// - 「加入学习」优先走 `VocabularyKnowledgeLinking.addToLearning`
-///   原子路径；
+/// - 写：关联确认/改选 → `linkNote`/`unlinkNote` + `resolveLexeme`；
+///   D19 起词级「已知/重置」迁往 learning-unit flags
+///   （`GRDBLearningUnitRepository.setWordTooEasy`），override
+///   写面已从协议与实现删除；
 /// - 每次成功写后向 `KnowledgeInvalidationCenter` 发失效信号。
 public struct VocabularyKnowledgeService: Sendable {
     private let repository: any VocabularyKnowledgeRepository
@@ -138,31 +127,16 @@ public struct VocabularyKnowledgeService: Sendable {
         return result
     }
 
-    /// 标为已知。重复调用返回同一 receipt、不新增事件。
-    @discardableResult
-    public func markKnown(lexemeID: UUID) async throws -> UUID {
-        let receipt = try await repository.setOverride(
-            lexemeID: lexemeID, override: .known, at: now())
+    /// D19：词级「已知/重置」写已迁到 learning-unit flags——
+    /// `markKnown`/`markIgnored`/`resetKnowledge`/`addToLearning`
+    /// （清 override + 建关联）语义随
+    /// `vocabulary_knowledge_overrides` 退出运行态删除；词级标记
+    /// 走 `GRDBLearningUnitRepository.setWordTooEasy`（基础设施层）。
+    ///
+    /// 外部写路径（unit flag/关联变更）完成后的失效信号——
+    /// 词典 lookup 会话与覆盖率缓存据此重估词级状态展示。
+    public func invalidate(lexemeID: UUID) async {
         await invalidation.invalidate(lexemeID: lexemeID)
-        return receipt
-    }
-
-    /// 标为忽略（不计入覆盖率分母）。
-    @discardableResult
-    public func markIgnored(lexemeID: UUID) async throws -> UUID {
-        let receipt = try await repository.setOverride(
-            lexemeID: lexemeID, override: .ignored, at: now())
-        await invalidation.invalidate(lexemeID: lexemeID)
-        return receipt
-    }
-
-    /// 重置人工状态：删除 override 行，由关联重判回 learning/unknown。
-    @discardableResult
-    public func resetKnowledge(lexemeID: UUID) async throws -> UUID {
-        let receipt = try await repository.setOverride(
-            lexemeID: lexemeID, override: nil, at: now())
-        await invalidation.invalidate(lexemeID: lexemeID)
-        return receipt
     }
 
     /// 歧义确认 / 改选：确保目标 lexeme 存在（`seed` 提供行内容），
@@ -198,45 +172,11 @@ public struct VocabularyKnowledgeService: Sendable {
         await invalidation.invalidate(lexemeID: lexemeID)
     }
 
-    /// 「加入学习」：清 override + 建关联必须同事务（§6.3）。
-    /// 仓储未实现 `VocabularyKnowledgeLinking` 时退化为顺序调用——
-    /// 顺序为先建关联后清 override，中途失败至多残留 known/ignored
-    /// 显示，不会丢关联（文档化限制）。
-    @discardableResult
-    public func addToLearning(
-        lexemeID: UUID,
-        noteID: UUID,
-        origin: LexemeNoteLink.AssociationOrigin = .userConfirmed
-    ) async throws -> UUID {
-        if let linking {
-            let receipt = try await linking.addToLearning(
-                lexemeID: lexemeID, noteID: noteID,
-                origin: origin, at: now())
-            await invalidation.invalidate(lexemeID: lexemeID)
-            return receipt
-        }
-        try await repository.linkNote(
-            lexemeID: lexemeID, noteID: noteID, origin: origin)
-        let receipt = try await repository.setOverride(
-            lexemeID: lexemeID, override: nil, at: now())
-        await invalidation.invalidate(lexemeID: lexemeID)
-        return receipt
-    }
-
-    /// 标记前的 lexeme 确保：OOV/未落库候选在 setOverride 前先 upsert
-    ///（只建行——不写状态；后续 markKnown/markIgnored 再产事件）。
+    /// 标记/改选前的 lexeme 确保：OOV/未落库候选在知识操作前
+    /// 先 upsert（只建行——不写状态）。
     public func ensureLexeme(
         key: LexicalKey, seed: Lexeme
     ) async throws -> Lexeme {
         try await repository.resolveLexeme(key: key, seed: seed)
-    }
-
-    /// 改选/加入学习前的预览：当前是否被 known/override 覆盖——
-    /// UI 据此提示「加入学习将清除 已知/忽略 标记」。
-    public func requiresOverrideReset(lexemeID: UUID) async throws -> Bool {
-        switch try await repository.state(lexemeID: lexemeID) {
-        case .known, .ignored: return true
-        case .learning, .unknown: return false
-        }
     }
 }

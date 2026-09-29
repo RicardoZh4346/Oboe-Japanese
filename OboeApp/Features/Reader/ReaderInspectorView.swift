@@ -287,15 +287,16 @@ struct ReaderInspectorView: View {
         }
     }
 
-    /// 「自动」＝ 无人工覆盖，状态由制卡情况判定（未制卡=未知、
-    /// 挖词后=学习中）；「已知」＝ 人工覆盖，措辞与图例一致。
-    /// S16：旧「已忽略」入口移除——不再出现的语义改由下方
-    /// 「学习单元/太简单」承担（learning-unit flag，带 CAS/撤销）。
+    /// 「自动」＝ 清除该词全部学习单元的「太简单」标记，状态回到
+    /// 制卡情况推导；「已知」＝ 该词全部活 unit 标记太简单
+    /// （D19：词级人工态唯一载体是 learning-unit flags——
+    /// `vocabulary_knowledge_overrides` 仅供 v8 导入/审计）。
+    /// S16：旧「已忽略」入口移除——ignored 已退出运行态（D04）。
     private var knowledgeSection: some View {
         Section {
             Picker("标注方式", selection: knowledgeBinding) {
-                Text("自动").tag(KnowledgeOverride?.none)
-                Text("已知").tag(KnowledgeOverride?.some(.known))
+                Text("自动").tag(ReaderInspectorViewModel.KnowledgeMark.auto)
+                Text("已知").tag(ReaderInspectorViewModel.KnowledgeMark.known)
             }
             .pickerStyle(.segmented)
             // 标记任务可取消、最新值生效——picker 全程保持可点。
@@ -310,7 +311,7 @@ struct ReaderInspectorView: View {
                 }
             }
         } footer: {
-            Text("「自动」按是否已制卡判定：未制卡记为未知，挖词后自动转学习中。")
+            Text("「已知」标记该词的全部学习单元为太简单；无学习单元的词不写入任何标记。")
                 .font(.footnote)
         }
     }
@@ -365,20 +366,18 @@ struct ReaderInspectorView: View {
         }
     }
 
-    /// Picker 选择 ←→ 人工覆盖：已知/已忽略恒来自 override，故
-    /// 解析态可直接反推；其余解析态一律回落到「自动」。
-    private var knowledgeBinding: Binding<KnowledgeOverride?> {
+    /// Picker 选择 ←→ 词级标记：known 恒来自 unit 聚合态
+    /// （全部活 unit mastered）；其余一律「自动」。
+    private var knowledgeBinding:
+        Binding<ReaderInspectorViewModel.KnowledgeMark> {
         Binding(
             get: {
-                // 有 pending 选择先回显（乐观更新），否则按解析态反推：
-                // 已知/已忽略恒来自 override；其余解析态一律「自动」。
                 if let pending = model.pendingMark {
-                    return pending.override
+                    return pending
                 }
                 return switch model.selectedCandidate?.knowledgeState {
                 case .known: .known
-                case .ignored: .ignored
-                default: nil
+                default: .auto
                 }
             },
             set: { model.mark($0) }
@@ -465,14 +464,14 @@ struct ReaderInspectorView: View {
         }
     }
 
-    /// pending 选择优先：known/ignored 立即回显；auto 的真值要等
-    /// 服务端解析，沿用当前徽章。
+    /// pending 选择优先：known 立即回显；auto 的真值要等
+    /// unit 聚合重查，沿用当前徽章。`.ignored` 运行态不再产生
+    /// （D04）——枚举 case 仅为 v8 解码/审计保留。
     private func displayedState(
         of candidate: ReaderMiningCandidate
     ) -> VocabularyKnowledgeState {
         switch model.pendingMark {
         case .known: .known
-        case .ignored: .ignored
         case .auto, nil: candidate.knowledgeState
         }
     }

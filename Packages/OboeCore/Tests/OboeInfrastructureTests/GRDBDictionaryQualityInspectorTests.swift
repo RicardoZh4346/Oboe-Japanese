@@ -186,7 +186,7 @@ final class GRDBDictionaryQualityInspectorTests: XCTestCase {
         let dictDigest = try ReaderHashing.digestFile(at: dictURL)
 
         let knowledge = GRDBVocabularyKnowledgeRepository(pool: pool)
-        // 建 lexeme 绑定到 entry 1，再写 override——全程不改词典文件。
+        // 建 lexeme + unit flag 写——全程不改词典文件。
         let key = LexicalIdentityKey.jmdict(
             entryID: 1, normalizedForm: "事", reading: "こと")
         let lexeme = try await knowledge.resolveLexeme(
@@ -197,8 +197,28 @@ final class GRDBDictionaryQualityInspectorTests: XCTestCase {
                 dictionaryVersionAtResolution: "v2026-a",
                 resolutionStatus: .resolved,
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000)))
-        _ = try await knowledge.setOverride(
-            lexemeID: lexeme.id, override: .known,
+        let unitID = UUID()
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO lexical_learning_units(
+                        id, identity_kind, identity_key, provider,
+                        dictionary_entry_id, semantic_fingerprint,
+                        fingerprint_version, lemma, reading,
+                        sense_snapshot_json, binding_status,
+                        revision, created_at_ms, updated_at_ms)
+                    VALUES (
+                        ?, 'dictionarySense', ?, 'jmdict', 1, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'v1',
+                        '事', NULL, '{}', 'current', 0, 1, 1)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(unitID),
+                    "ds:\(unitID.uuidString)"])
+        }
+        let units = GRDBLearningUnitRepository(pool: pool)
+        _ = try await units.setWordTooEasy(
+            lexemeID: lexeme.id, value: true,
+            operationID: UUID(),
             at: Date(timeIntervalSince1970: 1_700_000_001))
         let dictAfter = try ReaderHashing.digestFile(at: dictURL)
         XCTAssertEqual(dictAfter.sha256, dictDigest.sha256)

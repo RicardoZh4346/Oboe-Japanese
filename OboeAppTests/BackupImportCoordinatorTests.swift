@@ -101,7 +101,9 @@ final class BackupImportCoordinatorTests: XCTestCase {
 
         XCTAssertNil(coordinator.errorMessage)
         let prepared = try XCTUnwrap(coordinator.prepared)
-        XCTAssertEqual(prepared.sourceFormatVersion, 8)
+        XCTAssertEqual(
+            prepared.sourceFormatVersion,
+            PortableBackupFormat.currentVersion)
         XCTAssertEqual(prepared.backup.deckCount, 1)
         XCTAssertFalse(coordinator.isVerifying)
     }
