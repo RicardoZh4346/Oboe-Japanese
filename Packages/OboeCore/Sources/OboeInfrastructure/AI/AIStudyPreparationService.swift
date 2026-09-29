@@ -1600,6 +1600,7 @@ public struct AIStudyPreparationService: Sendable {
                 }
                 var flags: [UUID: Bool] = [:]
                 var links: [UUID: [UUID]] = [:]
+                var primaryLinks: [UUID: [UUID]] = [:]
                 let unitIDs = Array(unitsByKey.values)
                 for chunk in unitIDs.chunkedPreparation(400) {
                     let placeholders = chunk.map { _ in "?" }
@@ -1621,7 +1622,7 @@ public struct AIStudyPreparationService: Sendable {
                     for row in try Row.fetchAll(
                         db,
                         sql: """
-                            SELECT unit_id, note_id
+                            SELECT unit_id, note_id, role
                             FROM learning_unit_note_links
                             WHERE unit_id IN (\(placeholders))
                             """,
@@ -1631,6 +1632,12 @@ public struct AIStudyPreparationService: Sendable {
                         let noteID = try DatabaseValueCodec.decodeUUID(
                             row["note_id"])
                         links[unitID, default: []].append(noteID)
+                        // D02：复用面只认 primary；legacy_secondary 仅参与
+                        // 同 headword 去重排除，不作为可复用 note 呈现。
+                        let role: String = row["role"]
+                        if role == "primary" {
+                            primaryLinks[unitID, default: []].append(noteID)
+                        }
                     }
                 }
                 // Note 明细（linked + 同 headword 未关联候选）。
@@ -1686,7 +1693,8 @@ public struct AIStudyPreparationService: Sendable {
                 }
                 var result: [String: Patch] = [:]
                 for (unitKey, unitID) in unitsByKey {
-                    let linkedNotes = (links[unitID] ?? []).compactMap {
+                    let linkedNotes = (primaryLinks[unitID] ?? [])
+                        .compactMap {
                         noteID -> AIStudyPreviewItem.LinkedNote? in
                         guard let row = noteRows[noteID]
                         else { return nil }

@@ -60,7 +60,9 @@ final class ReaderAIStudyFlowModel {
 
         var displayName: String {
             switch self {
-            case .recommended: "AI 推荐"
+            // D06：保留「AI 推荐」字样时必须标注消歧后本地筛选——
+            // AI 只负责消歧，推荐排序是本地可解释规则。
+            case .recommended: "AI 推荐（消歧后本地筛选）"
             case .all: "全部新增"
             case .jlpt: "按 JLPT 范围"
             case .newItemsLimit: "限制新内容数量"
@@ -127,7 +129,9 @@ final class ReaderAIStudyFlowModel {
     var strategyKind: StrategyKind = .recommended
     var jlptLevels: Set<JLPTLevel> = Set(JLPTLevel.allCases)
     var newItemLimit: Int = 50
-    var directionPreset: DirectionPreset = .japaneseToChinese
+    /// D17：沿用三方向默认（非管线建卡路径 `allCases` 一致）；
+    /// 快照的是用户实际选择，不是单方向硬默认。
+    var directionPreset: DirectionPreset = .all
     /// 「自动建立学习牌组」——默认关闭（spec §42 默认建议关闭）。
     var automaticApply = false
     /// 准备载荷：是否生成段落译文（默认开——关闭时请求只消歧）。

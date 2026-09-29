@@ -570,6 +570,13 @@ struct DeckDetailView: View {
                     )
                     .accessibilityIdentifier("deck-learning-progress")
                 }
+                // D13：无启用方向时说明停用会改变聚合口径——
+                // 被停用卡片的单元不进入进度分母。
+                if !progress.hasEnabledVocabularyCards {
+                    Text("无启用方向——停用卡片的词义不计入进度")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if progress.anomalousCardCount > 0 {
                     Text("\(progress.anomalousCardCount) 张卡片进度数据待修复")
                         .font(.caption)
