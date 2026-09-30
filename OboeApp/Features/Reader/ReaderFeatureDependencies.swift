@@ -43,6 +43,10 @@ struct ReaderFeatureDependencies {
     /// v0.7.5 S18：文档↔学习牌组绑定读门面（库行徽标、阅读页
     /// 「打开牌组」按钮、Deck 详情反查共用）。nil → 隐藏入口。
     var studyDecks: (any StudyDeckSurfacing)? = nil
+    /// v0.7.5 S22：文档级 AI 分析进度投影（库行「分析中 x/y」
+    /// 展示——离开分析页后 Job 续跑，进度从持久化计数读）。
+    /// nil → 行不显示 AI 进度。
+    var aiStudyProgress: (any ReaderAIStudyProgressProviding)? = nil
 }
 
 /// v0.7.5 AI Study 的依赖包：UI 只消费窄面——准备/预览/确认经
@@ -224,6 +228,13 @@ protocol ReaderRelinking: Sendable {
 protocol ReaderTokenStateProvider: Sendable {
     func resolveLexemes(keys: [LexicalKey]) async throws -> [LexicalKey: Lexeme]
     func states(lexemeIDs: [UUID]) async throws -> [UUID: VocabularyKnowledgeState]
+    /// occurrence→unit 直查着色通道（S22）：按 token 位置拿已绑
+    /// unit 的三态——绕开 lexeme 链，多候选 token/lexeme 缺行也
+    /// 能在制卡后正确变色。默认空表（缺席依赖/测试替身降级为
+    /// 纯 lexeme 路径）。
+    func occurrenceStates(
+        documentID: UUID, contentRevision: Int64
+    ) async throws -> [ReaderOccurrencePosition: VocabularyKnowledgeState]
     /// 知识态变更信号（unit flag/link 写提交即发射）——Reader
     /// 据此重取 state 重着色；默认实现为不发射的完结流（缺席依赖
     /// 与测试替身无需实现）。
@@ -234,6 +245,21 @@ extension ReaderTokenStateProvider {
     func knowledgeChanges() -> AsyncThrowingStream<Void, Error> {
         AsyncThrowingStream { $0.finish() }
     }
+    func occurrenceStates(
+        documentID: UUID, contentRevision: Int64
+    ) async throws -> [ReaderOccurrencePosition: VocabularyKnowledgeState] {
+        [:]
+    }
+}
+
+/// 文档级 AI 分析进度口（S22 库行展示）：活跃 Job 进度投影 +
+/// 观察流。数据全部来自持久化计数列——Runner 是否在内存态不
+/// 影响读数（离开分析页后台续跑进度一致）。
+protocol ReaderAIStudyProgressProviding: Sendable {
+    func activeJobProgress(
+    ) async throws -> [UUID: AIStudyJobProgress]
+    func observeActiveJobProgress(
+    ) -> AsyncThrowingStream<[UUID: AIStudyJobProgress], Error>
 }
 
 // MARK: - 编辑器装配（容器注入）
@@ -420,3 +446,4 @@ extension ReaderIngestService: ReaderImporting {}
 extension ReaderRelinkService: ReaderRelinking {}
 extension GRDBReaderCoverageService: ReaderCoverageProviding {}
 extension GRDBVocabularyKnowledgeRepository: ReaderTokenStateProvider {}
+extension GRDBAIStudyJobStore: ReaderAIStudyProgressProviding {}

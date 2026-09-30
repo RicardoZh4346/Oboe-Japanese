@@ -149,10 +149,11 @@ struct ReaderAIStudySheet: View {
                         Button {
                             Task { await model.startAnalysis() }
                         } label: {
-                            Label(
-                                "开始分析",
-                                systemImage: "sparkles")
+                            // 纯文本真居中——Label 的图标+文字作为整体
+                            // 居中会让文字偏右（真机实测偏位）。
+                            Text("开始分析")
                                 .frame(maxWidth: .infinity)
+                                .multilineTextAlignment(.center)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!model.canStart)

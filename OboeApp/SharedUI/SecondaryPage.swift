@@ -8,11 +8,11 @@ import UIKit
 /// 详情、词条详情、AI 修卡建议预览等）同样不显示 Tab Bar，无需在
 /// 每个深链页重复标注；返回一级页时系统自动恢复。
 ///
-/// 除 SwiftUI `.toolbar(.hidden)` 外，还经 UIKit 的
-/// `hidesBottomBarWhenPushed` 标记被 push 的宿主 VC：SwiftUI 的
-/// toolbar 偏好要等 pop 转场结束、顶层 VC 结算后才恢复 Tab Bar
-/// （表现为 bar 晚到、内容上移的跳动）；UIKit 属性则让 pop 转场
-/// 一开始就同步恢复。
+/// 隐藏只走 UIKit `hidesBottomBarWhenPushed`（由 `SecondaryPageTabBarHook`
+/// 在 push 当下落位，Anchor 兜底），Tab Bar 的隐藏/恢复都随导航转场
+/// 同步执行。**不要再叠加** `.toolbar(.hidden, for: .tabBar)`——SwiftUI
+/// 的 tabBar 偏好在 pop 转场结束后才结算恢复，双轨并用时它会盖过
+/// UIKit 路径，表现为 bar 晚到 + 整页内容上移（iOS 26/27 实测）。
 ///
 /// sheet / fullScreenCover 会覆盖整个窗口（含 Tab Bar），不需要
 /// 使用本修饰符。
@@ -20,7 +20,6 @@ private struct SecondaryPageModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(TabBarHidesOnPush())
-            .toolbar(.hidden, for: .tabBar)
     }
 }
 
@@ -48,9 +47,21 @@ enum SecondaryPageTabBarHook {
             let hooked = class_getInstanceMethod(
                 cls,
                 #selector(UINavigationController
-                    .oboe_pushViewController(_:animated:)))
+                    .oboe_pushViewController(_:animated:))),
+            let originalSet = class_getInstanceMethod(
+                cls,
+                #selector(UINavigationController.setViewControllers(
+                    _:animated:))),
+            let hookedSet = class_getInstanceMethod(
+                cls,
+                #selector(UINavigationController
+                    .oboe_setViewControllers(_:animated:)))
         else { return }
         method_exchangeImplementations(original, hooked)
+        // `pushViewController` 不是唯一入栈口：NavigationStack 的快照
+        // 恢复/批量替换会走 `setViewControllers`——只钩 push 时该路径
+        // 仍丢标志，pop 返回后 Tab Bar 出现延迟复发（真机复现）。
+        method_exchangeImplementations(originalSet, hookedSet)
     }
 }
 
@@ -61,6 +72,17 @@ private extension UINavigationController {
         viewController.hidesBottomBarWhenPushed = true
         // 实现已与系统方法交换——这是原 pushViewController。
         oboe_pushViewController(viewController, animated: animated)
+    }
+
+    @objc func oboe_setViewControllers(
+        _ viewControllers: [UIViewController], animated: Bool
+    ) {
+        // 标全部非根控制器——根（各 Tab 的一级页）必须保持 false，
+        // 否则 Tab 首页会跟着藏 bar。本 App 一切非根页都是二级页。
+        for controller in viewControllers.dropFirst() {
+            controller.hidesBottomBarWhenPushed = true
+        }
+        oboe_setViewControllers(viewControllers, animated: animated)
     }
 }
 

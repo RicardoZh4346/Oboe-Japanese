@@ -599,7 +599,9 @@ final class ReaderAIStudyFlowModel {
         case .create:
             item.decision = .create
             item.proposedAction =
-                .createNote(directions: directionPreset.directions)
+                .createNote(
+                    directions: directionPreset.directions,
+                    senseIDs: item.mergedSenseIDs)
         case .reuse:
             let noteID = reuseNoteID
                 ?? item.linkedNotes.first?.noteID

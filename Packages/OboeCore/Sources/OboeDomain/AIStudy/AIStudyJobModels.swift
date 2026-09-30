@@ -316,6 +316,53 @@ public struct AIStudyJob: Codable, Equatable, Identifiable, Sendable {
     public var isActive: Bool { AIStudyJobStateMachine.isActive(self) }
 }
 
+// MARK: - 文档级进度投影（S22 库行展示）
+
+/// 文档级活跃 Job 进度——Reader 库行/文档入口的「分析进行中」
+/// 展示投影（S22 真机反馈：退出分析页后要能在文章行直接看到
+/// 进度）。全部字段来自持久化计数（`refreshJobCounters` 同事务
+/// 维护），不依赖 Runner 在内存态——后台续跑/重进接管进度一致。
+public struct AIStudyJobProgress: Equatable, Sendable {
+    public let jobID: UUID
+    public let documentID: UUID
+    public let status: AIStudyJobStatus
+    /// 已结束本轮请求处理的块数（含 resolved/applied/failed）。
+    public let processedBlocks: Int
+    public let failedBlocks: Int
+    /// Job 已落库的块行总数（分母）。
+    public let totalBlocks: Int
+    /// 已确认 unit 数（待应用/已应用的确认进度）。
+    public let confirmedUnits: Int
+    public let appliedUnits: Int
+
+    public init(
+        jobID: UUID,
+        documentID: UUID,
+        status: AIStudyJobStatus,
+        processedBlocks: Int,
+        failedBlocks: Int,
+        totalBlocks: Int,
+        confirmedUnits: Int,
+        appliedUnits: Int
+    ) {
+        self.jobID = jobID
+        self.documentID = documentID
+        self.status = status
+        self.processedBlocks = processedBlocks
+        self.failedBlocks = failedBlocks
+        self.totalBlocks = totalBlocks
+        self.confirmedUnits = confirmedUnits
+        self.appliedUnits = appliedUnits
+    }
+
+    /// 0…1 派发进度（totalBlocks=0 时为 0——块行未落库前不
+    /// 显示满格）。
+    public var fraction: Double {
+        guard totalBlocks > 0 else { return 0 }
+        return Double(processedBlocks) / Double(totalBlocks)
+    }
+}
+
 // MARK: - Block 状态（§4.1 十一态）
 
 /// `ai_study_job_blocks.status`（§4.1 冻结集）。
@@ -455,7 +502,12 @@ public enum AIStudyProposedAction: Equatable, Sendable {
     case reuseNote(noteID: UUID, addMembershipTo: UUID?)
     /// 新建 vocabulary Note + 卡：方向快照（§11.5：沿用实际用户
     /// 设置——仓库无全局方向偏好时复用三方向默认，D17）。
-    case createNote(directions: Set<VocabularyCardDirection>)
+    /// `senseIDs`：词条级合并义项集——文中读音确定后该 entry 的
+    /// 全部合法义项并入同一张卡的释义（真机反馈裁决：不再一义项
+    /// 一卡）。空集 = 仅 unitKey 锚定的代表义项（旧数据/旧流程）。
+    case createNote(
+        directions: Set<VocabularyCardDirection>,
+        senseIDs: [Int64] = [])
     /// 置 tooEasy（有无 Note 均允许，§2.2）。
     case setTooEasy
     /// 显式跳过——仅落 receipt 锚，不写学习数据。
@@ -466,7 +518,7 @@ public enum AIStudyProposedAction: Equatable, Sendable {
 
 extension AIStudyProposedAction: Codable {
     private enum CodingKeys: String, CodingKey {
-        case kind, noteID, addMembershipTo, directions
+        case kind, noteID, addMembershipTo, directions, senseIDs
     }
     private enum Kind: String, Codable {
         case reuseNote, createNote, setTooEasy, recordSkip, pending
@@ -491,7 +543,12 @@ extension AIStudyProposedAction: Codable {
                 }
                 directions.insert(direction)
             }
-            self = .createNote(directions: directions)
+            // senseIDs 缺省 = 空集（旧 revision 行/旧版本写入的载荷
+            // 语义不变——仅 unitKey 锚定的代表义项）。
+            self = .createNote(
+                directions: directions,
+                senseIDs: try container.decodeIfPresent(
+                    [Int64].self, forKey: .senseIDs) ?? [])
         case .setTooEasy:
             self = .setTooEasy
         case .recordSkip:
@@ -508,10 +565,16 @@ extension AIStudyProposedAction: Codable {
             try container.encode(Kind.reuseNote, forKey: .kind)
             try container.encode(noteID, forKey: .noteID)
             try container.encodeIfPresent(addMembershipTo, forKey: .addMembershipTo)
-        case .createNote(let directions):
+        case .createNote(let directions, let senseIDs):
             try container.encode(Kind.createNote, forKey: .kind)
             try container.encode(
                 directions.map(\.rawValue).sorted(), forKey: .directions)
+            // 空集不写键——编码形态与旧版本逐字节一致（receipt/
+            // 备份的 payload 比对不吃字段新增）。
+            if !senseIDs.isEmpty {
+                try container.encode(
+                    senseIDs.sorted(), forKey: .senseIDs)
+            }
         case .setTooEasy:
             try container.encode(Kind.setTooEasy, forKey: .kind)
         case .recordSkip:

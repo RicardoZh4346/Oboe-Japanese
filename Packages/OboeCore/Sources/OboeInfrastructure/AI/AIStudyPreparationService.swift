@@ -1349,14 +1349,23 @@ public struct AIStudyPreparationService: Sendable {
             latest[key] = record
         }
 
-        // unit 聚合（entryID+senseID 双键定位——unitKey 指纹由
-        // manifest 快照的 sense 计算）。
+        // unit 聚合（**entry 级**——真机反馈裁决：文中读音确定后
+        // 该词条的全部合法义项合并进**一张卡**，不再一义项一卡）。
+        // 聚合键 = entryID；unitKey 代表义项 = 合并集中词典序最小
+        // 者（确定性、可重放——不随 record 循环序漂移）。
         struct Aggregate {
-            var item: AIStudyPreviewItem
+            var entryID: Int64
+            /// 合并义项集合（跨 occurrence 并集）。
+            var senseIDs: Set<Int64>
+            var occurrenceCount: Int
+            var firstSentence: String?
+            var firstLocator: String?
+            var evidenceRevision: Int64
             var confidenceMin: Double?
             var confidenceMax: Double?
+            var containsLowConfidence: Bool
         }
-        var aggregates: [String: Aggregate] = [:]
+        var aggregates: [Int64: Aggregate] = [:]
         var pendingItems: [AIStudyPreviewPendingItem] = []
 
         for record in latest.values {
@@ -1376,78 +1385,50 @@ public struct AIStudyPreparationService: Sendable {
                                     manifest: manifest))
                     continue
                 }
-                // 义项扩展（S22 用户裁决）：文中读音已确定（选定
-                // entry+sense）→ 该 occurrence 下此 entry 的全部
-                // 合法义项整体成卡，不再逐义项确认。合法集 = 请求
-                // 侧候选引用里此 entry 的 admissible senses（已做
+                // 义项合并集：文中读音已确定（选定 entry+sense）→
+                // 此 entry 的全部合法义项并入一卡。合法集 = 请求侧
+                // 候选引用里此 entry 的 admissible senses（已做
                 // sense 级限制过滤的真子集）；引用缺席回退仅选定
-                // 义项。同词不同读音/义项分别解析时各自的扩展
-                // 自然并集——聚合键去重，不产生重复卡。
-                var senseIDs = anchor?.token.candidates
+                // 义项。同词不同读音/义项分别解析时各自的合法集
+                // 自然并集——entry 聚合键去重，不产生重复卡。
+                var senseIDs = Set(anchor?.token.candidates
                     .first(where: { $0.entryID == entryID })?
-                    .senses.map(\.senseID) ?? []
-                if !senseIDs.contains(senseID) {
-                    senseIDs.insert(senseID, at: 0)
-                }
-                let firstSentence = sentence(for: anchor)
-                for expandedSenseID in senseIDs {
-                    guard let expandedManifest = entry.senses.first(
-                        where: { $0.id == expandedSenseID })
-                    else { continue }
-                    let sense = expandedManifest.materialize()
-                    guard let key = unitKey(
-                        entryID: entryID, sense: sense)
-                    else { continue }
-                    if var aggregate = aggregates[key] {
-                        aggregate.item.occurrenceCount += 1
-                        aggregate.item.evidenceRevision = max(
-                            aggregate.item.evidenceRevision,
-                            record.revision)
-                        if let confidence = record.confidence,
-                           confidence
+                    .senses.map(\.senseID) ?? [])
+                senseIDs.insert(senseID)
+                let recordConfidence = record.confidence
+                if var aggregate = aggregates[entryID] {
+                    aggregate.senseIDs.formUnion(senseIDs)
+                    aggregate.occurrenceCount += 1
+                    aggregate.evidenceRevision = max(
+                        aggregate.evidenceRevision, record.revision)
+                    if let confidence = recordConfidence {
+                        if confidence
                             < AIStudyBudget.lowConfidenceThreshold {
-                            aggregate.item.containsLowConfidence = true
+                            aggregate.containsLowConfidence = true
                         }
-                        if let confidence = record.confidence {
-                            aggregate.confidenceMin = min(
-                                aggregate.confidenceMin ?? confidence,
-                                confidence)
-                            aggregate.confidenceMax = max(
-                                aggregate.confidenceMax ?? confidence,
-                                confidence)
-                        }
-                        aggregates[key] = aggregate
-                    } else {
-                        let preferred = sense.preferredGlosses()
-                        aggregates[key] = Aggregate(
-                            item: AIStudyPreviewItem(
-                                unitKey: key,
-                                entryID: entryID,
-                                senseID: sense.id,
-                                headword: entry.primaryForm,
-                                reading: entry.readings.first?.reading,
-                                glossSummary: preferred?.glosses
-                                    .map(\.text).joined(separator: "; "),
-                                jlptLevel: nil,
-                                occurrenceCount: 1,
-                                firstSentence: firstSentence,
-                                firstLocator: anchor.map {
-                                    "第 \($0.chapterOrdinal + 1) 章 · 段 \($0.blockOrdinal + 1)"
-                                },
-                                evidenceRevision: record.revision,
-                                confidenceRange: nil,
-                                containsLowConfidence:
-                                    (record.confidence ?? 1)
-                                        < AIStudyBudget.lowConfidenceThreshold,
-                                existingUnitID: nil,
-                                unitIsTooEasy: false,
-                                linkedNotes: [],
-                                duplicateNotes: [],
-                                decision: nil,
-                                proposedAction: nil),
-                            confidenceMin: record.confidence,
-                            confidenceMax: record.confidence)
+                        aggregate.confidenceMin = min(
+                            aggregate.confidenceMin ?? confidence,
+                            confidence)
+                        aggregate.confidenceMax = max(
+                            aggregate.confidenceMax ?? confidence,
+                            confidence)
                     }
+                    aggregates[entryID] = aggregate
+                } else {
+                    aggregates[entryID] = Aggregate(
+                        entryID: entryID,
+                        senseIDs: senseIDs,
+                        occurrenceCount: 1,
+                        firstSentence: sentence(for: anchor),
+                        firstLocator: anchor.map {
+                            "第 \($0.chapterOrdinal + 1) 章 · 段 \($0.blockOrdinal + 1)"
+                        },
+                        evidenceRevision: record.revision,
+                        confidenceMin: recordConfidence,
+                        confidenceMax: recordConfidence,
+                        containsLowConfidence:
+                            (recordConfidence ?? 1)
+                                < AIStudyBudget.lowConfidenceThreshold)
                 }
             case .lowConfidence, .unresolved, .rejected:
                 pendingItems.append(
@@ -1456,15 +1437,54 @@ public struct AIStudyPreparationService: Sendable {
             }
         }
 
-        var items = aggregates.values.map { aggregate -> AIStudyPreviewItem in
-            var item = aggregate.item
+        // 出参：代表义项 + 合并释义一次定稿（manifest 快照 senses
+        // 已按 sense_order 排序——序最小者即词条首义，作 unitKey
+        // 锚；释义按词典序拼接供预览展示）。
+        var items: [AIStudyPreviewItem] = []
+        items.reserveCapacity(aggregates.count)
+        for aggregate in aggregates.values {
+            guard let entry = manifestEntries[aggregate.entryID]
+            else { continue }
+            let mergedSenses = entry.senses.filter {
+                aggregate.senseIDs.contains($0.id)
+            }
+            guard let representative = mergedSenses.first,
+                  let key = unitKey(
+                      entryID: aggregate.entryID,
+                      sense: representative.materialize())
+            else { continue }
+            var item = AIStudyPreviewItem(
+                unitKey: key,
+                entryID: aggregate.entryID,
+                senseID: representative.id,
+                mergedSenseIDs: mergedSenses.map(\.id),
+                headword: entry.primaryForm,
+                reading: entry.readings.first?.reading,
+                glossSummary: mergedSenses.compactMap {
+                    $0.materialize().preferredGlosses()
+                        .map { $0.glosses.map(\.text)
+                            .joined(separator: "; ") }
+                }.filter { !$0.isEmpty }.joined(separator: "；"),
+                jlptLevel: nil,
+                occurrenceCount: aggregate.occurrenceCount,
+                firstSentence: aggregate.firstSentence,
+                firstLocator: aggregate.firstLocator,
+                evidenceRevision: aggregate.evidenceRevision,
+                confidenceRange: nil,
+                containsLowConfidence: aggregate.containsLowConfidence,
+                existingUnitID: nil,
+                unitIsTooEasy: false,
+                linkedNotes: [],
+                duplicateNotes: [],
+                decision: nil,
+                proposedAction: nil)
             if let lo = aggregate.confidenceMin,
                let hi = aggregate.confidenceMax, lo <= hi {
                 item.confidenceRange = lo...hi
             }
-            return item
+            items.append(item)
         }
-        .sorted { $0.unitKey < $1.unitKey }
+        items.sort { $0.unitKey < $1.unitKey }
 
         // 既有学习态复核 + JLPT 参考标签（两段都批量 IN）。
         await attachLearningState(to: &items)
@@ -1814,12 +1834,23 @@ public struct AIStudyPreparationService: Sendable {
             for pending in correctedPending {
                 guard let corrected = pending.correctedSelection,
                       let entry = manifestEntries[corrected.entryID],
-                      let sense = entry.senses.first(where: {
+                      entry.senses.contains(where: {
                           $0.id == corrected.senseID
-                      }),
+                      })
+                else { continue }
+                // 改判同样按 entry 级合并义项：同 entry 候选的
+                // admissible sense 集并入一卡（与 buildPreview
+                // 聚合口径一致——unitKey 锚合并集中词典序最小的
+                // 代表义项，不锚用户改判点中的那一行）。
+                let mergedSet = Set(pending.alternatives
+                    .filter { $0.entryID == corrected.entryID }
+                    .map(\.senseID)).union([corrected.senseID])
+                guard let representative = entry.senses.first(where: {
+                    mergedSet.contains($0.id)
+                }),
                       let key = unitKey(
                           entryID: corrected.entryID,
-                          sense: sense.materialize())
+                          sense: representative.materialize())
                 else { continue }
                 let revision = try GRDBAIStudyJobStore
                     .nextResolutionRevision(
@@ -1864,12 +1895,17 @@ public struct AIStudyPreparationService: Sendable {
                         ])
                 }
                 if coveredUnitKeys.insert(key).inserted {
+                    // 载荷必须落值——decision=create 配 nil 动作在
+                    // 应用层会落 invalidSelection（既有缺陷修正）。
                     selections.append(AIStudyJobSelection(
                         jobID: jobID,
                         unitKey: key,
                         selectionRevision: newRevision,
                         decision: .create,
-                        proposedAction: nil,
+                        proposedAction: .createNote(
+                            directions: Set(
+                                VocabularyCardDirection.allCases),
+                            senseIDs: mergedSet.sorted()),
                         evidenceRevision: revision))
                 }
             }
@@ -1910,8 +1946,9 @@ public struct AIStudyPreparationService: Sendable {
     ) -> AIStudyProposedAction? {
         switch decision {
         case .create:
-            return .createNote(directions: Set(
-                VocabularyCardDirection.allCases))
+            return .createNote(
+                directions: Set(VocabularyCardDirection.allCases),
+                senseIDs: item.mergedSenseIDs)
         case .reuse:
             return item.linkedNotes.first.map {
                 .reuseNote(noteID: $0.noteID, addMembershipTo: nil)

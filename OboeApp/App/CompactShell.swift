@@ -46,7 +46,16 @@ struct CompactShell: View {
     var body: some View {
         // `.tabBarOnly` 需要 iOS 18；iOS 17 下回退为系统默认样式
         // （iPad 常规宽度可能呈现 sidebarAdaptable，功能等价）。
-        if #available(iOS 18.0, *) {
+        if #available(iOS 26.0, *) {
+            // iOS 26+ 的悬浮 Tab Bar 默认「滚动时自动最小化」——二级
+            // 页内滚动把它收起后，pop 回一级页时 bar 走最小化的恢复
+            // 路径而不是转场动画，表现为晚到 + 内容上跳（真机实测）。
+            // 关闭最小化：bar 显隐只由二级页的 hidesBottomBarWhenPushed
+            // 驱动，push/pop 双侧都随转场同步。
+            tabContent
+                .tabViewStyle(.tabBarOnly)
+                .tabBarMinimizeBehavior(.never)
+        } else if #available(iOS 18.0, *) {
             tabContent
                 .tabViewStyle(.tabBarOnly)
         } else {

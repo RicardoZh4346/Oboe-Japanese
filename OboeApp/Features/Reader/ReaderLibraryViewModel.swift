@@ -27,6 +27,8 @@ final class ReaderLibraryViewModel {
         /// 绑定的学习牌组 id（`reader_documents.study_deck_id`；
         /// nil = 未绑定）。
         var studyDeckID: UUID?
+        /// S22：活跃 AI 分析 Job 进度投影；nil = 无进行中 Job。
+        var aiProgress: AIStudyJobProgress?
         var id: UUID { document.id }
     }
 
@@ -53,10 +55,14 @@ final class ReaderLibraryViewModel {
     /// v0.7.5 S18：学习表面观察流——绑定增删/文档集合变化驱动
     /// 行级同步（不重跑分析）。
     private let learningProgress: (any LearningProgressProviding)?
+    /// S22：文档级 AI 进度投影口（库行「分析中 x/y」展示）。
+    private let aiStudyProgress: (any ReaderAIStudyProgressProviding)?
     private let now: @Sendable () -> Date
 
     /// documentID → 绑定的学习牌组 id（观察流载荷直接落盘）。
     private(set) var studyDeckByDocument: [UUID: UUID] = [:]
+    /// documentID → 活跃 AI Job 进度（观察流载荷）。
+    private var aiProgressByDocument: [UUID: AIStudyJobProgress] = [:]
 
     init(
         repository: any ReaderDocumentStore,
@@ -66,6 +72,7 @@ final class ReaderLibraryViewModel {
         workGate: RestorationWorkGate? = nil,
         relink: (any ReaderRelinking)? = nil,
         learningProgress: (any LearningProgressProviding)? = nil,
+        aiStudyProgress: (any ReaderAIStudyProgressProviding)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
@@ -75,6 +82,7 @@ final class ReaderLibraryViewModel {
         self.workGate = workGate
         self.relinkService = relink
         self.learningProgress = learningProgress
+        self.aiStudyProgress = aiStudyProgress
         self.now = now
     }
 
@@ -91,6 +99,7 @@ final class ReaderLibraryViewModel {
             workGate: dependencies.workGate,
             relink: dependencies.relink,
             learningProgress: dependencies.learningProgress,
+            aiStudyProgress: dependencies.aiStudyProgress,
             now: now
         )
     }
@@ -128,6 +137,35 @@ final class ReaderLibraryViewModel {
         rows = rows.map { row in
             var patched = row
             patched.studyDeckID = studyDeckByDocument[row.document.id]
+            return patched
+        }
+    }
+
+    /// S22：订阅文档级 AI 分析进度——Runner 每块收束即发射，
+    /// 退出分析页后台续跑时库行仍实时推进。终态（completed/
+    /// cancelled/failed）从投影消失 → 行徽标同步撤下。
+    func observeAIStudyProgress() async {
+        guard let aiStudyProgress else { return }
+        do {
+            for try await update in aiStudyProgress
+                .observeActiveJobProgress() {
+                guard !Task.isCancelled else { return }
+                if update != aiProgressByDocument {
+                    aiProgressByDocument = update
+                    patchAIProgress()
+                }
+            }
+        } catch is CancellationError {
+        } catch {
+            // 失流降级为手动刷新（refreshable 仍在）。
+        }
+    }
+
+    /// 把最新 AI 进度写回已渲染行（行不在投影内 → 清零）。
+    private func patchAIProgress() {
+        rows = rows.map { row in
+            var patched = row
+            patched.aiProgress = aiProgressByDocument[row.document.id]
             return patched
         }
     }
@@ -181,7 +219,8 @@ final class ReaderLibraryViewModel {
                     document: document,
                     coverageFraction: nil,
                     coverageIsPartial: false,
-                    studyDeckID: studyDeckByDocument[document.id]
+                    studyDeckID: studyDeckByDocument[document.id],
+                    aiProgress: aiProgressByDocument[document.id]
                 )
                 if let snapshot = try? await coverage?
                     .documentSnapshot(documentID: document.id) {
@@ -190,7 +229,8 @@ final class ReaderLibraryViewModel {
                         coverageFraction: snapshot
                             .uniqueKnownOrLearningCoverage,
                         coverageIsPartial: snapshot.isPartial,
-                        studyDeckID: studyDeckByDocument[document.id]
+                        studyDeckID: studyDeckByDocument[document.id],
+                        aiProgress: aiProgressByDocument[document.id]
                     )
                 }
                 rows.append(row)
@@ -275,7 +315,8 @@ final class ReaderLibraryViewModel {
             document: mutate(rows[index].document),
             coverageFraction: rows[index].coverageFraction,
             coverageIsPartial: rows[index].coverageIsPartial,
-            studyDeckID: rows[index].studyDeckID
+            studyDeckID: rows[index].studyDeckID,
+            aiProgress: rows[index].aiProgress
         )
     }
 

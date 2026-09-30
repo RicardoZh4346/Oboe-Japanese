@@ -245,20 +245,8 @@ struct ReaderView: View {
                     .disabled(model.document == nil)
                     .accessibilityIdentifier("reader-ai-study-button")
                 }
-                // S18：已绑定学习牌组 → 「打开牌组」入口（跨区
-                // 路由由壳层回调执行）。载入中按占位钮置灰、载入后
-                // 未绑定则隐藏——工具栏图标集不随加载态跳变。
-                if let onOpenDeck, model.isLoading || model.studyDeckID != nil {
-                    Button {
-                        if let deckID = model.studyDeckID {
-                            onOpenDeck(deckID)
-                        }
-                    } label: {
-                        Label("学习牌组", systemImage: "rectangle.stack")
-                    }
-                    .disabled(model.studyDeckID == nil)
-                    .accessibilityIdentifier("reader-open-study-deck")
-                }
+                // 牌组入口按用户裁决移出阅读工具栏——文章→牌组的
+                // 跳转留在 Reader 库行的徽标 affordance。
                 if mining != nil {
                     Button {
                         isBatchSelecting.toggle()

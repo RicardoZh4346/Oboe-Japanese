@@ -723,6 +723,11 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
     public let unitKey: String
     public let entryID: Int64
     public let senseID: Int64
+    /// 词条级合并义项集：同 entry 的全部合法义项并入一张卡的
+    /// `senseIDs` 载荷（真机反馈裁决：一词条一卡）。空集 = 仅
+    /// `senseID` 代表义项（旧路径兼容）。`unitKey` 恒锚合并集中
+    /// 词典序最小的义项。
+    public var mergedSenseIDs: [Int64]
     /// 词典快照的词目（`entry.primaryForm`）。
     public let headword: String
     public let reading: String?
@@ -782,6 +787,7 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
         unitKey: String,
         entryID: Int64,
         senseID: Int64,
+        mergedSenseIDs: [Int64] = [],
         headword: String,
         reading: String?,
         glossSummary: String?,
@@ -802,6 +808,7 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
         self.unitKey = unitKey
         self.entryID = entryID
         self.senseID = senseID
+        self.mergedSenseIDs = mergedSenseIDs
         self.headword = headword
         self.reading = reading
         self.glossSummary = glossSummary
@@ -1016,7 +1023,9 @@ public enum AIStudySelectionStrategy: Equatable, Sendable {
                     createBudget = budget
                 }
                 item.decision = .create
-                item.proposedAction = .createNote(directions: directions)
+                item.proposedAction = .createNote(
+                    directions: directions,
+                    senseIDs: item.mergedSenseIDs)
             }
             items[index] = item
         }
@@ -1096,6 +1105,35 @@ public struct AIStudyJLPTReferenceIndex: Sendable {
     }
 
     public var isEmpty: Bool { levels.isEmpty }
+}
+
+// MARK: - occurrence 位置键（S22 着色直查）
+
+/// `reader_study_occurrences` 行的定位键——Reader 着色把 token
+/// 位置直接映到已绑 unit 的 occurrence（绕开 lexeme 解析链：
+/// 多候选 token 没有 lexicalKey、lexeme 缺行时词卡建成仍不
+/// 变色——真机反馈「制卡完成词仍橙色」的直查通道）。
+///
+/// 四元组全等才命中：章序 + 块序 + 块内 UTF-16 起点 + 长度。
+/// blockOrdinal 是**章内**序数——跨章同序块靠 chapterOrdinal
+/// 区分，缺它会错贴状态。
+public struct ReaderOccurrencePosition: Hashable, Sendable {
+    public let chapterOrdinal: Int
+    public let blockOrdinal: Int
+    public let startUTF16: Int
+    public let lengthUTF16: Int
+
+    public init(
+        chapterOrdinal: Int,
+        blockOrdinal: Int,
+        startUTF16: Int,
+        lengthUTF16: Int
+    ) {
+        self.chapterOrdinal = chapterOrdinal
+        self.blockOrdinal = blockOrdinal
+        self.startUTF16 = startUTF16
+        self.lengthUTF16 = lengthUTF16
+    }
 }
 
 // MARK: - 终态摘要（S15 §9：互不重叠计数 + 入口载荷）

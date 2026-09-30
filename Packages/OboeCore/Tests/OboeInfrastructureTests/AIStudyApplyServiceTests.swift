@@ -1034,6 +1034,116 @@ final class AIStudyApplyServiceTests: XCTestCase {
         XCTAssertTrue(result.contains("あ"))
     }
 
+    /// B6：resolution.locatorJSON 只到子块起点时，例句锚点必须
+    /// 改走 `reader_study_occurrences`（resolution_id 反查）的
+    /// token 级 locator——多句块里目标词在非首句也能取对句。
+    func testReaderBlockSentencePrefersOccurrenceTokenAnchor()
+        async throws {
+        let env = try await makeEnvironment()
+        // 块级锚：utf16Offset=0（子块起点）；token「暗く」在第三句。
+        let text = "雨が降る。空は灰色だ。気づけば外はすっかり暗くなっていた。"
+        let blockLocator = ReaderLocation(
+            chapterOrdinal: 0, blockOrdinal: 0, utf16Offset: 0,
+            blockTextHash: "bhash", prefix: "", suffix: "雨が降る")
+        let blockLocatorJSON = String(decoding:
+            try JSONEncoder().encode(blockLocator), as: UTF8.self)
+        // occurrence 行：token「暗く」起点=第三句内偏移。
+        let darkOffset = "雨が降る。空は灰色だ。気づけば外はすっかり"
+            .utf16.count
+        let tokenLocator = ReaderLocation(
+            chapterOrdinal: 0, blockOrdinal: 0, utf16Offset: darkOffset,
+            blockTextHash: "bhash", prefix: "すっかり", suffix: "暗くなっ")
+        let tokenLocatorJSON = String(decoding:
+            try JSONEncoder().encode(tokenLocator), as: UTF8.self)
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: blockLocatorJSON,
+            tokenKey: "tok-0", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1)
+        try await env.pool.write { db in
+            try db.execute(
+                sql: "UPDATE reader_blocks SET text = ? WHERE document_id = ?",
+                arguments: [text,
+                            DatabaseValueCodec.encode(env.documentID)])
+            try db.execute(
+                sql: """
+                    INSERT INTO reader_study_occurrences(
+                        id, document_id, content_revision,
+                        locator_json, block_source_hash,
+                        tokenizer_version, start_utf16, length_utf16,
+                        resolution_status, resolution_id
+                    ) VALUES (?, ?, ?, ?, ?, 'tv', ?, 2,
+                              'aiResolved', ?)
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(UUID()),
+                    DatabaseValueCodec.encode(env.documentID),
+                    1, tokenLocatorJSON, "bhash",
+                    darkOffset,
+                    DatabaseValueCodec.encode(resolution.id)])
+        }
+        let context = AIStudyApplyUnitContext(
+            jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            blocks: [env.block], resolutions: [resolution])
+        let selection = AIStudyJobSelection(
+            jobID: env.job.id,
+            unitKey: "jmdict:sense-v1:200:"
+                + String(repeating: "f", count: 64),
+            selectionRevision: 1, decision: .create,
+            evidenceRevision: 1)
+        let sentence = try await env.pool.read { db in
+            GRDBAIStudyApplyService.readerBlockSentence(
+                context: context, selection: selection, in: db)
+        }
+        XCTAssertEqual(sentence, "気づけば外はすっかり暗くなっていた。")
+    }
+
+    /// B6：occurrence 行缺席（未收束/旧 Job）时回退 resolution
+    /// 块级锚——仍取含锚点的包含句，不整段入卡。
+    func testReaderBlockSentenceOccurrenceMissingFallsBack()
+        async throws {
+        let env = try await makeEnvironment()
+        let text = "彼は走った。猫は魚を食べた。"
+        let blockLocator = ReaderLocation(
+            chapterOrdinal: 0, blockOrdinal: 0, utf16Offset: 6,
+            blockTextHash: "bhash", prefix: "。猫は", suffix: "魚を食べ")
+        let blockLocatorJSON = String(decoding:
+            try JSONEncoder().encode(blockLocator), as: UTF8.self)
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: blockLocatorJSON,
+            tokenKey: "tok-0", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1)
+        try await env.pool.write { db in
+            try db.execute(
+                sql: "UPDATE reader_blocks SET text = ? WHERE document_id = ?",
+                arguments: [text,
+                            DatabaseValueCodec.encode(env.documentID)])
+        }
+        let context = AIStudyApplyUnitContext(
+            jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            blocks: [env.block], resolutions: [resolution])
+        let selection = AIStudyJobSelection(
+            jobID: env.job.id,
+            unitKey: "jmdict:sense-v1:200:"
+                + String(repeating: "f", count: 64),
+            selectionRevision: 1, decision: .create,
+            evidenceRevision: 1)
+        let sentence = try await env.pool.read { db in
+            GRDBAIStudyApplyService.readerBlockSentence(
+                context: context, selection: selection, in: db)
+        }
+        XCTAssertEqual(sentence, "猫は魚を食べた。")
+    }
+
     /// 锚点缺失（locator/sourceHash 皆空）→ nil——不伪造例句。
     func testReaderBlockSentenceMissingAnchorReturnsNil()
         async throws {

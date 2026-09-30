@@ -125,9 +125,18 @@ public struct AIStudyResolverResult: Equatable, Sendable {
 ///   参数透传给现有管线（仅存于 Authorization 等协议头）。本类型
 ///   不打日志；错误只携带分类码位，不含正文/Key/带秘密 URL。
 public struct AIStudyResolverClient: Sendable {
-    /// 输出 token 上限：40 occurrence × words 项 + 译文，沿用句析档。
-    static let maximumOutputTokens = 4_000
+    /// 输出 token 上限：40 occurrence × words 项 + 译文。
+    /// B8：4000 对满载块偏紧——截断 JSON 外层校验拒绝整包拒
+    /// （§7 不猜半截），重试同载荷大概率再截，是纯烧尝试的
+    /// 确定性失败。8192 覆盖 DeepSeek/OpenAI 常规上限，
+    /// Anthropic max_tokens 语义同。schema `maxItems` 不变。
+    static let maximumOutputTokens = 8_192
     static let maximumResponseBytes = AIHTTPSupport.defaultMaximumResponseBytes
+    /// study 路单请求超时：块大+provider 高峰排队时 60s 偏紧
+    /// （B8 真机：DeepSeek flash 满载块偶发超时烧重试）。
+    /// 独立常量不动共享 `AIHTTPSupport.executionTimeout`（其他
+    /// AI 客户端仍 60s）。
+    static let requestTimeout: TimeInterval = 120
 
     private let executor: AIRequestExecutor
     /// executor 内部使用的 transport 外层探针——只为拿响应头。
@@ -138,7 +147,7 @@ public struct AIStudyResolverClient: Sendable {
     public init() {
         self.init(
             transport: URLSessionAIHTTPTransport(
-                timeout: AIHTTPSupport.executionTimeout))
+                timeout: Self.requestTimeout))
     }
 
     /// 测试/复用注入点：与既有四个 client 相同的 transport 注入惯例；

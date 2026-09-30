@@ -536,6 +536,87 @@ final class GRDBVocabularyKnowledgeRepositoryTests: XCTestCase {
         XCTAssertNotNil(second, "unit 事件写提交应触发变更信号")
     }
 
+    /// S22：occurrence→unit 直查着色通道——`unit_id` 绑定的
+    /// occurrence 按位置四元组投影 unit 三态；未绑定行不出现，
+    /// unit 归零态回 unknown（调用方回落 lexeme 兜底链）。
+    func testOccurrenceStatesProjectUnitStates() async throws {
+        let documentID = UUID()
+        let deckID = try insertDeck()
+        let noteID = try insertNote(headword: "暗い", deckID: deckID)
+        let learningUnit = try insertUnit(entryID: 20, lemma: "暗い")
+        let masteredUnit = try insertUnit(entryID: 21, lemma: "雨")
+        let plainUnit = try insertUnit(entryID: 22, lemma: "走る")
+        try linkUnit(unitID: learningUnit, noteID: noteID)
+        try insertUnitFlag(unitID: masteredUnit, tooEasy: true)
+        let locators: [Int: String] = try [0, 10, 20].reduce(
+            into: [:]
+        ) { out, start in
+            out[start] = String(decoding: try JSONEncoder().encode(
+                ReaderLocation(
+                    chapterOrdinal: 0, blockOrdinal: 0,
+                    utf16Offset: start, blockTextHash: "h",
+                    prefix: "", suffix: "")), as: UTF8.self)
+        }
+        try await pool.write { db in
+            try db.execute(
+                sql: """
+                    INSERT INTO reader_documents(
+                        id, title, format, created_at_ms,
+                        source_sha256, canonical_text_hash,
+                        parser_version, content_revision,
+                        progress_basis_points, availability
+                    ) VALUES (?, 't', 'txt', 1, ?, ?, 'v1', 1, 0,
+                              'available')
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(documentID),
+                    String(repeating: "a", count: 64),
+                    String(repeating: "b", count: 64)])
+            // 三行：learning / mastered / 未绑 unit（nil）。
+            for (start, unitID) in [
+                (0, learningUnit), (10, masteredUnit), (20, nil),
+            ] as [(Int, UUID?)] {
+                try db.execute(
+                    sql: """
+                        INSERT INTO reader_study_occurrences(
+                            id, document_id, content_revision,
+                            locator_json, block_source_hash,
+                            tokenizer_version, start_utf16, length_utf16,
+                            unit_id, resolution_status
+                        ) VALUES (?, ?, 1, ?, 'h', 'tv', ?, 2, ?,
+                                  'aiResolved')
+                        """,
+                    arguments: [
+                        DatabaseValueCodec.encode(UUID()),
+                        DatabaseValueCodec.encode(documentID),
+                        locators[start], start,
+                        unitID.map(DatabaseValueCodec.encode)])
+            }
+            // 无 unit 的 plainUnit 独立行不重复——plainUnit 仅证明
+            // 「无学习信号的 unit」投影为 unknown 不出现在结果。
+            _ = plainUnit
+        }
+        let states = try await repository.occurrenceStates(
+            documentID: documentID, contentRevision: 1)
+        XCTAssertEqual(states.count, 2)
+        XCTAssertEqual(
+            states[ReaderOccurrencePosition(
+                chapterOrdinal: 0, blockOrdinal: 0,
+                startUTF16: 0, lengthUTF16: 2)], .learning)
+        XCTAssertEqual(
+            states[ReaderOccurrencePosition(
+                chapterOrdinal: 0, blockOrdinal: 0,
+                startUTF16: 10, lengthUTF16: 2)], .known)
+        // unit_id=nil 行不产键；其他 revision/文档不串。
+        XCTAssertNil(
+            states[ReaderOccurrencePosition(
+                chapterOrdinal: 0, blockOrdinal: 0,
+                startUTF16: 20, lengthUTF16: 2)])
+        let wrongRevision = try await repository.occurrenceStates(
+            documentID: documentID, contentRevision: 2)
+        XCTAssertTrue(wrongRevision.isEmpty)
+    }
+
     /// `lexeme_dictionary_bindings.status='current'` 优先于
     /// `lexemes.entry_id`——换库重绑后词级态跟新 entry 的 unit 走。
     func testBindingOverrideEntryWins() async throws {

@@ -220,6 +220,148 @@ final class AIStudyRunnerTests: XCTestCase {
             blocks.allSatisfy { $0.lastErrorCode == "authFailed" })
     }
 
+    // MARK: - B8 截断外层拒绝 + 自适应节流
+
+    /// B8：HTTP 成功但 lexicalStatus=.failed（截断/畸形 JSON）
+    /// 必须走重试档而非静默落 resolved——否则词义全丢且结果
+    /// 写进 ai_study_cache 毒化后续同 hash 块。归因码
+    /// `envelope.<rejection>` 保留外层拒绝细节。
+    func testEnvelopeRejectedRetriesInsteadOfSilentResolve() async throws {
+        let env = try await makeEnvironment()
+        let jobID = try await env.insertJobWithTwoBlocks()
+        let transport = env.transport
+        await transport.setHandler { request in
+            if request.requestHash == "rh-0" {
+                return .success(Self.envelopeRejectedResult(
+                    for: request, rejection: .malformedJSON))
+            }
+            return .success(Self.resolverResult(for: request))
+        }
+
+        let runner = env.makeRunner(
+            maxAttempts: 2, baseDelayMs: 10, jitter: { $0 })
+        _ = try await runner.createJob(env.job)
+        try await runner.start(jobID: jobID)
+        await runner.waitUntilSettled(jobID: jobID)
+
+        let blocks = try await env.store.fetchBlocks(jobID: jobID)
+        let failed = try XCTUnwrap(
+            blocks.first { $0.subblockKey == "b0" })
+        XCTAssertEqual(failed.status, .failed)
+        XCTAssertEqual(
+            failed.lastErrorCode, "envelope.malformedJSON")
+        XCTAssertEqual(failed.attemptCount, 2, "截断按重试档烧尝试")
+        // 失败结果绝不能进缓存——同 hash 复用会扩散毒化。
+        let cachedPoison = try await env.store.cachedResult(
+            requestHash: "rh-0")
+        XCTAssertNil(cachedPoison)
+        let resolved = try XCTUnwrap(
+            blocks.first { $0.subblockKey == "b1" })
+        XCTAssertEqual(resolved.status, .resolved)
+        let job = try await env.store.fetchJob(id: jobID)
+        XCTAssertEqual(job?.status, .partiallyCompleted)
+    }
+
+    /// B8：缓存里历史 lexicalStatus=.failed 毒化行不再命中——
+    /// 命中路径显式跳过失败结果，块走正常网络重试。
+    func testPoisonedCacheEntryNotReused() async throws {
+        let env = try await makeEnvironment()
+        let jobID = try await env.insertJobWithTwoBlocks()
+        let transport = env.transport
+        // 手工把一条 failed 结果写进缓存（模拟旧版本毒化行）。
+        try await env.pool.write { db in
+            try GRDBAIStudyJobStore.storeCachedResult(
+                AIStudyCachedResult(
+                    result: Self.envelopeRejectedResult(
+                        for: nil, rejection: .malformedJSON,
+                        requestHash: "rh-0"),
+                    resultID: UUID(), atMs: 1),
+                capacity: 256, atMs: 1, in: db)
+        }
+        await transport.setHandler { request in
+            .success(Self.resolverResult(for: request))
+        }
+
+        let runner = env.makeRunner()
+        _ = try await runner.createJob(env.job)
+        try await runner.start(jobID: jobID)
+        await runner.waitUntilSettled(jobID: jobID)
+
+        XCTAssertEqual(
+            transport.callCount(for: "rh-0"), 1,
+            "毒化缓存不得命中——rh-0 必须真发网络请求")
+        let blocks = try await env.store.fetchBlocks(jobID: jobID)
+        XCTAssertEqual(Set(blocks.map(\.status)), [.resolved])
+    }
+
+    /// B8 AIMD：并发 4 下整批 429 → 有效并发降坡至 1 且开冷却
+    /// 闸；后续派发序列化（任一时刻在途 ≤1）。cooldown 由
+    /// Retry-After=0.05s 提供，测试时钟不真等。
+    func testAdaptiveConcurrencyShrinksOnFailures() async throws {
+        let env = try await makeEnvironment()
+        let jobID = try await env.insertJob(withBlockCount: 6)
+        let transport = env.transport
+        // 前 4 个请求（首批并发批）全部 429；之后驻留。
+        await transport.setHandler { request in
+            if transport.callCount(for: request.requestHash) == 1 {
+                throw AIStudyResolverError.rateLimited(
+                    retryAfter: 0.05)
+            }
+            return await transport.park(request)
+        }
+
+        let runner = env.makeRunner(maxConcurrency: 4)
+        try await runner.start(jobID: jobID)
+        // 首批 4 个 429 落完 → 节流降坡 + cooldown；rh-4/rh-5
+        // 与到期重试只能单发——等第 5 次调用出现且当前在途 1。
+        try await waitUntil {
+            transport.callCount >= 5 && transport.currentInFlight == 1
+        }
+        XCTAssertLessThanOrEqual(
+            transport.currentInFlight, 1,
+            "整批 429 后并发必须退坡到 1")
+    }
+
+    /// B8：429 冷却窗内不领新块——rh-0 失败后 50ms 冷却期内
+    /// rh-1 不得发出（即便还有并发容量）。
+    func testRateLimitCooldownBlocksNewDispatches() async throws {
+        let env = try await makeEnvironment()
+        let jobID = try await env.insertJobWithTwoBlocks()
+        let transport = env.transport
+        let rh1Sent = OSAllocatedUnfairLock(initialState: false)
+        let rh1SentAtMs = OSAllocatedUnfairLock(
+            initialState: Int64(0))
+        await transport.setHandler { request in
+            if request.requestHash == "rh-0",
+               transport.callCount(for: "rh-0") == 1 {
+                throw AIStudyResolverError.rateLimited(
+                    retryAfter: 0.05)
+            }
+            if request.requestHash == "rh-1" {
+                rh1Sent.withLock { $0 = true }
+                rh1SentAtMs.withLock {
+                    $0 = Int64(Date().timeIntervalSince1970 * 1_000)
+                }
+            }
+            return .success(Self.resolverResult(for: request))
+        }
+
+        let runner = env.makeRunner(
+            maxConcurrency: 1,  // 串行批：rh-0 失败时 rh-1 尚未派发
+            maxAttempts: 1,     // rh-0 一次失败后直接 failed
+            baseDelayMs: 10, jitter: { $0 })
+        _ = try await runner.createJob(env.job)
+        let startMs = Int64(Date().timeIntervalSince1970 * 1_000)
+        try await runner.start(jobID: jobID)
+        await runner.waitUntilSettled(jobID: jobID)
+
+        XCTAssertTrue(rh1Sent.withLock { $0 }, "rh-1 最终应派发成功")
+        let sentAt = rh1SentAtMs.withLock { $0 }
+        XCTAssertGreaterThanOrEqual(
+            sentAt - startMs, 40,
+            "rh-1 必须在 429 冷却窗（50ms）之后才发出")
+    }
+
     // MARK: - 请求复用 / 并发界
 
     /// 同 requestHash 的两块在途合并——一次网络调用喂两个 waiter。
@@ -505,6 +647,33 @@ final class AIStudyRunnerTests: XCTestCase {
             suggestedRetryAfter: nil, responseBytes: 64)
     }
 
+    /// B8：`lexicalStatus == .failed` 的应答（截断/畸形外层拒绝）——
+    /// HTTP 层成功但词义全丢。
+    static func envelopeRejectedResult(
+        for request: AIStudyRequest?,
+        rejection: AIStudyEnvelopeRejection,
+        requestHash: String? = nil
+    ) -> AIStudyResolverResult {
+        AIStudyResolverResult(
+            outcome: ValidatedBlockOutcome(
+                blockKey: request?.blocks.first?.blockKey ?? "b0",
+                lexicalStatus: .failed,
+                translationStatus: .failed,
+                translation: nil,
+                envelopeRejection: rejection,
+                resolutions: [],
+                targetTokenCount: 1, aiResolvedCount: 0,
+                lowConfidenceCount: 0, unresolvedTokenCount: 0,
+                droppedUnknownTokenCount: 0, duplicateTokenCount: 0,
+                malformedItemCount: 0, invalidItemCount: 0),
+            requestHash: requestHash ?? request?.requestHash ?? "rh-0",
+            requestID: request?.requestID ?? "rq-x",
+            providerKind: "fake", model: "fake-model",
+            promptVersion: "ai-study-prompt-v1",
+            responseMode: .promptedJSON,
+            suggestedRetryAfter: nil, responseBytes: 64)
+    }
+
     static func insertDocument(id: UUID, in db: Database) throws {
         try db.execute(
             sql: """
@@ -547,6 +716,12 @@ private extension AIStudyRunnerTests {
 
         var maxInFlight: Int {
             state.withLock { $0.maxInFlight }
+        }
+
+        /// 当前在途数（park 挂起也计入）——节流断言用：与
+        /// maxInFlight 不同，它是此刻值不是历史峰值。
+        var currentInFlight: Int {
+            state.withLock { $0.inFlight }
         }
 
         func callCount(for requestHash: String) -> Int {

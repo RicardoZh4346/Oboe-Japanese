@@ -95,6 +95,7 @@ struct ReaderLibraryView: View {
         .navigationTitle("阅读")
         .task { await model.refresh() }
         .task { await model.observeLearningSurface() }
+        .task { await model.observeAIStudyProgress() }
         .refreshable { await model.refresh() }
         .fileImporter(
             isPresented: $showFileImporter,
@@ -293,6 +294,11 @@ private struct ReaderDocumentRow: View {
                             .accessibilityLabel("已绑定学习牌组")
                     }
                 }
+                // S22：活跃 AI 分析 Job 进度——离开分析页后台续跑，
+                // 库行直接显示派发/失败计数（数据源是持久化计数列）。
+                if let progress = row.aiProgress {
+                    aiProgressRow(progress)
+                }
             }
             Spacer()
             if row.document.availability == .missing {
@@ -315,6 +321,37 @@ private struct ReaderDocumentRow: View {
         case .txt: "doc.text"
         case .paste: "doc.on.clipboard"
         }
+    }
+
+    /// S22：AI 分析进度行——进度条 + 「分析中 x/y」+ 失败计数。
+    /// awaitingConfirmation 时文案切换为「待确认 n」引导用户
+    /// 回到分析页完成确认。
+    @ViewBuilder
+    private func aiProgressRow(
+        _ progress: AIStudyJobProgress
+    ) -> some View {
+        let awaiting = progress.status == .awaitingConfirmation
+        VStack(alignment: .leading, spacing: 3) {
+            ProgressView(value: progress.fraction)
+                .frame(maxWidth: .infinity)
+            HStack(spacing: OboeTheme.Spacing.xs) {
+                if awaiting {
+                    Text("待确认 \(progress.confirmedUnits)")
+                        .foregroundStyle(.orange)
+                } else {
+                    Text("AI 分析 \(progress.processedBlocks)"
+                        + "/\(progress.totalBlocks)")
+                        .foregroundStyle(.secondary)
+                }
+                if progress.failedBlocks > 0 {
+                    Text("失败 \(progress.failedBlocks)")
+                        .foregroundStyle(.red)
+                }
+            }
+            .font(.caption)
+        }
+        .accessibilityIdentifier(
+            "reader-ai-progress-\(row.document.id.uuidString)")
     }
 
     @ViewBuilder

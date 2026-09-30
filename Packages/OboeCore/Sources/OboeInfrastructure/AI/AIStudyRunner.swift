@@ -182,6 +182,23 @@ public actor AIStudyRunner {
     /// `requesting` 的块当死 lease 重复认领（同一网络请求被重发）。
     private var resolving: Set<UUID> = []
 
+    // MARK: - 自适应节流（B8：AIMD + 限流冷却）
+
+    /// 有效派发并发——AIMD：失败减半（下限 1），连续
+    /// `successWindow` 次成功 +1（上限 = 配置并发）。runner 级：
+    /// provider 是共享资源，限流/超时按整池背压不按 Job。
+    private var effectiveConcurrency: Int
+    /// AIMD 升档计数窗。
+    private var consecutiveSuccesses = 0
+    /// 恢复升档所需连续成功数。
+    private static let successWindow = 4
+    /// runner 级限流冷却截止时刻（ms）：429/Retry-After 命中的
+    /// 窗口内所有 Job 停领新块——服务端要求的全局等待期。
+    /// 无 Retry-After 时给 10s 默认冷却（块级退避仍各自生效，
+    /// 冷却只是派发闸门）。
+    private var cooldownUntilMs: Int64 = 0
+    private static let defaultRateLimitCooldownMs: Int64 = 10_000
+
     public init(
         store: GRDBAIStudyJobStore,
         configuration: Configuration = .init(),
@@ -206,6 +223,7 @@ public actor AIStudyRunner {
         self.nowMs = nowMs
         self.sleep = sleep
         self.jitter = jitter
+        self.effectiveConcurrency = configuration.dispatchConcurrency
     }
 
     // MARK: - Job 生命周期入口
@@ -507,12 +525,28 @@ public actor AIStudyRunner {
             await settle(jobID: jobID)
             return
         }
+        let now = nowMs()
+        // 限流冷却窗：provider 要全局等待期间不领新块（在途
+        // flight 完成仍各自落库；窗内唤醒到冷却截止时刻）。
+        let cooldown = cooldownUntilMs - now
+        if cooldown > 0 {
+            if var runtime = runtimes[jobID], runtime.wakeTask == nil {
+                let generation = runtime.generation
+                runtime.wakeTask = Task { [sleep] in
+                    try? await sleep(cooldown)
+                    await self.wake(
+                        jobID: jobID, generation: generation)
+                }
+                runtimes[jobID] = runtime
+            }
+            return
+        }
         let epoch = runtime.epoch
         while true {
             let inFlight = inFlightCount(for: jobID)
-            var capacity = configuration.dispatchConcurrency - inFlight
+            // AIMD 有效并发：失败退坡时派发面自动收窄。
+            var capacity = effectiveConcurrency - inFlight
             guard capacity > 0 else { break }
-            let now = nowMs()
             guard let dispatchable = try? await store
                 .fetchDispatchableBlocks(jobID: jobID, nowMs: now)
             else { break }
@@ -523,8 +557,11 @@ public actor AIStudyRunner {
             for block in dispatchable where capacity > 0 {
                 if owned.contains(block.id) { continue }
                 // ① 缓存命中：零网络落结果（§8.2 请求复用）。
+                //    词义层失败（截断/畸形）的结果不复用——历史
+                //    版本可能写进过这种毒化行。
                 if let cached = try? await store.cachedResult(
                     requestHash: block.requestHash),
+                   cached.lexicalStatus != .failed,
                    (try? await store.persistOutcome(
                        blockID: block.id,
                        expectedJobEpoch: epoch,
@@ -555,6 +592,7 @@ public actor AIStudyRunner {
                         } else if let cached = try? await store
                             .cachedResult(
                                 requestHash: block.requestHash),
+                            cached.lexicalStatus != .failed,
                             (try? await store.persistOutcome(
                                 blockID: block.id,
                                 expectedJobEpoch: epoch,
@@ -661,6 +699,7 @@ public actor AIStudyRunner {
               flight.outcome == nil else { return }
         flight.outcome = result
         flights[requestHash] = flight
+        recordThrottle(result)
         let waiters = flight.waiters
         resolving.formUnion(waiters.map(\.blockID))
         var affectedJobs = Set<UUID>()
@@ -679,14 +718,65 @@ public actor AIStudyRunner {
         }
     }
 
+    /// AIMD 节流记录 + 429 冷却窗设置（runner 级）。
+    /// 词义层失败（截断/畸形外层拒绝）同样按失败降档——provider
+    /// 应答不可用与传输失败对吞吐的含义相同。
+    private func recordThrottle(
+        _ result: Result<AIStudyResolverResult, AIStudyResolverError>
+    ) {
+        switch result {
+        case .success(let resolverResult):
+            if resolverResult.outcome.lexicalStatus == .failed {
+                effectiveConcurrency = max(1, effectiveConcurrency / 2)
+                consecutiveSuccesses = 0
+            } else {
+                consecutiveSuccesses += 1
+                if consecutiveSuccesses >= Self.successWindow,
+                   effectiveConcurrency
+                        < configuration.dispatchConcurrency {
+                    effectiveConcurrency += 1
+                    consecutiveSuccesses = 0
+                }
+            }
+        case .failure(let error):
+            consecutiveSuccesses = 0
+            effectiveConcurrency = max(1, effectiveConcurrency / 2)
+            if case .rateLimited(let retryAfter) = error {
+                // 服务端明确给的等待期优先；缺省给 10s 冷却闸
+                // （块级 retryScheduled 仍有自己的退避到期时刻）。
+                let cooldownMs = retryAfter.map {
+                    min(Int64($0 * 1_000),
+                        Int64(AIStudyResolverClient
+                            .maxRetryAfterInterval) * 1_000)
+                } ?? Self.defaultRateLimitCooldownMs
+                cooldownUntilMs = max(cooldownUntilMs, nowMs() + cooldownMs)
+            }
+        }
+    }
+
     /// 单个 waiter 按请求结果落库（成功 → 持久化结果+写缓存；
     /// 失败 → 归类转移）。合并进结算中 flight 的块共用此路径。
+    ///
+    /// 截断/畸形外层拒绝（`lexicalStatus == .failed`）**不**落
+    /// resolved——HTTP 成功但词义全丢，静默收下会造出「已完成
+    /// 却零 resolution」的块并毒化 `ai_study_cache`（同 hash
+    /// 后续命中直接把失败结果给别的块）。统一走可重试失败档：
+    /// 归因码 `envelope.<kind>`，退避重试到 `maxAttempts`。
     private func settleWaiter(
         _ waiter: Waiter,
         result: Result<AIStudyResolverResult, AIStudyResolverError>
     ) async {
         switch result {
         case .success(let resolverResult):
+            if resolverResult.outcome.lexicalStatus == .failed {
+                let rejection = resolverResult.outcome
+                    .envelopeRejection?.rawValue ?? "unknown"
+                await applyFailure(
+                    waiter: waiter,
+                    error: .retryable(.malformedResponse),
+                    failureCode: "envelope.\(rejection)")
+                return
+            }
             let cached = AIStudyCachedResult(
                 result: resolverResult, resultID: UUID(), atMs: nowMs())
             _ = try? await store.persistOutcome(
@@ -704,7 +794,8 @@ public actor AIStudyRunner {
     /// paused(missingKey)；其余非重试 → failed；cancelled 不写
     /// （epoch 屏障兜底）。
     private func applyFailure(
-        waiter: Waiter, error: AIStudyResolverError
+        waiter: Waiter, error: AIStudyResolverError,
+        failureCode: String? = nil
     ) async {
         guard let block = try? await store.fetchBlock(
             id: waiter.blockID), block.status == .requesting
@@ -755,15 +846,16 @@ public actor AIStudyRunner {
                 _ = try? await store.transitionBlock(
                     id: waiter.blockID, to: .failed,
                     context: AIStudyBlockTransitionContext(
-                        lastErrorCode: FailureCode.retryExhausted),
+                        lastErrorCode: failureCode
+                            ?? FailureCode.retryExhausted),
                     expectedJobEpoch: waiter.epoch)
             } else {
                 _ = try? await store.transitionBlock(
                     id: waiter.blockID, to: .retryScheduled,
                     context: AIStudyBlockTransitionContext(
                         nextRetryAtMs: now + delay,
-                        lastErrorCode:
-                            "retryable.\(shortName(underlying))"),
+                        lastErrorCode: failureCode
+                            ?? "retryable.\(shortName(underlying))"),
                     expectedJobEpoch: waiter.epoch)
             }
         case .unsupportedConfiguration:

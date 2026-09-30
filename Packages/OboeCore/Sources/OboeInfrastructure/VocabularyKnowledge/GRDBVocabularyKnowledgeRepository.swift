@@ -204,6 +204,81 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
         return result
     }
 
+    /// S22 真机反馈修复：occurrence→unit **直查**着色通道。
+    /// `reader_study_occurrences.unit_id` 在 AI 应用/改判落库时
+    /// 回填——按 token 位置直接拿到该 occurrence 绑定的 unit
+    /// 三态，绕开 `resolveLexemes`（多候选 token 无 lexicalKey、
+    /// lexeme 行缺失时仍会正确变色；「制卡完成词仍橙」的根因）。
+    ///
+    /// 归并语义与 `wordKnowledgeStates` 同源：unit 三态经
+    /// `LearningKnowledgeResolver`（tooEasy→known，有 vocabulary
+    /// link→learning，否则 unknown）；同位置至多一行（UNIQUE
+    /// 约束）无聚合歧义。仍只回**非 unknown** 命中——unit 已删
+    /// Note 归零态时调用方回落 lexeme 路径继续兜底。
+    ///
+    /// 版本不过滤：occurrence 按 (document, contentRevision,
+    /// 位置四元组) 定位；tokenizer 版本差异不改写旧行位置分量，
+    /// 四元组全等失配概率低于漏报的代价（真机存量 Job 用旧版本
+    /// occurrence，过滤会让本修复对它们完全无效）。
+    public func occurrenceStates(
+        documentID: UUID,
+        contentRevision: Int64
+    ) async throws -> [ReaderOccurrencePosition: VocabularyKnowledgeState] {
+        try await pool.read { db in
+            var unitIDs = Set<UUID>()
+            var rows: [(ReaderOccurrencePosition, UUID)] = []
+            for row in try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT json_extract(locator_json,'$.chapterOrdinal')
+                               AS ch,
+                           json_extract(locator_json,'$.blockOrdinal')
+                               AS bo,
+                           start_utf16, length_utf16, unit_id
+                    FROM reader_study_occurrences
+                    WHERE document_id = ? AND content_revision = ?
+                          AND unit_id IS NOT NULL
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(documentID),
+                    contentRevision,
+                ]
+            ) {
+                let ch: Int64? = row["ch"]
+                let bo: Int64? = row["bo"]
+                let start: Int64? = row["start_utf16"]
+                let length: Int64? = row["length_utf16"]
+                let unitRaw: String? = row["unit_id"]
+                guard let ch, let bo, let start, let length,
+                      let unitRaw,
+                      let unitID = try? DatabaseValueCodec
+                          .decodeUUID(unitRaw)
+                else { continue }
+                rows.append((
+                    ReaderOccurrencePosition(
+                        chapterOrdinal: Int(ch), blockOrdinal: Int(bo),
+                        startUTF16: Int(start), lengthUTF16: Int(length)),
+                    unitID))
+                unitIDs.insert(unitID)
+            }
+            guard !rows.isEmpty else { return [:] }
+            // unit 三态与词级路径同源复用（flags + vocabulary link）。
+            let unitStates = try GRDBLearningProgressRepository
+                .knowledgeStates(unitIDs: Array(unitIDs), in: db)
+            var result: [ReaderOccurrencePosition:
+                VocabularyKnowledgeState] = [:]
+            result.reserveCapacity(rows.count)
+            for (position, unitID) in rows {
+                switch unitStates[unitID] ?? .unknown {
+                case .mastered: result[position] = .known
+                case .learning: result[position] = .learning
+                case .unknown: break // 归零态不产键——调用方回落兜底
+                }
+            }
+            return result
+        }
+    }
+
     // MARK: - 写（关联）
 
     /// D19（v0.7.5）：`setOverride`/`addToLearning` 已删除——

@@ -497,10 +497,11 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         XCTAssertNotNil(summary.deckName)
     }
 
-    /// S22 义项扩展：选定 entry 的合法义项集整体成卡——entry 500
-    /// 三义项 → 三条 unit item（决议只选了首义项），同块 好き
-    /// 一条，共 4；聚合键去重，无重复 unit，零 pending。
-    func testBuildPreviewExpandsAllAdmissibleSenses() async throws {
+    /// S22-B4 义项合并：选定 entry 的全部合法义项并入**一张**卡
+    /// （真机反馈裁决——不再一义项一卡）——entry 500 三义项 →
+    /// 一条 unit item，`mergedSenseIDs` 冻结合并集，unitKey 锚定
+    /// 代表义项（词典序最小 id）。
+    func testBuildPreviewMergesAllAdmissibleSenses() async throws {
         let env = try await makeEnvironment(
             chapterCount: 1,
             chapterABlockTexts: ["多義が好き。", "犬も好き。"])
@@ -531,18 +532,32 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         try await env.service.finalizeResults(jobID: job.id)
 
         let preview = try await env.service.buildPreview(jobID: job.id)
-        let expanded = preview.items.filter { $0.entryID == 500 }
-        XCTAssertEqual(expanded.count, 3,
-                       "选定 entry 的全部合法义项应整体成卡")
+        let merged = preview.items.filter { $0.entryID == 500 }
+        XCTAssertEqual(merged.count, 1,
+                       "选定 entry 的全部合法义项并入一张卡")
+        let item = try XCTUnwrap(merged.first)
         XCTAssertEqual(
-            Set(expanded.map(\.senseID)), [501, 502, 503])
-        XCTAssertEqual(Set(expanded.map(\.unitKey)).count, 3,
-                       "unitKey 按义项指纹区分——不塌缩不重复")
-        XCTAssertTrue(expanded.allSatisfy {
-            $0.glossSummary != nil && $0.firstSentence != nil
-        })
-        // 同块其它解析照常；总条目 = 3 义项 + 好き + 犬 = 5。
-        XCTAssertEqual(preview.items.count, 5)
+            item.mergedSenseIDs, [501, 502, 503],
+            "合并义项集整体冻结进 item")
+        XCTAssertEqual(item.senseID, 501,
+                       "unitKey 锚定代表义项（词典序最小 id）")
+        XCTAssertTrue(
+            item.glossSummary != nil && item.firstSentence != nil)
+        // 策略应用后 proposedAction 携带合并集——apply 侧物化
+        // 一卡多义（directions 载荷 + 冻结的 senseIDs）。
+        var appliedItems = preview.items
+        AIStudySelectionStrategy.all.apply(
+            to: &appliedItems, studyDeckID: nil,
+            directions: [.japaneseToChinese])
+        let applied = try XCTUnwrap(
+            appliedItems.first { $0.entryID == 500 })
+        if case .createNote(_, let senseIDs) = applied.proposedAction {
+            XCTAssertEqual(senseIDs, [501, 502, 503])
+        } else {
+            XCTFail("合并义项 item 的默认动作应是 createNote")
+        }
+        // 同块其它解析照常；总条目 = 合并一卡 + 好き + 犬 = 3。
+        XCTAssertEqual(preview.items.count, 3)
         // pending 里是 が/も 类无候选 unresolved（原设计）；已选定
         // entry 的 token 绝不留在待确认队列。
         XCTAssertFalse(preview.pending.contains {

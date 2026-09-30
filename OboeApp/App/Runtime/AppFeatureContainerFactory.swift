@@ -394,7 +394,8 @@ enum AppFeatureContainerFactory {
                 workGate: workGate,
                 aiStudy: aiStudyDependencies,
                 learningProgress: learningProgress,
-                studyDecks: readerStudyDecks
+                studyDecks: readerStudyDecks,
+                aiStudyProgress: aiStudyDependencies.store
             )
         )
         let runtime = RuntimeServices(

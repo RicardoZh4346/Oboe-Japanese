@@ -1632,4 +1632,90 @@ extension GRDBAIStudyJobStore {
     public static func nowMilliseconds() -> Int64 {
         (try? DatabaseValueCodec.encode(Date())) ?? 0
     }
+
+    // MARK: - 文档级进度投影（S22 库行展示）
+
+    /// 全部活跃 Job 的进度投影（documentID 键）。非终态
+    /// （pending…partiallyCompleted）都入投影——partiallyCompleted
+    /// 有残余失败块仍是可恢复工作，库行如实显示。
+    /// 计数全部取自 `ai_study_jobs` 持久化冗余列 + 块行总数
+    /// 子查询——Runner 不在内存态时进度同样可读（后台续跑
+    /// 断点续传语义）。
+    public func activeJobProgress(
+    ) async throws -> [UUID: AIStudyJobProgress] {
+        try await pool.read { db in
+            try Self.fetchActiveJobProgress(in: db)
+        }
+    }
+
+    static func fetchActiveJobProgress(
+        in db: Database
+    ) throws -> [UUID: AIStudyJobProgress] {
+        var result: [UUID: AIStudyJobProgress] = [:]
+        for row in try Row.fetchAll(
+            db,
+            sql: """
+                SELECT j.id, j.document_id, j.status,
+                       j.processed_blocks, j.failed_blocks,
+                       j.confirmed_units, j.applied_units,
+                       (SELECT COUNT(*) FROM ai_study_job_blocks b
+                        WHERE b.job_id = j.id) AS total_blocks
+                FROM ai_study_jobs j
+                WHERE j.status NOT IN
+                      ('completed', 'cancelled', 'failed')
+                """
+        ) {
+            guard let status = AIStudyJobStatus(
+                rawValue: row["status"] as String),
+                  let documentID = try? DatabaseValueCodec
+                      .decodeUUID(row["document_id"]),
+                  let jobID = try? DatabaseValueCodec
+                      .decodeUUID(row["id"])
+            else { continue }
+            result[documentID] = AIStudyJobProgress(
+                jobID: jobID,
+                documentID: documentID,
+                status: status,
+                processedBlocks: row["processed_blocks"],
+                failedBlocks: row["failed_blocks"],
+                totalBlocks: row["total_blocks"],
+                confirmedUnits: row["confirmed_units"],
+                appliedUnits: row["applied_units"])
+        }
+        return result
+    }
+
+    /// 文档级进度观察流——`ai_study_jobs` 行变化（Runner 每块
+    /// 收束都 refresh 计数）即重估；`.removeDuplicates()` 保证
+    /// 无变化不 ping。同池写（任何 scene/Runner）都会触发。
+    public func observeActiveJobProgress(
+    ) -> AsyncThrowingStream<[UUID: AIStudyJobProgress], Error> {
+        let observation = ValueObservation
+            .tracking { db throws -> [UUID: AIStudyJobProgress] in
+                try Self.fetchActiveJobProgress(in: db)
+            }
+            .removeDuplicates()
+        let values = observation.values(
+            in: pool, bufferingPolicy: .bufferingNewest(1))
+        return AsyncThrowingStream(
+            bufferingPolicy: .bufferingNewest(1)
+        ) { continuation in
+            let task = Task {
+                do {
+                    for try await update in values {
+                        guard !Task.isCancelled else { break }
+                        continuation.yield(update)
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
 }

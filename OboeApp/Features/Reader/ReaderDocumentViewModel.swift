@@ -160,7 +160,8 @@ final class ReaderDocumentViewModel {
     }
 
     /// 知识态重着色：复用 `tokenCache`，只重走 lexeme 解析 +
-    /// 状态取数（两个批量 IN 查询），不重分词。失败保留现着色。
+    /// 状态取数 + occurrence 直查（批量 IN 查询），不重分词。
+    /// 失败保留现着色。
     private func refreshTokenStates() async {
         guard let tokenStates, !tokenCache.isEmpty else { return }
         var keys = Set<LexicalKey>()
@@ -176,18 +177,30 @@ final class ReaderDocumentViewModel {
             let states = try await tokenStates.states(
                 lexemeIDs: lexemes.values.map(\.id)
             )
+            let occurrenceStates = try await tokenStates
+                .occurrenceStates(
+                    documentID: documentID,
+                    contentRevision: document.map {
+                        Int64($0.contentRevision) } ?? -1)
+            let chapterOrdinal = chapters.indices
+                .contains(currentChapterIndex)
+                ? chapters[currentChapterIndex].ordinal : -1
             var highlightMap: [UUID: [TokenHighlight]] = [:]
             for (blockID, tokens) in tokenCache {
+                let blockOrdinal = blocks.first(where: {
+                    $0.id == blockID })?.ordinal ?? -1
                 highlightMap[blockID] = tokens.map { token in
                     // 功能词不是词汇学习目标——始终中性色（.known
                     // 渲染为 .label），不被 unit 状态误标成生词；
                     // 仍进 highlight 保住点词链接。
                     let state = token.tokenClass == .functionWord
                         ? .known
-                        : (token.lexicalKey
-                            .flatMap { lexemes[$0] }
-                            .flatMap { states[$0.id] }
-                            ?? .unknown)
+                        : tokenState(
+                            token: token,
+                            chapterOrdinal: chapterOrdinal,
+                            blockOrdinal: blockOrdinal,
+                            lexemes: lexemes, states: states,
+                            occurrenceStates: occurrenceStates)
                     return TokenHighlight(
                         blockID: blockID,
                         utf16Range: token.sourceRangeUTF16,
@@ -200,6 +213,34 @@ final class ReaderDocumentViewModel {
         } catch {
             // 重取失败保留现着色——下次发射再试。
         }
+    }
+
+    /// token → 知识态（occurrence 直查优先，lexeme 兜底）：
+    /// `reader_study_occurrences.unit_id` 是 AI 应用事务回填的
+    /// 位置级证据——命中且非 unknown 即采信（该位置那次分析已
+    /// 落学习单元）；miss 或 unit 归零态回落 lexeme→states 链
+    /// （挖词路径只写 lexeme 侧链接，兜底保留）。
+    private func tokenState(
+        token: ReaderToken,
+        chapterOrdinal: Int,
+        blockOrdinal: Int,
+        lexemes: [LexicalKey: Lexeme],
+        states: [UUID: VocabularyKnowledgeState],
+        occurrenceStates: [ReaderOccurrencePosition:
+            VocabularyKnowledgeState]
+    ) -> VocabularyKnowledgeState {
+        let position = ReaderOccurrencePosition(
+            chapterOrdinal: chapterOrdinal,
+            blockOrdinal: blockOrdinal,
+            startUTF16: token.sourceRangeUTF16.lowerBound,
+            lengthUTF16: token.sourceRangeUTF16.count)
+        if let occ = occurrenceStates[position], occ != .unknown {
+            return occ
+        }
+        return token.lexicalKey
+            .flatMap { lexemes[$0] }
+            .flatMap { states[$0.id] }
+            ?? .unknown
     }
 
     // MARK: - 载入与恢复
@@ -331,14 +372,23 @@ final class ReaderDocumentViewModel {
             let states = try await tokenStates.states(
                 lexemeIDs: lexemes.values.map(\.id)
             )
+            let occurrenceStates = try await tokenStates
+                .occurrenceStates(
+                    documentID: documentID,
+                    contentRevision: document.map {
+                        Int64($0.contentRevision) } ?? -1)
             for (blockID, tokens) in collected {
+                let blockOrdinal = blocks.first(where: {
+                    $0.id == blockID })?.ordinal ?? -1
                 highlightMap[blockID] = tokens.map { token in
                     let state = token.tokenClass == .functionWord
                         ? .known
-                        : (token.lexicalKey
-                            .flatMap { lexemes[$0] }
-                            .flatMap { states[$0.id] }
-                            ?? .unknown)
+                        : tokenState(
+                            token: token,
+                            chapterOrdinal: chapter.ordinal,
+                            blockOrdinal: blockOrdinal,
+                            lexemes: lexemes, states: states,
+                            occurrenceStates: occurrenceStates)
                     return TokenHighlight(
                         blockID: blockID,
                         utf16Range: token.sourceRangeUTF16,

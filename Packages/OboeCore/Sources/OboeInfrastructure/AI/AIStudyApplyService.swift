@@ -238,7 +238,7 @@ public enum GRDBAIStudyApplyService {
         case .reuseNote(let noteID, let deck):
             return (.reuseNote(noteID: noteID, membershipDeck: deck),
                     .reuseNote)
-        case .createNote(let directions):
+        case .createNote(let directions, _):
             return (.createNote(directions: directions), .createNote)
         case .setTooEasy:
             return (.setTooEasy, .setTooEasy)
@@ -280,6 +280,14 @@ public enum GRDBAIStudyApplyService {
         case .createNote(let directions):
             detail = "create:"
                 + directions.map(\.rawValue).sorted().joined(separator: ",")
+            // 义项合并集是动作语义的一部分——同方向不同义项集
+            // 必须分键（payload 异）。
+            if case .createNote(_, let senseIDs) =
+                selection.proposedAction, !senseIDs.isEmpty {
+                detail += "|senses:"
+                    + senseIDs.sorted().map(String.init)
+                        .joined(separator: ",")
+            }
         case .setTooEasy: detail = "tooEasy"
         case .recordSkip: detail = "skip"
         }
@@ -771,11 +779,16 @@ public enum GRDBAIStudyApplyService {
     }
 
     /// 来源证据：选择锚定的 resolution → 所属块 → locator/hash；
-    /// `ReaderLocation` best-effort 解码（planner 的 locator_json
-    /// 与 Reader 定位同构时落 `reader_location` 列）。
+    /// 另按 `resolution_id` 反查 `reader_study_occurrences` 拿
+    /// **token 级**锚点（其 `utf16Offset` 记 token 块内起点，
+    /// `blockOrdinal/chapterOrdinal/blockTextHash` 可重链）——
+    /// resolution/块行的 locator 只记到子块起点，多句块中非首句
+    /// 的目标词会取错句（「例句不含目标词」真机反馈）。
+    /// occurrence 锚缺席（未收束/旧 Job）回退块级偏移。
     static func evidenceAnchor(
         context: AIStudyApplyUnitContext,
-        selection: AIStudyJobSelection
+        selection: AIStudyJobSelection,
+        in db: Database
     ) -> (locator: String, sourceHash: String,
           location: ReaderLocation?) {
         let resolutions = matchedResolutions(
@@ -783,14 +796,37 @@ public enum GRDBAIStudyApplyService {
         let resolution = resolutions.first
         let block = resolution?.jobBlockID
             .flatMap { id in context.blocks.first { $0.id == id } }
-        let locator = resolution?.locatorJSON ?? block?.locatorJSON ?? ""
-        let sourceHash = block?.sourceHash ?? ""
-        let location = try? JSONDecoder().decode(
+        var locator = resolution?.locatorJSON ?? block?.locatorJSON ?? ""
+        var location = try? JSONDecoder().decode(
             ReaderLocation.self, from: Data(locator.utf8))
-        return (locator, sourceHash, location)
+        if let resolutionID = resolution?.id,
+           let occurrenceJSON = try? String.fetchOne(
+               db,
+               sql: """
+                   SELECT locator_json FROM reader_study_occurrences
+                   WHERE resolution_id = ? AND document_id = ?
+                         AND content_revision = ?
+                   ORDER BY start_utf16 LIMIT 1
+                   """,
+               arguments: [
+                   DatabaseValueCodec.encode(resolutionID),
+                   DatabaseValueCodec.encode(context.documentID),
+                   context.contentRevision,
+               ]),
+           let tokenLocation = try? JSONDecoder().decode(
+               ReaderLocation.self, from: Data(occurrenceJSON.utf8)) {
+            // occurrence 级 locator 进 locator/reader_location——
+            // dedup 键更精确（token 位），跳转回原句也更准。
+            locator = occurrenceJSON
+            location = tokenLocation
+        }
+        return (locator, block?.sourceHash
+                ?? location?.blockTextHash ?? "", location)
     }
 
-    /// reader_blocks 重链（locator_json 优先，text_hash 兜底）——
+    /// reader_blocks 重链——先按 occurrence 锚的
+    /// (chapterOrdinal, blockOrdinal, blockTextHash) 经章序数精确
+    /// 定位（hash 校验内容未漂移），再回退 text_hash 直配；
     /// 取 token 所在的**包含句**（`AIStudySentenceSegments` 确定性
     /// 句界），不把整段进例句；锚点缺失/句界异常时回退块级有界
     /// 裁剪。单个「句子」本身超长（无标点长文）时以 token 位置
@@ -801,24 +837,42 @@ public enum GRDBAIStudyApplyService {
         in db: Database
     ) -> String? {
         let anchor = evidenceAnchor(
-            context: context, selection: selection)
+            context: context, selection: selection, in: db)
         guard !anchor.locator.isEmpty || !anchor.sourceHash.isEmpty
         else { return nil }
-        let row = try? Row.fetchOne(
-            db,
-            sql: """
-                SELECT text FROM reader_blocks
-                WHERE document_id = ?
-                  AND (locator_json = ? OR text_hash = ?)
-                ORDER BY (locator_json = ?) DESC
-                LIMIT 1
-                """,
-            arguments: [
-                DatabaseValueCodec.encode(context.documentID),
-                anchor.locator, anchor.sourceHash, anchor.locator,
-            ])
-        guard let text: String = row.flatMap({ $0["text"] }),
-              !text.isEmpty else { return nil }
+        var text: String?
+        if let location = anchor.location,
+           !location.blockTextHash.isEmpty {
+            // 序数锚 + hash 校验：文本相符才采信该块的句界切分。
+            text = try? Row.fetchOne(
+                db,
+                sql: """
+                    SELECT b.text FROM reader_blocks b
+                    JOIN reader_chapters ch ON ch.id = b.chapter_id
+                    WHERE b.document_id = ? AND ch.ordinal = ?
+                          AND b.ordinal = ? AND b.text_hash = ?
+                    LIMIT 1
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(context.documentID),
+                    location.chapterOrdinal, location.blockOrdinal,
+                    location.blockTextHash,
+                ]).flatMap { $0["text"] }
+        }
+        if text == nil {
+            text = try? Row.fetchOne(
+                db,
+                sql: """
+                    SELECT text FROM reader_blocks
+                    WHERE document_id = ? AND text_hash = ?
+                    LIMIT 1
+                    """,
+                arguments: [
+                    DatabaseValueCodec.encode(context.documentID),
+                    anchor.sourceHash,
+                ]).flatMap { $0["text"] }
+        }
+        guard let text, !text.isEmpty else { return nil }
         let limit = SourceContextDraft.maximumSurroundingCharacters
         guard let offset = anchor.location?.utf16Offset else {
             return String(text.prefix(limit))
@@ -860,7 +914,7 @@ public enum GRDBAIStudyApplyService {
     ) throws {
         guard let unitID else { return }
         let anchor = evidenceAnchor(
-            context: context, selection: selection)
+            context: context, selection: selection, in: db)
         let kind = "aiStudyApply"
         let dedupKey = studyDedupKey(
             noteID: noteID, documentID: context.documentID,
@@ -1342,16 +1396,45 @@ public struct DictionaryAIStudyUnitSourceProvider:
 
         let binding = try DictionarySenseBinding.from(
             sense: sense, entryID: entryID, datasetVersion: dataset)
-        let preferred = sense.preferredGlosses()
+
+        // 义项释义：`createNote.senseIDs` 冻结的合并集——全部合法
+        // 义项的 preferredGlosses 按词典序并入一卡（真机反馈裁决：
+        // 一词条一卡）。空集/陈旧引用回退代表义项单义（旧行为）。
+        // unit 身份仍由 `binding`（unitKey 复算）把关——senseIDs
+        // 只影响卡面内容，不改 unit 锚定。
+        var mergedIDs: [Int64] = []
+        if case .createNote(_, let ids) = selection.proposedAction {
+            mergedIDs = ids
+        }
+        let contentSenses = mergedIDs.isEmpty
+            ? [sense]
+            : entry.senses.filter { mergedIDs.contains($0.id) }
+        let glossParts = (contentSenses.isEmpty ? [sense] : contentSenses)
+            .compactMap { $0.preferredGlosses() }
+            .map { $0.glosses.map(\.text).joined(separator: "; ") }
+            .filter { !$0.isEmpty }
+        let languageParts = contentSenses.compactMap {
+            $0.preferredGlosses()?.language
+        }
+        // 语言如实标记：任一义项走了 en 兜底则在卡面如实反映
+        // （selected_gloss_language 记主体语言——全 zh 记 zho，
+        // 有混入仍记 zho 为主体；纯 en 记 eng）。
+        let glossLanguage = languageParts.contains(
+            DictionaryGlossLanguage.chinese)
+            ? DictionaryGlossLanguage.chinese
+            : languageParts.first
+        var seenPOS = Set<String>()
+        let partOfSpeech = (contentSenses.isEmpty ? [sense] : contentSenses)
+            .flatMap(\.posCodes)
+            .filter { seenPOS.insert($0).inserted }
+            .joined(separator: ";")
         return AIStudyApplyUnitSource(
             binding: binding,
             headword: entry.primaryForm,
             reading: entry.readings.first?.reading,
-            meaningZH: preferred.map {
-                $0.glosses.map(\.text).joined(separator: "; ")
-            },
-            glossLanguage: preferred?.language,
-            partOfSpeech: sense.posCodes.joined(separator: ";"))
+            meaningZH: glossParts.joined(separator: "；"),
+            glossLanguage: glossLanguage,
+            partOfSpeech: partOfSpeech)
     }
 }
 
