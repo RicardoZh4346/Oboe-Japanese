@@ -166,8 +166,12 @@ struct ReaderAIStudySheet: View {
                 }
             } else {
                 Section {
-                    Button("重新检查") {
+                    Button {
                         Task { await model.loadPreflight() }
+                    } label: {
+                        Text("重新检查")
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
                     }
                     .accessibilityIdentifier("ai-study-preflight-retry")
                 }
@@ -245,32 +249,48 @@ struct ReaderAIStudySheet: View {
                 .foregroundStyle(.secondary)
             switch active.status {
             case .paused:
-                Button("继续分析") {
+                Button {
                     Task {
                         await adoptActiveJob(active)
                         await model.resume()
                     }
+                } label: {
+                    Text("继续分析")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
                 .accessibilityIdentifier("ai-study-resume-active")
             case .awaitingConfirmation, .partiallyCompleted:
-                Button("查看预览") {
+                Button {
                     Task { await adoptActiveJob(active) }
+                } label: {
+                    Text("查看预览")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
                 .accessibilityIdentifier("ai-study-open-preview")
             default:
                 ProgressView("分析进行中——可在阅读页稍后查看")
                 // 重进接管：共享 Runner 驱动仍在 → 仅挂观察；驱动
                 // 已消亡 → adopt 内 `start` 幂等重驱动。
-                Button("查看进度") {
+                Button {
                     Task { await adoptActiveJob(active) }
+                } label: {
+                    Text("查看进度")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
                 .accessibilityIdentifier("ai-study-watch-active")
             }
-            Button("放弃并取消该分析", role: .destructive) {
+            Button(role: .destructive) {
                 Task {
                     await adoptActiveJob(active)
                     await model.cancel()
                 }
+            } label: {
+                Text("放弃并取消该分析")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
             }
             .accessibilityIdentifier("ai-study-cancel-active")
         }
@@ -486,10 +506,12 @@ struct ReaderAIStudySheet: View {
 
                 if preview.failedBlockCount > 0 {
                     Section {
-                        Button(
-                            "重试 \(preview.failedBlockCount) 个失败段落"
-                        ) {
+                        Button {
                             Task { await model.retryFailedBlocks() }
+                        } label: {
+                            Text("重试 \(preview.failedBlockCount) 个失败段落")
+                                .frame(maxWidth: .infinity)
+                                .multilineTextAlignment(.center)
                         }
                         .accessibilityIdentifier("ai-study-retry-failed")
                     }
@@ -507,11 +529,31 @@ struct ReaderAIStudySheet: View {
                 }
 
                 if !preview.pending.isEmpty {
-                    Section("待确认（\(preview.pending.count)）") {
+                    Section {
+                        if model.acceptableAISuggestionCount > 0 {
+                            Button {
+                                model.acceptAllAISuggestions()
+                            } label: {
+                                Text(
+                                    "采纳全部 AI 建议（"
+                                    + "\(model.acceptableAISuggestionCount)）"
+                                )
+                                .frame(maxWidth: .infinity)
+                                .multilineTextAlignment(.center)
+                            }
+                            .accessibilityIdentifier(
+                                "ai-study-accept-all-suggestions")
+                        }
                         ForEach(preview.pending) { pending in
                             pendingRow(pending)
                                 .accessibilityIdentifier(
                                     "ai-study-pending-\(pending.id)")
+                        }
+                    } header: {
+                        Text("待确认（\(preview.pending.count)）")
+                    } footer: {
+                        if model.acceptableAISuggestionCount > 0 {
+                            Text("AI 为这些词给出了候选答案但置信度偏低；采纳后与已解析词条同样生成卡片。")
                         }
                     }
                 }
@@ -520,16 +562,21 @@ struct ReaderAIStudySheet: View {
                     Button {
                         Task { await model.confirm() }
                     } label: {
-                        Label(
-                            "生成学习牌组",
-                            systemImage: "checkmark.circle.fill")
+                        // 纯文本真居中——Label 的图标+文字整体居中
+                        // 会让文字偏右（同「开始分析」的修法）。
+                        Text("生成学习牌组")
                             .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.isBusy)
                     .accessibilityIdentifier("ai-study-confirm")
-                    Button("取消整个分析", role: .destructive) {
+                    Button(role: .destructive) {
                         Task { await model.cancel() }
+                    } label: {
+                        Text("取消整个分析")
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
                     }
                     .accessibilityIdentifier("ai-study-cancel-preview")
                 }
@@ -699,6 +746,13 @@ struct ReaderAIStudySheet: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
             }
+            if let suggested = pending.aiSuggested {
+                Text(
+                    "AI 建议：\(suggested.lemma)"
+                    + (suggested.glossSummary.map { " — \($0)" } ?? ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let correction = pending.correctedSelection {
                 Label(
                     "已改判 → entry \(correction.entryID)",
@@ -708,6 +762,18 @@ struct ReaderAIStudySheet: View {
             }
             if !pending.alternatives.isEmpty {
                 Menu {
+                    if let suggested = pending.aiSuggested,
+                       pending.correctedSelection == nil {
+                        Button(
+                            "采纳 AI 建议：\(suggested.lemma)")
+                        {
+                            model.correctPending(
+                                pending.id, to: suggested)
+                        }
+                        .accessibilityIdentifier(
+                            "ai-study-accept-suggestion-\(pending.id)")
+                        Divider()
+                    }
                     ForEach(
                         Array(pending.alternatives.enumerated()),
                         id: \.offset
@@ -819,8 +885,12 @@ struct ReaderAIStudySheet: View {
                         }
                         .accessibilityIdentifier("ai-study-open-deck")
                     }
-                    Button("返回阅读") {
+                    Button {
                         dismiss()
+                    } label: {
+                        Text("返回阅读")
+                            .frame(maxWidth: .infinity)
+                            .multilineTextAlignment(.center)
                     }
                     .accessibilityIdentifier("ai-study-return-reader")
                 }

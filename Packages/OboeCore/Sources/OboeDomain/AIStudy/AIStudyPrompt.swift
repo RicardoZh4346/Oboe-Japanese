@@ -23,15 +23,17 @@ import Foundation
 ///   纯文本 JSON 一个对象。
 /// - **输出契约**：严格 `{schemaVersion, requestID, translation,
 ///   words[]}` 形态；words 项 `{tokenID, status, entryID, senseID,
-///   confidence}`；requestID/schemaVersion 原样回显。
+///   confidence, sentenceTranslation}`；requestID/schemaVersion
+///   原样回显。
 ///
 /// 模板拼装全部为纯函数——相同 `AIStudyRequest` 必然渲染相同文本，
 /// requestHash 的 `promptVersion` 组分因此真实。
 public enum AIStudyPrompt {
     /// 冻结 prompt 版本（contracts §4.4 requestHash 组分）。
     /// 变更模板语义时必须 bump，否则新旧响应会串缓存。
-    public static let promptVersion = "ai-study-prompt-v1"
-    /// 响应契约版本——与请求 `schemaVersion` 同值（§3.1/§3.2 同为 1）。
+    /// v2：`words[]` 元素新增 `sentenceTranslation` 字段（C7）。
+    public static let promptVersion = "ai-study-prompt-v2"
+    /// 响应契约版本——与请求 `schemaVersion` 同值（§3.1/§3.2 同步）。
     public static let schemaVersion = AIStudyRequest.schemaVersion
 
     /// 一次渲染的完整产物：system 指令 + user 文本 + 版本快照。
@@ -130,7 +132,12 @@ public enum AIStudyPrompt {
         translation (string or null), words (array). Each words element \
         has exactly: tokenID (a tokenID from the request), status \
         ("resolved" or "unresolved"), entryID (integer or null), senseID \
-        (integer or null), confidence (number or null). Cover every \
+        (integer or null), confidence (number or null), \
+        sentenceTranslation (string or null). sentenceTranslation is the \
+        \(targetLanguage) translation of the single sentence within \
+        targetText that contains this token — quote the sentence, not \
+        the whole passage, and translate only that sentence; use null \
+        when the token's containing sentence is ambiguous. Cover every \
         requested tokenID exactly once and include no other tokenIDs.
         """
     }

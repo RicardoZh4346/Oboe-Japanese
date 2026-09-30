@@ -233,6 +233,8 @@ public enum GRDBAIStudyPipelineSchema {
                     CHECK (origin IN ('ai', 'user', 'local')),
                 revision INTEGER NOT NULL DEFAULT 0,
                 created_at_ms INTEGER NOT NULL,
+                -- v28 起另有 sentence_translation（ALTER 补列）——
+                -- 本建表语句保持 v25 冻结形态，新装同样走 v28 补列。
                 UNIQUE(request_hash, token_key, revision)
             );
 

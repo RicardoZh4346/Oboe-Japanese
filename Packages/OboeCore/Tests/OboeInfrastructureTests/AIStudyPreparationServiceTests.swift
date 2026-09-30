@@ -629,6 +629,97 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         XCTAssertFalse(preview.pending.isEmpty)
     }
 
+    /// C5：低置信行的 AI 选定透传进 pending item 的
+    /// `aiSuggested`——预览层暴露「采纳 AI 建议」入口；
+    /// unresolved（无选定）行的 `aiSuggested` 为 nil。
+    func testLowConfidencePendingCarriesAISuggestion() async throws {
+        let env = try await makeEnvironment(
+            chapterCount: 1,
+            chapterABlockTexts: ["多義が好き。", "犬も好き。"])
+        env.dictionary.stubbedEntries[500] = Self.makeEntry(
+            id: 500, form: "多義", reading: "たぎ", senses: [
+                (id: 501, gloss: "meaning A"),
+                (id: 502, gloss: "meaning B"),
+            ])
+        let report = try await env.service.preflight(
+            documentID: documentID,
+            request: AIStudyScopeRequest(choice: .wholeBook),
+            provider: provider(.ready))
+        let job = try await env.service.prepare(
+            documentID: documentID, report: report,
+            configuration: report.provider.resolved!)
+        let service = env.service
+        let runner = AIStudyRunner(
+            store: env.store,
+            planner: { job in
+                try await service.plannedBlocks(for: job)
+            },
+            sendRequest: { request in
+                let base = Self.successResult(for: request)
+                let block = request.blocks[0]
+                var lowCount = 0
+                let resolutions = base.outcome.resolutions.map { res in
+                    // 带选定的降格为 lowConfidence（<0.50 阈值），
+                    // 无选定的保持 unresolved。
+                    if res.selected != nil {
+                        lowCount += 1
+                        return AIStudyResolution(
+                            tokenKey: res.tokenKey,
+                            selected: res.selected,
+                            confidence: 0.3,
+                            status: .lowConfidence,
+                            reasonCode: .belowConfidenceThreshold,
+                            origin: .ai)
+                    }
+                    return res
+                }
+                return AIStudyResolverResult(
+                    outcome: ValidatedBlockOutcome(
+                        blockKey: block.blockKey,
+                        lexicalStatus: .partial,
+                        translationStatus: .notRequested,
+                        translation: nil, envelopeRejection: nil,
+                        resolutions: resolutions,
+                        targetTokenCount: block.tokens.count,
+                        aiResolvedCount: 0,
+                        lowConfidenceCount: lowCount,
+                        unresolvedTokenCount:
+                            block.tokens.count - lowCount,
+                        droppedUnknownTokenCount: 0,
+                        duplicateTokenCount: 0,
+                        malformedItemCount: 0, invalidItemCount: 0),
+                    requestHash: base.requestHash,
+                    requestID: base.requestID,
+                    providerKind: base.providerKind,
+                    model: base.model,
+                    promptVersion: base.promptVersion,
+                    responseMode: base.responseMode,
+                    suggestedRetryAfter: nil,
+                    responseBytes: base.responseBytes)
+            })
+        try await runner.start(jobID: job.id)
+        await runner.waitUntilSettled(jobID: job.id)
+        try await env.service.finalizeResults(jobID: job.id)
+
+        let preview = try await env.service.buildPreview(jobID: job.id)
+        XCTAssertTrue(preview.items.isEmpty,
+                      "全部低置信——无自动入选项")
+        let suggested = preview.pending.filter { $0.aiSuggested != nil }
+        XCTAssertFalse(suggested.isEmpty,
+                       "低置信带选定的行必须暴露 AI 建议")
+        for item in suggested {
+            let candidate = try XCTUnwrap(item.aiSuggested)
+            XCTAssertTrue(item.alternatives.contains {
+                $0.entryID == candidate.entryID
+                    && $0.senseID == candidate.senseID
+            }, "aiSuggested 必须落在合法候选集内")
+        }
+        // unresolved（が/も 类无候选）行无建议可给。
+        for item in preview.pending where item.aiSuggested == nil {
+            XCTAssertEqual(item.status, .unresolved)
+        }
+    }
+
     /// 已取消 Job 拒绝确认（jobNotConfirmable）。
     func testRecordSelectionsRejectsCancelledJob() async throws {
         let env = try await makeEnvironment(chapterCount: 1)

@@ -836,6 +836,10 @@ public struct AIStudyResolutionRecord: Codable, Equatable, Identifiable, Sendabl
     /// 重新分析/修正产生新 revision 不覆盖历史。
     public let revision: Int64
     public let createdAtMs: Int64
+    /// v28：token 所在句的 AI 译文（schema v2 `sentenceTranslation`）。
+    /// 与选义子状态独立——unresolved/低置信行同样可携带；制卡时
+    /// 写入词汇卡 `exampleTranslationZH`。
+    public let sentenceTranslation: String?
 
     public init(
         id: UUID,
@@ -854,7 +858,8 @@ public struct AIStudyResolutionRecord: Codable, Equatable, Identifiable, Sendabl
         reasonCode: AIStudyReasonCode? = nil,
         origin: AIStudyResolutionOrigin,
         revision: Int64,
-        createdAtMs: Int64
+        createdAtMs: Int64,
+        sentenceTranslation: String? = nil
     ) {
         self.id = id
         self.jobID = jobID
@@ -873,6 +878,7 @@ public struct AIStudyResolutionRecord: Codable, Equatable, Identifiable, Sendabl
         self.origin = origin
         self.revision = revision
         self.createdAtMs = createdAtMs
+        self.sentenceTranslation = sentenceTranslation
     }
 
     /// 领域投影：行 → §3.3 `AIStudyResolution` 值类型。
@@ -896,7 +902,8 @@ public struct AIStudyResolutionRecord: Codable, Equatable, Identifiable, Sendabl
             confidence: confidence,
             status: status,
             reasonCode: reasonCode,
-            origin: origin
+            origin: origin,
+            sentenceTranslation: sentenceTranslation
         )
     }
 }

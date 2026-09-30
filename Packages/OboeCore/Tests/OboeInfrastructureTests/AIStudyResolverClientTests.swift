@@ -183,7 +183,7 @@ final class AIStudyResolverClientTests: XCTestCase {
         XCTAssertEqual(responseFormat["type"] as? String, "json_schema")
         let jsonSchema = try XCTUnwrap(
             responseFormat["json_schema"] as? [String: Any])
-        XCTAssertEqual(jsonSchema["name"] as? String, "oboe_ai_study_v1")
+        XCTAssertEqual(jsonSchema["name"] as? String, "oboe_ai_study_v2")
     }
 
     // MARK: - 能力 / 元数据 fail-fast（不发请求）

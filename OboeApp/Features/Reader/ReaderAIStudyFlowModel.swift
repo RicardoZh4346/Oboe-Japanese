@@ -644,6 +644,38 @@ final class ReaderAIStudyFlowModel {
         self.preview = preview
     }
 
+    /// 待确认队列里 AI 首选仍可采纳的行数（有 `aiSuggested`
+    /// 且未改判）——「一键采纳」按钮的计数与可用性依据。
+    var acceptableAISuggestionCount: Int {
+        preview?.pending.filter {
+            $0.aiSuggested != nil && $0.correctedSelection == nil
+        }.count ?? 0
+    }
+
+    /// C5：一键采纳全部 AI 首选——低置信行的合法选定批量写
+    /// `correctedSelection`（走同一改判落库路径：origin=user 新
+    /// revision + occurrence 换指）。已手动改判的行不动；
+    /// 无 AI 首选的行（unresolved/被拒/缺 confidence）保持待确认。
+    /// 返回采纳数。
+    @discardableResult
+    func acceptAllAISuggestions() -> Int {
+        guard var preview else { return 0 }
+        var adopted = 0
+        for index in preview.pending.indices {
+            guard let suggested = preview.pending[index].aiSuggested,
+                  preview.pending[index].correctedSelection == nil
+            else { continue }
+            preview.pending[index].correctedSelection = AIStudySelection(
+                provider: "jmdict",
+                entryID: suggested.entryID,
+                senseID: suggested.senseID,
+                datasetVersion: manifestDatasetVersion)
+            adopted += 1
+        }
+        self.preview = preview
+        return adopted
+    }
+
     // MARK: - 确认 → 应用 → 摘要
 
     /// 「生成学习牌组」：不可变 selection revision 落库 →

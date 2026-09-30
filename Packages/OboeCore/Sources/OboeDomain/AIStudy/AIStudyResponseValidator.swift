@@ -19,7 +19,7 @@ import Foundation
 /// |      | finite ∈[0,1]。 |
 /// | 重复项 | 同 tokenID 多次 → 该 token 整体降级 unresolved，其他保留。 |
 /// | 缺项/未知 | 缺失目标 → unresolved；未知 tokenID 不创建对象只计数。 |
-/// | 低置信 | <0.80（含 resolved 缺 confidence）→ lowConfidence 进确认。 |
+/// | 低置信 | <阈值（含 resolved 缺 confidence）→ lowConfidence 进确认。|
 /// | 译文 | trim 非空 + 长度有界；失败仅 translationStatus=.failed， |
 /// |      | 词义结果保留。 |
 /// | malformed | 解析失败/截断 → 整包 failed，不猜半截 JSON。 |
@@ -173,6 +173,9 @@ public enum AIStudyResponseValidator {
         let entryID: Int64?
         let senseID: Int64?
         let confidence: Double?
+        /// v2：token 所在句译文。类型错/空串/超长一律剥为 nil——
+        /// 辅助字段不制造降级，不携带即不制卡译文。
+        let sentenceTranslation: String?
         /// entryID/senseID/confidence 字段存在但类型不可解——
         /// 区别「字段缺席」与「字段坏值」（后者按降级计）。
         let hasUnreadableSelectionField: Bool
@@ -183,6 +186,17 @@ public enum AIStudyResponseValidator {
             entryID = AIStudyResponseValidator.int64Value(dict["entryID"])
             senseID = AIStudyResponseValidator.int64Value(dict["senseID"])
             confidence = AIStudyResponseValidator.doubleValue(dict["confidence"])
+            if let raw = dict["sentenceTranslation"] as? String {
+                let trimmed = raw.trimmingCharacters(
+                    in: .whitespacesAndNewlines)
+                sentenceTranslation =
+                    (trimmed.isEmpty
+                        || trimmed.count
+                            > AIStudyBudget.maxSentenceTranslationLength)
+                        ? nil : trimmed
+            } else {
+                sentenceTranslation = nil
+            }
             hasUnreadableSelectionField =
                 (dict["entryID"] != nil && !(dict["entryID"] is NSNull)
                     && entryID == nil)
@@ -209,11 +223,13 @@ public enum AIStudyResponseValidator {
         switch effectiveStatus {
         case "unresolved":
             // AI 明确放弃：合法路径；OOV 目标归 noCandidate。
+            // 句译仍保留——翻译与选义是独立子状态。
             return (AIStudyResolution(
                 tokenKey: token.tokenID, selected: nil, confidence: nil,
                 status: .unresolved,
                 reasonCode: token.candidates.isEmpty ? .noCandidate : nil,
-                origin: .ai), false)
+                origin: .ai,
+                sentenceTranslation: item.sentenceTranslation), false)
 
         case "resolved":
             // 字段类型坏值 → 该项降级（不产生选定）。
@@ -221,13 +237,15 @@ public enum AIStudyResponseValidator {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .unresolved, reasonCode: .incompleteSelection,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             guard let entryID = item.entryID, let senseID = item.senseID else {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .unresolved, reasonCode: .incompleteSelection,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             // 候选集成员校验：entry ∈ 该 token 候选 且 sense ∈ 该 entry
             // 的已发送 sense 集——跨 token 合法 ID 偷换同样命中此拒绝
@@ -239,7 +257,8 @@ public enum AIStudyResponseValidator {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .rejected, reasonCode: .candidateNotInSet,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             // §7 单项层：sense 表记/读音限制必须对该 occurrence 仍有效。
             guard restrictionSatisfied(
@@ -247,21 +266,24 @@ public enum AIStudyResponseValidator {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .rejected, reasonCode: .restrictionNotSatisfied,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             // confidence：finite ∈[0,1]；坏值/越界 → 该项降级。
             if item.hasUnreadableConfidenceField {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .unresolved, reasonCode: .invalidConfidence,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             if let confidence = item.confidence,
                !(confidence.isFinite && confidence >= 0 && confidence <= 1) {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: nil, confidence: nil,
                     status: .unresolved, reasonCode: .invalidConfidence,
-                    origin: .ai), true)
+                    origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), true)
             }
             let selection = AIStudySelection(
                 entryID: entryID, senseID: senseID,
@@ -273,27 +295,32 @@ public enum AIStudyResponseValidator {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: selection,
                     confidence: item.confidence, status: .lowConfidence,
-                    reasonCode: .candidateOverflow, origin: .ai), false)
+                    reasonCode: .candidateOverflow, origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), false)
             }
-            // 低置信路由：≥阈值才 aiResolved；缺席或 <0.80 → lowConfidence
-            // 进确认队列（选定保留——用户可在原候选中确认，不许填伪造 ID）。
+            // 低置信路由：≥阈值才 aiResolved；缺席或低于
+            // lowConfidenceThreshold → lowConfidence 进确认队列（选定
+            // 保留——用户可在原候选中确认，不许填伪造 ID）。
             guard let confidence = item.confidence,
                   confidence >= AIStudyBudget.lowConfidenceThreshold else {
                 return (AIStudyResolution(
                     tokenKey: token.tokenID, selected: selection,
                     confidence: item.confidence, status: .lowConfidence,
-                    reasonCode: .belowConfidenceThreshold, origin: .ai), false)
+                    reasonCode: .belowConfidenceThreshold, origin: .ai,
+                    sentenceTranslation: item.sentenceTranslation), false)
             }
             return (AIStudyResolution(
                 tokenKey: token.tokenID, selected: selection,
                 confidence: confidence, status: .aiResolved,
-                reasonCode: nil, origin: .ai), false)
+                reasonCode: nil, origin: .ai,
+                sentenceTranslation: item.sentenceTranslation), false)
 
         default:
             return (AIStudyResolution(
                 tokenKey: token.tokenID, selected: nil, confidence: nil,
                 status: .unresolved, reasonCode: .unknownStatus,
-                origin: .ai), true)
+                origin: .ai,
+                sentenceTranslation: item.sentenceTranslation), true)
         }
     }
 

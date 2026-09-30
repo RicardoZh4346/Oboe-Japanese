@@ -104,7 +104,8 @@ public enum OboeDatabaseSchema {
         "v24_reader_study_binding",
         "v25_ai_study_pipeline",
         "v26_learning_metrics",
-        "v27_ai_study_manifests"
+        "v27_ai_study_manifests",
+        "v28_ai_study_sentence_translation"
     ]
 
     public static let tableNames: Set<String> = [
@@ -283,6 +284,11 @@ public enum OboeDatabaseSchema {
                     identifier,
                     migrate: GRDBAIStudyManifestSchema.migrate
                 )
+            case "v28_ai_study_sentence_translation":
+                migrator.registerMigration(
+                    identifier,
+                    migrate: migrateAIStudySentenceTranslation
+                )
             default:
                 preconditionFailure("Unknown migration identifier \(identifier)")
             }
@@ -429,6 +435,19 @@ public enum OboeDatabaseSchema {
                 WHERE origin = 'builtin_jlpt' AND source_ref IS NOT NULL;
             """)
         try createSearchIndexMaintenance(db)
+    }
+
+    /// v28（v0.7.5-F C7）：AI 响应 schema v2 的 `sentenceTranslation`
+    /// ——resolution 行携带 token 所在句译文，制卡时写入词汇卡
+    /// `exampleTranslationZH`。可空列，旧行留 NULL（旧 Job 的已存
+    /// resolution 不回填——重分析以新 schema 产出新 revision）。
+    private static func migrateAIStudySentenceTranslation(
+        _ db: Database
+    ) throws {
+        try db.execute(sql: """
+            ALTER TABLE ai_study_resolutions
+            ADD COLUMN sentence_translation TEXT;
+            """)
     }
 
     /// v0.4 settings (需求 §16): typed-recall toggles, listening autoplay and

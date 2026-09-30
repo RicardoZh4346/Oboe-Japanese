@@ -181,7 +181,8 @@ enum PortableBackupFormatV9 {
     )
 
     /// `ai_study_resolutions` 全列白名单。全部 ID 弱引用语义（SET NULL
-    /// 留史）；有界审计快照。
+    /// 留史）；有界审计快照。`sentence_translation`（v28）随包走——
+    /// 恢复后旧库行的句译不丢，wire 记录缺该字段按 NULL 补。
     static let aiStudyResolution = PortableBackupTableSpecification(
         tableName: "ai_study_resolutions",
         recordType: "aiStudyResolution",
@@ -190,7 +191,7 @@ enum PortableBackupFormatV9 {
             "token_key", "request_hash", "selected_entry_id",
             "selected_sense_id", "selected_dataset_version", "unit_id",
             "confidence", "status", "reason_code", "origin", "revision",
-            "created_at_ms"
+            "created_at_ms", "sentence_translation"
         ],
         orderBy: "job_id, created_at_ms, id"
     )

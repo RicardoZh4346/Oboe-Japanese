@@ -861,6 +861,10 @@ public struct AIStudyPreviewPendingItem: Equatable, Identifiable, Sendable {
     public let confidence: Double?
     /// 可供改判的候选（低置信修正入口的选项集）。
     public let alternatives: [Alternative]
+    /// AI 的首选（低置信行 = validator 合法但被阈值路由的选择）——
+    /// 行内显示「AI 建议：xxx」+ 一键采纳入口；unresolved/缺选定
+    /// 行为 nil。采纳写 `correctedSelection`，走同一改判落库路径。
+    public let aiSuggested: Alternative?
     /// 用户改判结果（nil = 未处理，应用期保持未解析）。
     public var correctedSelection: AIStudySelection?
 
@@ -894,6 +898,7 @@ public struct AIStudyPreviewPendingItem: Equatable, Identifiable, Sendable {
         reasonCode: AIStudyReasonCode?,
         confidence: Double?,
         alternatives: [Alternative],
+        aiSuggested: Alternative? = nil,
         correctedSelection: AIStudySelection? = nil
     ) {
         self.resolutionID = resolutionID
@@ -906,6 +911,7 @@ public struct AIStudyPreviewPendingItem: Equatable, Identifiable, Sendable {
         self.reasonCode = reasonCode
         self.confidence = confidence
         self.alternatives = alternatives
+        self.aiSuggested = aiSuggested
         self.correctedSelection = correctedSelection
     }
 }

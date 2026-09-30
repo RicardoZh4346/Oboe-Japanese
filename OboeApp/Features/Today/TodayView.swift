@@ -1016,11 +1016,16 @@ private struct HomeShortcutTile: View {
             Text(detail)
                 .font(.caption2)
                 .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+                // 三磁贴 HStack(alignment:.top) 等高：detail 行数不齐
+                // （「保持率·趋势·到期预测」折两行 vs 「暂无待处理」
+                // 一行）会让短 tile 底部缺一块（真机反馈收集箱变小）。
+                .lineLimit(2, reservesSpace: true)
                 .accessibilityIdentifier(detailIdentifier)
         } else {
             Text(detail)
                 .font(.caption2)
                 .foregroundStyle(OboeTheme.Colors.secondaryOnCard)
+                .lineLimit(2, reservesSpace: true)
         }
     }
 }

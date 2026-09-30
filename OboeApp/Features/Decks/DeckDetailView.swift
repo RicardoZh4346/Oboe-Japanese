@@ -59,6 +59,9 @@ struct DeckDetailView: View {
     @State private var contentModel: DeckContentModel
     @State private var searchText = ""
     @State private var searchModel: KnowledgeSearchModel
+    /// 首刷完成标记——false 期间缺 deck 显示载入中而非「已不存在」
+    /// （AI 摘要路由新建的空 DeckListModel 需要时间回流 decks）。
+    @State private var didInitialDeckLoad = false
 
     init(
         deckID: UUID,
@@ -327,14 +330,9 @@ struct DeckDetailView: View {
                     moveBeforeDeletionSheet(for: deck)
                 }
                 .task(id: deckID) {
-                    // S18：幂等启动 model 观察——共享 model 已订阅时
-                    // no-op；AI 摘要/外部路由新建的 model 在此开始
-                    // 同步。model 里还没有该 deck（新建的专用 model
-                    // 或绑定刚建立尚未回流）时主动重取一次。
-                    model.startObserving()
-                    if !model.decks.contains(where: { $0.id == deckID }) {
-                        await model.refreshDecks()
-                    }
+                    // S18：本 task 只负责内容列；decks 观察/首刷已上
+                    // 提至外层 Group（空 decks 时本分支不渲染，任务不
+                    // 能被条件分支的可选挂载阻断）。
                     await contentModel.load()
                 }
                 .task(id: model.studyDeckLink(for: deckID)?.documentID) {
@@ -379,14 +377,32 @@ struct DeckDetailView: View {
                 } message: {
                     Text(searchModel.errorMessage ?? "未知错误")
                 }
-            } else {
+            } else if didInitialDeckLoad {
                 ContentUnavailableView(
                     "牌组已不存在",
                     systemImage: "rectangle.stack.badge.minus"
                 )
+            } else {
+                // 冷启动窗口：专用 DeckListModel 的 decks 为空属正常，
+                // 先显示载入态——首刷完成仍无此 deck 才落「已不存在」
+                // （真机反馈：AI 摘要「查看牌组」直达本视图时误报缺失）。
+                ProgressView("正在载入牌组…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .secondaryPage()
+        .task(id: deckID) {
+            // S18：幂等启动 model 观察——共享 model 已订阅时
+            // no-op；AI 摘要/外部路由新建的 model 在此开始
+            // 同步。model 里还没有该 deck（新建的专用 model
+            // 或绑定刚建立尚未回流）时主动重取一次。挂在 Group 层
+            // 而非 `if let deck` 分支内——分支未命中时任务也要跑。
+            model.startObserving()
+            if !model.decks.contains(where: { $0.id == deckID }) {
+                await model.refreshDecks()
+            }
+            didInitialDeckLoad = true
+        }
     }
 
     private func dismissAfterMoveIfNeeded() {
@@ -523,18 +539,26 @@ struct DeckDetailView: View {
     @ViewBuilder
     private func managementSection(deck: DeckSummary) -> some View {
         Section {
-            Button("重命名") {
+            Button {
                 isPresentingRename = true
+            } label: {
+                Text("重命名")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
             }
             .accessibilityIdentifier("deck-rename-button")
 
-            Button("删除牌组", role: .destructive) {
+            Button(role: .destructive) {
                 if deck.isEmpty {
                     isConfirmingDelete = true
                 } else {
                     isChoosingNonEmptyDeletion = true
                     Task { await model.loadDeletionImpact(for: deck.id) }
                 }
+            } label: {
+                Text("删除牌组")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
             }
             .accessibilityIdentifier("deck-delete-button")
         } footer: {
@@ -670,8 +694,12 @@ struct DeckDetailView: View {
                 ProgressView("正在载入内容…")
             } else if contentModel.items.isEmpty {
                 Label("暂无学习内容", systemImage: "tray")
-                Button("添加单词或语法") {
+                Button {
                     isPresentingAdd = true
+                } label: {
+                    Text("添加单词或语法")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
                 .accessibilityIdentifier("deck-add-empty-button")
             } else {

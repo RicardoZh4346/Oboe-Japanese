@@ -1174,7 +1174,7 @@ public struct AIStudyPreparationService: Sendable {
     ) async {
         do {
             try await pool.write { db in
-                try GRDBReaderCoverageSnapshotStore
+                _ = try GRDBReaderCoverageSnapshotStore
                     .recordDocumentSnapshot(
                         documentID: documentID,
                         dictionaryVersion: dictionaryVersion,
@@ -1464,7 +1464,7 @@ public struct AIStudyPreparationService: Sendable {
                     $0.materialize().preferredGlosses()
                         .map { $0.glosses.map(\.text)
                             .joined(separator: "; ") }
-                }.filter { !$0.isEmpty }.joined(separator: "；"),
+                }.filter { !$0.isEmpty }.joined(separator: "\n"),
                 jlptLevel: nil,
                 occurrenceCount: aggregate.occurrenceCount,
                 firstSentence: aggregate.firstSentence,
@@ -1557,6 +1557,16 @@ public struct AIStudyPreparationService: Sendable {
         } else {
             alternatives = []
         }
+        // AI 首选：低置信行保留合法选定（validator 只挡阈值不挡
+        // 选择）——在 alternatives 中找到同 entryID+senseID 的项
+        // 作一键采纳入口。unresolved/被拒行无选定 → nil。
+        let aiSuggested = record.selectedEntryID.flatMap { entryID in
+            record.selectedSenseID.flatMap { senseID in
+                alternatives.first(where: {
+                    $0.entryID == entryID && $0.senseID == senseID
+                })
+            }
+        }
         return AIStudyPreviewPendingItem(
             resolutionID: record.id,
             requestHash: record.requestHash,
@@ -1567,7 +1577,8 @@ public struct AIStudyPreparationService: Sendable {
             status: record.status,
             reasonCode: record.reasonCode,
             confidence: record.confidence,
-            alternatives: alternatives)
+            alternatives: alternatives,
+            aiSuggested: aiSuggested)
     }
 
     /// token 所在句（manifest 块句界切片；range 外 → nil）。

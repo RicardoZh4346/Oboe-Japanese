@@ -300,7 +300,7 @@ public struct AIStudyResolverClient: Sendable {
             maximumOutputTokens: maximumOutputTokens,
             outputContract: AIOutputContract(
                 mode: configuration.responseFormatMode,
-                schemaName: "oboe_ai_study_v1",
+                schemaName: "oboe_ai_study_v2",
                 schema: outputSchema()
             )
         )
@@ -328,8 +328,12 @@ public struct AIStudyResolverClient: Sendable {
                 "entryID": integerOrNull,
                 "senseID": integerOrNull,
                 "confidence": numberOrNull,
+                "sentenceTranslation": stringOrNull,
             ],
-            "required": ["tokenID", "status", "entryID", "senseID", "confidence"],
+            "required": [
+                "tokenID", "status", "entryID", "senseID", "confidence",
+                "sentenceTranslation",
+            ],
             "additionalProperties": false,
         ]
         return [

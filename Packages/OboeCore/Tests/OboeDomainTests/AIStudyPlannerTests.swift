@@ -407,7 +407,8 @@ final class AIStudyPlannerTests: XCTestCase {
         ] {
             XCTAssertFalse(wire.contains(forbidden), "leaked \(forbidden)")
         }
-        XCTAssertTrue(wire.contains("\"schemaVersion\":1"))
+        XCTAssertTrue(wire.contains(
+            "\"schemaVersion\":\(AIStudyRequest.schemaVersion)"))
     }
 
     // MARK: - UTF-16 边界

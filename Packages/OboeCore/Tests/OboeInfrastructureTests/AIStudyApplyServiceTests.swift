@@ -1176,6 +1176,144 @@ final class AIStudyApplyServiceTests: XCTestCase {
         XCTAssertNil(sentence)
     }
 
+    /// C7：resolution 携带 `sentenceTranslation`（schema v2）时，
+    /// apply 落卡的 examples.translation_zh 必须等于该句译——
+    /// 与例句同一条证据链（同 resolution 行）。
+    func testSentenceTranslationLandsOnCardExample() async throws {
+        let env = try await makeEnvironment()
+        let binding = try Self.makeBinding(
+            entryID: 200, senseID: 7, lemma: "食べる")
+        // 覆盖 env 默认 resolution：带句译版本入库。
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: env.locatorJSON,
+            tokenKey: "tok-1", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1,
+            sentenceTranslation: "猫喜欢吃鱼。")
+        try await env.pool.write { db in
+            try GRDBAIStudyJobStore.insertResolution(
+                resolution, documentID: env.documentID, in: db)
+        }
+        let selection = env.selection(
+            unitKey: binding.identityKey, decision: .create,
+            action: .createNote(directions: [.japaneseToChinese]))
+        try await env.insertSelection(selection)
+        let service = env.service(sources: [
+            binding.identityKey: AIStudyApplyUnitSource(
+                binding: binding, headword: "食べる",
+                reading: "たべる", meaningZH: "吃")])
+
+        let report = try await service.applyConfirmedJob(
+            jobID: env.job.id)
+        XCTAssertEqual(report.finalStatus, .completed)
+        let noteID = try XCTUnwrap(report.units.first?.noteID)
+        try await env.pool.read { db in
+            let row = try XCTUnwrap(try Row.fetchOne(
+                db,
+                sql: """
+                    SELECT japanese, translation_zh FROM examples
+                    WHERE note_id = ?
+                    """,
+                arguments: [DatabaseValueCodec.encode(noteID)]))
+            let japanese: String? = row["japanese"]
+            let translationZH: String? = row["translation_zh"]
+            XCTAssertEqual(japanese, "猫は食べるが好きだ。")
+            XCTAssertEqual(translationZH, "猫喜欢吃鱼。")
+        }
+    }
+
+    /// C7 反向：无句译（旧 schema/AI 未产出）时 translation_zh
+    /// 为空而非崩溃——句译是可选增强字段。
+    func testMissingSentenceTranslationLeavesExampleBlank()
+        async throws {
+        let env = try await makeEnvironment()
+        let binding = try Self.makeBinding(
+            entryID: 200, senseID: 7, lemma: "食べる")
+        let selection = env.selection(
+            unitKey: binding.identityKey, decision: .create,
+            action: .createNote(directions: [.japaneseToChinese]))
+        try await env.insertSelection(selection)
+        let service = env.service(sources: [
+            binding.identityKey: AIStudyApplyUnitSource(
+                binding: binding, headword: "食べる",
+                reading: "たべる", meaningZH: "吃")])
+
+        let report = try await service.applyConfirmedJob(
+            jobID: env.job.id)
+        XCTAssertEqual(report.finalStatus, .completed)
+        let noteID = try XCTUnwrap(report.units.first?.noteID)
+        try await env.pool.read { db in
+            let translationZH = try String.fetchOne(
+                db,
+                sql: """
+                    SELECT translation_zh FROM examples
+                    WHERE note_id = ?
+                    """,
+                arguments: [DatabaseValueCodec.encode(noteID)])
+            XCTAssertTrue((translationZH ?? "").isEmpty)
+        }
+    }
+
+    /// C6：物化 source 的多义项释义按换行拼接——notes.meaning_zh
+    /// 保留 "\n" 分隔（卡面按行渲染各义项）。
+    func testMergedSenseMeaningKeepsNewlineSeparators() async throws {
+        let env = try await makeEnvironment()
+        let binding = try Self.makeBinding(
+            entryID: 200, senseID: 7, lemma: "食べる")
+        let selection = env.selection(
+            unitKey: binding.identityKey, decision: .create,
+            action: .createNote(directions: [.japaneseToChinese]))
+        try await env.insertSelection(selection)
+        let service = env.service(sources: [
+            binding.identityKey: AIStudyApplyUnitSource(
+                binding: binding, headword: "食べる",
+                reading: "たべる",
+                meaningZH: "吃\n进食; 咽下")])
+
+        let report = try await service.applyConfirmedJob(
+            jobID: env.job.id)
+        XCTAssertEqual(report.finalStatus, .completed)
+        let noteID = try XCTUnwrap(report.units.first?.noteID)
+        try await env.pool.read { db in
+            let meaningZH = try String.fetchOne(
+                db,
+                sql: "SELECT meaning_zh FROM notes WHERE id = ?",
+                arguments: [DatabaseValueCodec.encode(noteID)])
+            XCTAssertEqual(meaningZH, "吃\n进食; 咽下")
+        }
+    }
+
+    /// v28 列 roundtrip：insertResolution → fetch 回读句译原文。
+    func testResolutionSentenceTranslationRoundTrip() async throws {
+        let env = try await makeEnvironment()
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: env.locatorJSON,
+            tokenKey: "tok-rt", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1,
+            sentenceTranslation: "往復する訳文")
+        try await env.pool.write { db in
+            try GRDBAIStudyJobStore.insertResolution(
+                resolution, documentID: env.documentID, in: db)
+        }
+        let value = try await env.pool.read { db in
+            try String.fetchOne(
+                db,
+                sql: """
+                    SELECT sentence_translation FROM ai_study_resolutions
+                    WHERE id = ?
+                    """,
+                arguments: [DatabaseValueCodec.encode(resolution.id)])
+        }
+        XCTAssertEqual(value, "往復する訳文")
+    }
+
     // MARK: - 环境
 
     private struct Environment {

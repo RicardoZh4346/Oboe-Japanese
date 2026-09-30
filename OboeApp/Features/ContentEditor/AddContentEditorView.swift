@@ -231,8 +231,12 @@ struct AddContentEditorView: View {
 
                 if model.hasCurrentDraft {
                     Section {
-                        Button("清除草稿", role: .destructive) {
+                        Button(role: .destructive) {
                             Task { await model.clearCurrentDraft() }
+                        } label: {
+                            Text("清除草稿")
+                                .frame(maxWidth: .infinity)
+                                .multilineTextAlignment(.center)
                         }
                         .disabled(model.isSaving)
                         .accessibilityIdentifier(model.kind.clearDraftIdentifier)

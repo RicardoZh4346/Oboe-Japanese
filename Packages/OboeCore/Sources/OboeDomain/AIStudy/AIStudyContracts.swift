@@ -38,7 +38,13 @@ public enum AIStudyBudget {
     /// 每 token 候选 entry 上限（§3.1 `candidates[]: ≤5 entry`）。
     public static let maxCandidatesPerEntry = 5
     /// 低置信路由阈值：confidence < 此值合法但进确认队列（§3.2）。
-    public static let lowConfidenceThreshold = 0.80
+    /// v0.7.5-F（第三轮真机反馈 C5）：0.80 实测把 provider 自报
+    /// 0.5–0.79 区间的大量合法选择挡进待确认队列——覆盖率公式
+    /// 只计已采纳单元，结果是「分析完成、覆盖 23%」。降至 0.50：
+    /// 仍保留「诚实低置信必须人工过目」的路由，但不再把 provider
+    /// 的保守自报当成主要拦截器（候选集内选择题的错配另有
+    /// validator 单项校验兜底）。
+    public static let lowConfidenceThreshold = 0.50
 
     // MARK: validator 防御边界（S09 工程值，非冻结契约）
 
@@ -50,6 +56,9 @@ public enum AIStudyBudget {
     public static let maxWordItems = 2048
     /// 译文 trim 后字符数上限——超限仅 translation 子状态失败。
     public static let maxTranslationLength = 4096
+    /// 单词级例句译文上限（v0.7.5-F schema v2 新增字段）——超限
+    /// 不降级整词：字段被剥掉按缺席处理（不进卡，不报错）。
+    public static let maxSentenceTranslationLength = 1024
     /// 序列化预算中预留给请求元数据/prompt 模板的部分。
     /// block 打包时按 `serializedInputBudgetBytes - 此值` 计容量。
     public static let requestEnvelopeReserveBytes = 2048
@@ -280,8 +289,10 @@ public struct AIStudyRequestMetadata: Equatable, Sendable {
 /// （与 `ai_study_job_blocks` 1:1，`requestHash` 即块级缓存键）；
 /// `blocks` 保持数组形态以兼容契约与未来合批。
 public struct AIStudyRequest: Equatable, Sendable {
-    /// 冻结 schema 版本（§3.1）。
-    public static let schemaVersion = 1
+    /// 冻结 schema 版本（§3.1）。v2：`words[]` 元素新增
+    /// `sentenceTranslation`（v0.7.5-F C7）——响应契约形态变化，
+    /// 版本随形态 bump；requestID 派生含本值，请求侧天然隔离。
+    public static let schemaVersion = 2
 
     public let schemaVersion: Int
     /// 本地 opaque ID：`rq-` + SHA256(blockKey|schemaVersion) 前 16 hex——
@@ -321,19 +332,25 @@ public struct AIStudyWordResult: Codable, Equatable, Sendable {
     /// 本次候选快照行 ID，**不是义项序号**。
     public let senseID: Int64?
     public let confidence: Double?
+    /// v2：该 token 所在句子的译文（例句中文）。可选——provider
+    /// 不给出或 validator 剥掉（超长/非串）时为 nil；unresolved
+    /// 项也可携带（翻译与选义子状态独立）。
+    public let sentenceTranslation: String?
 
     public init(
         tokenID: String,
         status: String,
         entryID: Int64? = nil,
         senseID: Int64? = nil,
-        confidence: Double? = nil
+        confidence: Double? = nil,
+        sentenceTranslation: String? = nil
     ) {
         self.tokenID = tokenID
         self.status = status
         self.entryID = entryID
         self.senseID = senseID
         self.confidence = confidence
+        self.sentenceTranslation = sentenceTranslation
     }
 }
 
@@ -367,8 +384,8 @@ public enum AIStudyResolutionStatus: String, Codable, Sendable {
     case aiResolved
     /// 用户在确认/预览中选定（S15/S16 写入路径使用；validator 不产生）。
     case userConfirmed
-    /// 合法候选但 confidence < 0.80（含 resolved 应答缺 confidence）——
-    /// 进确认队列，不可自动采纳。
+    /// 合法候选但 confidence < `lowConfidenceThreshold`（含 resolved
+    /// 应答缺 confidence）——进确认队列，不可自动采纳。
     case lowConfidence
     /// 未解析：缺项/OOV/重复降级/非法项降级 的归并出口。
     case unresolved
@@ -452,6 +469,9 @@ public struct AIStudyResolution: Equatable, Sendable {
     public let status: AIStudyResolutionStatus
     public let reasonCode: AIStudyReasonCode?
     public let origin: AIStudyResolutionOrigin
+    /// v2：该 token 所在句的译文（经 trim/长度校验，违规剥为 nil）。
+    /// 随 resolution 持久化——制卡时把它写入词汇卡例句译文。
+    public let sentenceTranslation: String?
 
     public init(
         tokenKey: String,
@@ -459,7 +479,8 @@ public struct AIStudyResolution: Equatable, Sendable {
         confidence: Double?,
         status: AIStudyResolutionStatus,
         reasonCode: AIStudyReasonCode?,
-        origin: AIStudyResolutionOrigin
+        origin: AIStudyResolutionOrigin,
+        sentenceTranslation: String? = nil
     ) {
         self.tokenKey = tokenKey
         self.selected = selected
@@ -467,6 +488,7 @@ public struct AIStudyResolution: Equatable, Sendable {
         self.status = status
         self.reasonCode = reasonCode
         self.origin = origin
+        self.sentenceTranslation = sentenceTranslation
     }
 }
 
@@ -499,7 +521,7 @@ public enum AIStudyEnvelopeRejection: String, Equatable, Sendable {
     case notAnObject
     /// 递归深度超 `maxJSONDepth`。
     case depthExceeded
-    /// `schemaVersion != 1`——整包拒。
+    /// `schemaVersion != 请求侧 schemaVersion`——整包拒。
     case schemaVersionMismatch
     /// `requestID` 与本请求不符——整包拒。
     case requestIDMismatch

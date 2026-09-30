@@ -357,9 +357,13 @@ struct SentenceAnalysisSections: View {
 
         if model.hasCurrentDraft {
             Section {
-                Button("清除分析草稿", role: .destructive) {
+                Button(role: .destructive) {
                     selectedItemID = nil
                     Task { await model.clearCurrentDraft() }
+                } label: {
+                    Text("清除分析草稿")
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
                 }
                 .disabled(model.isSaving)
                 .accessibilityIdentifier(model.kind.clearDraftIdentifier)

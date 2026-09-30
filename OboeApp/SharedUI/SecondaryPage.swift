@@ -8,17 +8,24 @@ import UIKit
 /// 详情、词条详情、AI 修卡建议预览等）同样不显示 Tab Bar，无需在
 /// 每个深链页重复标注；返回一级页时系统自动恢复。
 ///
-/// 隐藏只走 UIKit `hidesBottomBarWhenPushed`（由 `SecondaryPageTabBarHook`
-/// 在 push 当下落位，Anchor 兜底），Tab Bar 的隐藏/恢复都随导航转场
-/// 同步执行。**不要再叠加** `.toolbar(.hidden, for: .tabBar)`——SwiftUI
-/// 的 tabBar 偏好在 pop 转场结束后才结算恢复，双轨并用时它会盖过
-/// UIKit 路径，表现为 bar 晚到 + 整页内容上移（iOS 26/27 实测）。
+/// 双轨隐藏（第三轮真机反馈裁决）：
+/// - **SwiftUI 偏好轨** `.toolbar(.hidden, for: .tabBar)`：iOS 26+
+///   的悬浮 tab bar 不走 UITabBarController 承载，`hidesBottomBarWhenPushed`
+///   对它完全无效（真机实测标记落位但 bar 不消失）——悬浮 bar 只认
+///   SwiftUI 偏好，本轨道是 iOS 26 上唯一有效通道。
+/// - **UIKit 轨** `hidesBottomBarWhenPushed`（`SecondaryPageTabBarHook`
+///   在 push 当下落位，Anchor 兜底）：在 UITabBarController 承载的
+///   环境上仍负责转场同步隐藏。
+/// 两轨同向叠加：任一侧先生效都能隐藏；pop 恢复由各自机制处理，
+/// SwiftUI 偏好随页面离栈即时结算，不再有「转场结束后才恢复」的
+/// 晚到窗口（此前晚到是 UIKit 单轨下 pop 走偏好回弹路径所致）。
 ///
 /// sheet / fullScreenCover 会覆盖整个窗口（含 Tab Bar），不需要
 /// 使用本修饰符。
 private struct SecondaryPageModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
+            .toolbar(.hidden, for: .tabBar)
             .background(TabBarHidesOnPush())
     }
 }

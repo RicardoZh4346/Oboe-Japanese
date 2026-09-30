@@ -171,8 +171,9 @@ final class AIStudyValidatorTests: XCTestCase {
 
     // MARK: - §48 low confidence
 
-    /// confidence < 0.80：合法但进确认队列——选定保留、
-    /// 状态 lowConfidence、块为 partial（不可自动采纳）。
+    /// confidence < lowConfidenceThreshold：合法但进确认队列——
+    /// 选定保留、状态 lowConfidence、块为 partial（不可自动采纳）。
+    /// v0.7.5-F：阈值 0.80→0.50（provider 保守自报不再当主拦截器）。
     func testLowConfidenceRoutedToConfirmation() {
         let request = makeRequest(tokens: [
             studyToken("t01", candidates: [studyCandidate(100, senses: [
@@ -182,7 +183,7 @@ final class AIStudyValidatorTests: XCTestCase {
         ])
         let outcome = validate(request, words: [
             word("t01", status: "resolved", entryID: 100, senseID: 1001,
-                 confidence: 0.5),
+                 confidence: 0.3),
             word("t02", status: "resolved", entryID: 200, senseID: 2001,
                  confidence: 0.95),
         ])
@@ -191,12 +192,26 @@ final class AIStudyValidatorTests: XCTestCase {
         XCTAssertEqual(low?.reasonCode, .belowConfidenceThreshold)
         XCTAssertEqual(low?.selected?.senseID, 1001,
                        "低置信保留原候选——用户可确认，不许填伪造 ID")
-        XCTAssertEqual(low?.confidence, 0.5)
+        XCTAssertEqual(low?.confidence, 0.3)
         XCTAssertEqual(outcome.lowConfidenceCount, 1)
         XCTAssertEqual(outcome.lexicalStatus, .partial)
     }
 
-    /// resolved 但缺 confidence → 无法证明 ≥0.8 → lowConfidence。
+    /// 0.5–0.79 区间（原阈值会拦下的段）现在直通——C5 的判定面。
+    func testModerateConfidenceAccepted() {
+        let request = makeRequest(tokens: [
+            studyToken("t01", candidates: [studyCandidate(100, senses: [
+                (1001, [], [])])]),
+        ])
+        let outcome = validate(request, words: [
+            word("t01", status: "resolved", entryID: 100, senseID: 1001,
+                 confidence: 0.65),
+        ])
+        XCTAssertEqual(resolutionFor(outcome, "t01")?.status, .aiResolved)
+        XCTAssertEqual(outcome.lexicalStatus, .resolved)
+    }
+
+    /// resolved 但缺 confidence → 无法证明 ≥阈值 → lowConfidence。
     func testMissingConfidenceRoutesLowConfidence() {
         let request = makeRequest(tokens: [
             studyToken("t01", candidates: [studyCandidate(100, senses: [
@@ -208,7 +223,7 @@ final class AIStudyValidatorTests: XCTestCase {
         XCTAssertEqual(resolutionFor(outcome, "t01")?.status, .lowConfidence)
     }
 
-    /// 阈值边界：恰好 0.80 → aiResolved（"<0.80 才低置信"）。
+    /// 阈值边界：恰好 lowConfidenceThreshold → aiResolved。
     func testConfidenceAtThresholdAccepted() {
         let request = makeRequest(tokens: [
             studyToken("t01", candidates: [studyCandidate(100, senses: [
@@ -216,9 +231,64 @@ final class AIStudyValidatorTests: XCTestCase {
         ])
         let outcome = validate(request, words: [
             word("t01", status: "resolved", entryID: 100, senseID: 1001,
-                 confidence: 0.8),
+                 confidence: AIStudyBudget.lowConfidenceThreshold),
         ])
         XCTAssertEqual(resolutionFor(outcome, "t01")?.status, .aiResolved)
+    }
+
+    // MARK: - v2 句译字段（C7）
+
+    /// `sentenceTranslation` 随 resolution 透传；unresolved 项也保留
+    /// （翻译与选义子状态独立）。
+    func testSentenceTranslationCarriedThrough() {
+        let request = makeRequest(tokens: [
+            studyToken("t01", candidates: [studyCandidate(100, senses: [
+                (1001, [], [])])]),
+            studyToken("t02"),   // OOV——句译仍应保留
+        ])
+        var resolvedWord = word(
+            "t01", status: "resolved", entryID: 100, senseID: 1001,
+            confidence: 0.9)
+        resolvedWord["sentenceTranslation"] = "第一句的译文"
+        var unresolvedWord = word("t02", status: "unresolved")
+        unresolvedWord["sentenceTranslation"] = "同句译文"
+        let outcome = validate(request, words: [resolvedWord, unresolvedWord])
+        XCTAssertEqual(
+            resolutionFor(outcome, "t01")?.sentenceTranslation,
+            "第一句的译文")
+        XCTAssertEqual(
+            resolutionFor(outcome, "t02")?.sentenceTranslation,
+            "同句译文")
+    }
+
+    /// 句译坏值剥除：超长/空串/非串 → nil，不降级词义。
+    func testSentenceTranslationStrippedOnViolation() {
+        let request = makeRequest(tokens: [
+            studyToken("t01", candidates: [studyCandidate(100, senses: [
+                (1001, [], [])])]),
+            studyToken("t02", candidates: [studyCandidate(200, senses: [
+                (2001, [], [])])]),
+            studyToken("t03", candidates: [studyCandidate(300, senses: [
+                (3001, [], [])])]),
+        ])
+        var w1 = word("t01", status: "resolved", entryID: 100,
+                      senseID: 1001, confidence: 0.9)
+        w1["sentenceTranslation"] = String(
+            repeating: "译",
+            count: AIStudyBudget.maxSentenceTranslationLength + 1)
+        var w2 = word("t02", status: "resolved", entryID: 200,
+                      senseID: 2001, confidence: 0.9)
+        w2["sentenceTranslation"] = "   "
+        var w3 = word("t03", status: "resolved", entryID: 300,
+                      senseID: 3001, confidence: 0.9)
+        w3["sentenceTranslation"] = 42
+        let outcome = validate(request, words: [w1, w2, w3])
+        XCTAssertEqual(outcome.lexicalStatus, .resolved,
+                       "句译字段违规不拖累词义状态")
+        for token in ["t01", "t02", "t03"] {
+            XCTAssertNil(resolutionFor(outcome, token)?.sentenceTranslation)
+            XCTAssertEqual(resolutionFor(outcome, token)?.status, .aiResolved)
+        }
     }
 
     // MARK: - §48 partial invalid / malformed JSON
@@ -276,9 +346,9 @@ final class AIStudyValidatorTests: XCTestCase {
             studyToken("t01", candidates: [studyCandidate(100, senses: [
                 (1001, [], [])])]),
         ])
-        let outcome = validate(
-            request, rawData: Data("{\"schemaVersion\":1,\"requestID\":\"x\","
-                .utf8))
+        let truncated = "{\"schemaVersion\":\(AIStudyRequest.schemaVersion),"
+            + "\"requestID\":\"x\","
+        let outcome = validate(request, rawData: Data(truncated.utf8))
         XCTAssertEqual(outcome.lexicalStatus, .failed)
         XCTAssertEqual(outcome.envelopeRejection, .malformedJSON)
         XCTAssertTrue(outcome.resolutions.isEmpty,
@@ -466,12 +536,17 @@ final class AIStudyValidatorTests: XCTestCase {
         XCTAssertTrue(outcome.resolutions.isEmpty)
     }
 
+    /// v1 响应在 v2 请求下被拒——schema bump 即整包拒（缓存键
+    /// 含 promptVersion+schemaVersion 不同键，此断言锁死「旧
+    /// 契约响应不得混进新请求」的边界）。
     func testSchemaVersionMismatchRejectsEnvelope() {
         let request = makeRequest(tokens: [
             studyToken("t01", candidates: [studyCandidate(100, senses: [
                 (1001, [], [])])]),
         ])
-        let outcome = validate(request, schemaVersion: 2, words: [
+        let outcome = validate(
+            request, schemaVersion: AIStudyRequest.schemaVersion - 1,
+            words: [
             word("t01", status: "resolved", entryID: 100, senseID: 1001,
                  confidence: 0.9),
         ])
@@ -500,7 +575,7 @@ final class AIStudyValidatorTests: XCTestCase {
     /// 递归深度超 `maxJSONDepth` → 外层拒（结构防御）。
     func testDeeplyNestedResponseRejected() {
         let request = makeRequest(tokens: [])
-        var json = "{\"schemaVersion\":1,\"requestID\":\"rq-test\",\"x\":"
+        var json = "{\"schemaVersion\":\(AIStudyRequest.schemaVersion),\"requestID\":\"rq-test\",\"x\":"
         json += String(repeating: "[", count: AIStudyBudget.maxJSONDepth + 2)
         json += String(repeating: "]", count: AIStudyBudget.maxJSONDepth + 2)
         json += "}"
@@ -516,7 +591,8 @@ final class AIStudyValidatorTests: XCTestCase {
             repeating: ["tokenID": "t?", "status": "unresolved"],
             count: AIStudyBudget.maxWordItems + 1)
         let envelope: [String: Any] = [
-            "schemaVersion": 1, "requestID": "rq-test",
+            "schemaVersion": AIStudyRequest.schemaVersion,
+            "requestID": "rq-test",
             "translation": "译文", "words": words,
         ]
         let data = try! JSONSerialization.data(withJSONObject: envelope)
@@ -690,7 +766,7 @@ final class AIStudyValidatorTests: XCTestCase {
     private func validate(
         _ request: AIStudyRequest,
         translation: String? = "译文",
-        schemaVersion: Int = 1,
+        schemaVersion: Int = AIStudyRequest.schemaVersion,
         requestIDOverride: String? = nil,
         words: [[String: Any]] = [],
         wordsLiteral: String? = nil,

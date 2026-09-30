@@ -74,7 +74,9 @@ final class PortableBackupV9SpecTests: XCTestCase {
             "token_key", "request_hash", "selected_entry_id",
             "selected_sense_id", "selected_dataset_version", "unit_id",
             "confidence", "status", "reason_code", "origin", "revision",
-            "created_at_ms"
+            "created_at_ms",
+            // v28 扩列：schema v2 句译证据——支持数据随包走。
+            "sentence_translation"
         ]),
         ("aiStudyReceipt", "ai_study_receipts", [
             "operation_id", "action_key", "payload_hash", "outcome_json",

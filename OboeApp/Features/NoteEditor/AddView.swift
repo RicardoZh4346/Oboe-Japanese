@@ -697,8 +697,12 @@ private struct KnowledgePointLifecycleSection: View {
             .disabled(decks.isEmpty || membership == nil || isWorking)
             .accessibilityIdentifier("knowledge-membership-button")
 
-            Button("删除知识点", role: .destructive) {
+            Button(role: .destructive) {
                 prepareDeletion()
+            } label: {
+                Text("删除知识点")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
             }
             .disabled(isWorking)
             .accessibilityIdentifier("knowledge-delete-button")

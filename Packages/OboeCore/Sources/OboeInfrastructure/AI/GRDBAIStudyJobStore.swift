@@ -92,6 +92,8 @@ public struct AIStudyCachedResult: Codable, Equatable, Sendable {
         public var status: AIStudyResolutionStatus
         public var reasonCode: AIStudyReasonCode?
         public var origin: AIStudyResolutionOrigin
+        /// v2 句译——Codable 对缺席键解为 nil，旧缓存行天然兼容。
+        public var sentenceTranslation: String?
 
         public init(_ resolution: AIStudyResolution) {
             tokenKey = resolution.tokenKey
@@ -103,6 +105,7 @@ public struct AIStudyCachedResult: Codable, Equatable, Sendable {
             status = resolution.status
             reasonCode = resolution.reasonCode
             origin = resolution.origin
+            sentenceTranslation = resolution.sentenceTranslation
         }
 
         public var resolution: AIStudyResolution {
@@ -117,7 +120,8 @@ public struct AIStudyCachedResult: Codable, Equatable, Sendable {
             return AIStudyResolution(
                 tokenKey: tokenKey, selected: selection,
                 confidence: confidence, status: status,
-                reasonCode: reasonCode, origin: origin)
+                reasonCode: reasonCode, origin: origin,
+                sentenceTranslation: sentenceTranslation)
         }
     }
 
@@ -663,7 +667,8 @@ extension GRDBAIStudyJobStore {
                     reasonCode: resolution.reasonCode,
                     origin: resolution.origin,
                     revision: revision,
-                    createdAtMs: atMs),
+                    createdAtMs: atMs,
+                    sentenceTranslation: resolution.sentenceTranslation),
                 documentID: documentID(of: block.jobID, in: db),
                 in: db)
         }
@@ -793,8 +798,8 @@ extension GRDBAIStudyJobStore {
                     token_key, request_hash, selected_entry_id,
                     selected_sense_id, selected_dataset_version, unit_id,
                     confidence, status, reason_code, origin, revision,
-                    created_at_ms)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at_ms, sentence_translation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
             arguments: [
                 DatabaseValueCodec.encode(record.id),
@@ -815,6 +820,7 @@ extension GRDBAIStudyJobStore {
                 record.origin.rawValue,
                 record.revision,
                 record.createdAtMs,
+                record.sentenceTranslation,
             ])
     }
 
@@ -843,7 +849,7 @@ extension GRDBAIStudyJobStore {
                        selected_entry_id, selected_sense_id,
                        selected_dataset_version, unit_id, confidence,
                        status, reason_code, origin, revision,
-                       created_at_ms
+                       created_at_ms, sentence_translation
                 FROM ai_study_resolutions
                 WHERE job_id = ?
                 ORDER BY revision, token_key
@@ -863,7 +869,7 @@ extension GRDBAIStudyJobStore {
                        selected_entry_id, selected_sense_id,
                        selected_dataset_version, unit_id, confidence,
                        status, reason_code, origin, revision,
-                       created_at_ms
+                       created_at_ms, sentence_translation
                 FROM ai_study_resolutions
                 WHERE request_hash = ?
                 ORDER BY token_key, revision
@@ -1373,7 +1379,8 @@ extension GRDBAIStudyJobStore {
             },
             origin: origin,
             revision: row["revision"],
-            createdAtMs: row["created_at_ms"])
+            createdAtMs: row["created_at_ms"],
+            sentenceTranslation: row["sentence_translation"])
     }
 
     private static func decodeSelection(

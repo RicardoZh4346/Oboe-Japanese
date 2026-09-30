@@ -841,8 +841,12 @@ struct SettingsView: View {
         }
 
         if loadedAIStatus?.hasAPIKey == true {
-            Button("删除已保存的 API Key", role: .destructive) {
+            Button(role: .destructive) {
                 showRemoveAPIKeyConfirmation = true
+            } label: {
+                Text("删除已保存的 API Key")
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
             }
             .disabled(isSavingAIConfiguration || isTestingAIConnection)
             .accessibilityIdentifier("ai-remove-key-button")

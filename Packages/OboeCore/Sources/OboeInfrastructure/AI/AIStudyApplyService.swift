@@ -665,11 +665,21 @@ public enum GRDBAIStudyApplyService {
         let sentence = source?.sourceSentence
             ?? readerBlockSentence(context: context,
                                    selection: selection, in: db)
+        // C7：AI 句译随卡——selection 锚定的 resolution 行携带的
+        // `sentenceTranslation`（schema v2）进 `exampleTranslationZH`。
+        // 只取最新锚定组（matchedResolutions 已按 revision 排序），
+        // 与例句来源同一证据链：句来自 occurrence 锚，译来自
+        // 同 resolution 行的句级译文——两句同源不错配。
+        let sentenceTranslation = matchedResolutions(
+            context: context, selection: selection
+        ).first(where: { $0.sentenceTranslation != nil })?
+            .sentenceTranslation
         let form = VocabularyFormData(
             headword: headword, reading: reading ?? "",
             meaningZH: meaning,
             partOfSpeech: source?.partOfSpeech ?? "",
-            exampleJapanese: sentence ?? "")
+            exampleJapanese: sentence ?? "",
+            exampleTranslationZH: sentenceTranslation ?? "")
         let content = try form.validatedContent()
 
         let orderedDirections = directions.isEmpty
@@ -1413,6 +1423,9 @@ public struct DictionaryAIStudyUnitSourceProvider:
             .compactMap { $0.preferredGlosses() }
             .map { $0.glosses.map(\.text).joined(separator: "; ") }
             .filter { !$0.isEmpty }
+        // C6（真机反馈）：义项之间按行分隔——同一义项的并列 gloss
+        // 仍用 "; "，不同义项各自成行（卡面/详情页按行渲染）。
+        let meaningZH = glossParts.joined(separator: "\n")
         let languageParts = contentSenses.compactMap {
             $0.preferredGlosses()?.language
         }
@@ -1432,7 +1445,7 @@ public struct DictionaryAIStudyUnitSourceProvider:
             binding: binding,
             headword: entry.primaryForm,
             reading: entry.readings.first?.reading,
-            meaningZH: glossParts.joined(separator: "；"),
+            meaningZH: meaningZH,
             glossLanguage: glossLanguage,
             partOfSpeech: partOfSpeech)
     }
