@@ -179,10 +179,15 @@ final class ReaderDocumentViewModel {
             var highlightMap: [UUID: [TokenHighlight]] = [:]
             for (blockID, tokens) in tokenCache {
                 highlightMap[blockID] = tokens.map { token in
-                    let state = token.lexicalKey
-                        .flatMap { lexemes[$0] }
-                        .flatMap { states[$0.id] }
-                        ?? .unknown
+                    // 功能词不是词汇学习目标——始终中性色（.known
+                    // 渲染为 .label），不被 unit 状态误标成生词；
+                    // 仍进 highlight 保住点词链接。
+                    let state = token.tokenClass == .functionWord
+                        ? .known
+                        : (token.lexicalKey
+                            .flatMap { lexemes[$0] }
+                            .flatMap { states[$0.id] }
+                            ?? .unknown)
                     return TokenHighlight(
                         blockID: blockID,
                         utf16Range: token.sourceRangeUTF16,
@@ -328,10 +333,12 @@ final class ReaderDocumentViewModel {
             )
             for (blockID, tokens) in collected {
                 highlightMap[blockID] = tokens.map { token in
-                    let state = token.lexicalKey
-                        .flatMap { lexemes[$0] }
-                        .flatMap { states[$0.id] }
-                        ?? .unknown
+                    let state = token.tokenClass == .functionWord
+                        ? .known
+                        : (token.lexicalKey
+                            .flatMap { lexemes[$0] }
+                            .flatMap { states[$0.id] }
+                            ?? .unknown)
                     return TokenHighlight(
                         blockID: blockID,
                         utf16Range: token.sourceRangeUTF16,
