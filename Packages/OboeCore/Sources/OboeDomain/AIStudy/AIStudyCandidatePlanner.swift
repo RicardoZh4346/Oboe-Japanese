@@ -566,6 +566,7 @@ public struct AIStudyCandidatePlanner: Sendable {
         switch token.tokenClass {
         case .auxiliary: return "auxiliary"
         case .outOfVocabulary: return "oov"
+        case .functionWord: return "particle"
         case .lexical: return nil
         case .nonLexical: return nil
         }

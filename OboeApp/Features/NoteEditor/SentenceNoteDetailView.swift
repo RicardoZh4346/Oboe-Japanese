@@ -123,7 +123,7 @@ struct SentenceNoteDetailView: View {
                     }
                     .disabled(isDeleting)
                     .accessibilityIdentifier("sentence-note-delete")
-                    .confirmationDialog(
+                    .alert(
                         "删除这张句子卡片？",
                         isPresented: $isDeleteConfirmPresented
                     ) {

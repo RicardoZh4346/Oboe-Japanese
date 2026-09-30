@@ -89,12 +89,16 @@ public enum ReaderTokenClass: String, Codable, Sendable {
     case nonLexical
     /// 独立英文字词等 OOV——计 unknown（§7）。
     case outOfVocabulary
+    /// 语法功能词（は/が/を/に/の…）：语法黏着不是词汇学习
+    /// 目标——不计覆盖率分母、不进 AI 候选/挖词批量目标；
+    /// 候选仍保留，点词查词不受影响（S22）。
+    case functionWord
 
     /// 是否计入覆盖率分母。
     public var countsForCoverage: Bool {
         switch self {
         case .lexical, .auxiliary, .outOfVocabulary: true
-        case .nonLexical: false
+        case .nonLexical, .functionWord: false
         }
     }
 }

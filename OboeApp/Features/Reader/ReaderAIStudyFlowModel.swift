@@ -104,7 +104,8 @@ final class ReaderAIStudyFlowModel {
         // 装配缺席时入口已隐藏；此处 force unwrap 是装配契约。
         dependencies.preparation!
     }
-    private var runner: AIStudyRunner?
+    // Runner 走依赖级共享盒（`AIStudyRunnerBox`）——本模型析构
+    // 不杀驱动；重进 adopt 对运行中 Job 幂等重驱动/接管。
 
     // MARK: - 可观测状态
 
@@ -290,6 +291,13 @@ final class ReaderAIStudyFlowModel {
         case .pending, .analyzing, .waitingForAI:
             phase = .analyzing
             watch(jobID: existing.id)
+            // 重驱动屏障：共享 Runner 驱动仍在 → `start` 幂等
+            // no-op；驱动已消亡（重启/上次 FlowModel 异常）→ 按
+            // 块 checkpoint 续跑，不让孤儿 analyzing 永久停摆。
+            let runner = ensureRunner()
+            Task { [runner] in
+                try? await runner.start(jobID: existing.id)
+            }
         case .applying:
             phase = .applying
         default:
@@ -340,14 +348,18 @@ final class ReaderAIStudyFlowModel {
 
     /// Runner 延迟装配：planner = manifest 确定性 replan；
     /// sendRequest = 配置/凭据**当次**快照 → resolver。
+    /// 实例存依赖级共享盒——多 FlowModel/重进共用同一驱动面。
     private func ensureRunner() -> AIStudyRunner {
-        if let runner { return runner }
+        if let runner = dependencies.runnerBox.runner { return runner }
         let preparation = preparation
         let aiConfiguration = dependencies.aiConfiguration
         let credentialStore = dependencies.credentialStore
         let resolver = dependencies.resolver
         let runner = AIStudyRunner(
             store: dependencies.store,
+            // §9.2 上限 4——默认 2 对几十块的长任务太慢；限流由
+            // 退避+jitter+failed 重试自调节，不超协议上限。
+            configuration: .init(maxConcurrentRequests: 4),
             planner: { job in
                 try await preparation.plannedBlocks(for: job)
             },
@@ -371,7 +383,7 @@ final class ReaderAIStudyFlowModel {
                     configuration: resolved,
                     credential: credential)
             })
-        self.runner = runner
+        dependencies.runnerBox.runner = runner
         return runner
     }
 
@@ -411,11 +423,14 @@ final class ReaderAIStudyFlowModel {
 
     private func updateBlockCounts(_ blocks: [AIStudyJobBlock]) {
         var resolved = 0, failed = 0, pending = 0
+        var failureCode: String?
         for block in blocks {
             switch block.status {
             case .resolved, .awaitingConfirmation, .applying, .applied:
                 resolved += 1
-            case .failed: failed += 1
+            case .failed:
+                failed += 1
+                failureCode = failureCode ?? block.lastErrorCode
             case .cancelled: break
             default: pending += 1
             }
@@ -423,7 +438,12 @@ final class ReaderAIStudyFlowModel {
         blockCounts = (
             total: blocks.count, resolved: resolved,
             failed: failed, pending: pending)
+        lastFailureCode = failureCode
     }
+
+    /// 最近一个失败块的归因码（rateLimited/retryExhausted/…）——
+    /// 分析页给用户看「为什么慢/为什么失败」，不止给计数。
+    private(set) var lastFailureCode: String?
 
     /// 驱动收束后的相位推进：awaitingConfirmation/partiallyCompleted
     /// → 预览；paused → 留在 analyzing（显示恢复原因）；failed/

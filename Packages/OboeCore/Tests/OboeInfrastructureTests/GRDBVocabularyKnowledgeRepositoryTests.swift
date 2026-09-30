@@ -515,6 +515,27 @@ final class GRDBVocabularyKnowledgeRepositoryTests: XCTestCase {
         XCTAssertEqual(flagRows, 0)
     }
 
+    /// S22：知识态变更流——unit flag/link/事件写提交即 ping。
+    /// Reader 着色同步依赖（AI 制卡/挖词/太简单写后重取 state）。
+    /// 注：flags/links 是 WITHOUT ROWID 表，触发器是同事务的
+    /// `learning_unit_events` 行——测试走生产写路径 `setWordTooEasy`
+    /// （flag+事件同事务），不直插 flags。
+    func testKnowledgeChangesEmitsOnUnitWrites() async throws {
+        let lexeme = try await jmdictLexeme(entryID: 8, form: "変わる")
+        _ = try insertUnit(entryID: 8, lemma: "変わる")
+        let units = GRDBLearningUnitRepository(pool: pool)
+        var iterator = repository.knowledgeChanges()
+            .makeAsyncIterator()
+        // ValueObservation 订阅即发初始 ping——先取走，第二发
+        // 才证明写触发。
+        _ = try await iterator.next()
+        _ = try await units.setWordTooEasy(
+            lexemeID: lexeme.id, value: true,
+            operationID: UUID(), at: Date())
+        let second = try await iterator.next()
+        XCTAssertNotNil(second, "unit 事件写提交应触发变更信号")
+    }
+
     /// `lexeme_dictionary_bindings.status='current'` 优先于
     /// `lexemes.entry_id`——换库重绑后词级态跟新 entry 的 unit 走。
     func testBindingOverrideEntryWins() async throws {

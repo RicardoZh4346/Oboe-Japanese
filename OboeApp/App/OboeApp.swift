@@ -8,6 +8,12 @@ struct OboeApp: App {
     @State private var runtime = AppRuntimeController()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // iOS 26/27 下让二级页的 tab bar 隐藏标志在 UIKit 读它
+        // 之前落位（见 SecondaryPage.swift 说明）。
+        SecondaryPageTabBarHook.install()
+    }
+
     var body: some Scene {
         WindowGroup {
             AppSceneRoot(runtime: runtime)

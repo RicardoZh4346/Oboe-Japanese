@@ -210,10 +210,9 @@ struct ReviewView: View {
         }
         // S16（§12.2）：应用前后果确认——flag 是持久数据改动，
         // 先解释再提交；撤销窗口约 10 秒（横幅另提供）。
-        .confirmationDialog(
+        .alert(
             "标记为「太简单」？",
-            isPresented: $showingTooEasyConfirmation,
-            titleVisibility: .visible
+            isPresented: $showingTooEasyConfirmation
         ) {
             Button("太简单——本会话不再出现") {
                 Task { await model.applyTooEasy() }

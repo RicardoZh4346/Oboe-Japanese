@@ -24,6 +24,46 @@ private struct SecondaryPageModifier: ViewModifier {
     }
 }
 
+/// iOS 26/27 实测：`TabBarHidesOnPush` 的标记时机是被 push VC 首次
+/// 视图加载——而 UITabBarController 在 `pushViewController` 调用当下
+/// 就查询目标 VC 的 `hidesBottomBarWhenPushed`。标记晚于查询时
+/// push 进栈不带隐藏标志，pop 返回时 bar 走 SwiftUI 偏好恢复路径
+/// （转场结束后才出现，表现为 bar 晚到 + 整页内容上移）。
+///
+/// 确定性修法：在 `pushViewController` 执行前把标志落位。本 App 所
+/// 有 push 目标页都是二级页（`.secondaryPage()`），统一标记没有
+/// 误伤面；iPad/侧栏壳层没有 UITabBarController，标志天然无效。
+@MainActor
+enum SecondaryPageTabBarHook {
+    private static var installed = false
+
+    static func install() {
+        guard !installed else { return }
+        installed = true
+        let cls: AnyClass = UINavigationController.self
+        guard let original = class_getInstanceMethod(
+            cls,
+            #selector(UINavigationController.pushViewController(
+                _:animated:))),
+            let hooked = class_getInstanceMethod(
+                cls,
+                #selector(UINavigationController
+                    .oboe_pushViewController(_:animated:)))
+        else { return }
+        method_exchangeImplementations(original, hooked)
+    }
+}
+
+private extension UINavigationController {
+    @objc func oboe_pushViewController(
+        _ viewController: UIViewController, animated: Bool
+    ) {
+        viewController.hidesBottomBarWhenPushed = true
+        // 实现已与系统方法交换——这是原 pushViewController。
+        oboe_pushViewController(viewController, animated: animated)
+    }
+}
+
 /// 把 `hidesBottomBarWhenPushed` 标到承载本页的被 push VC 上。
 /// 沿 parent 链向上找到 UINavigationController 的直接子 VC——即
 /// 导航栈里真正被 push 的那个控制器。

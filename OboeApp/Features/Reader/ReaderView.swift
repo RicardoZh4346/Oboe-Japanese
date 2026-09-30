@@ -229,10 +229,11 @@ struct ReaderView: View {
                     .accessibilityIdentifier("reader-translation-menu")
                 }
                 // v0.7.5 S15：AI 学习入口——preparation 装配缺席
-                // （无形态分析）或文档未载入时隐藏。
-                if let aiStudy, aiStudy.preparation != nil,
-                   let document = model.document {
+                // （无形态分析）时隐藏；文档未载入时置灰而不是消
+                // 失（工具栏在加载前后保持同一组按钮，不跳变）。
+                if let aiStudy, aiStudy.preparation != nil {
                     Button {
+                        guard let document = model.document else { return }
                         aiStudyModel = ReaderAIStudyFlowModel(
                             context: aiStudyContext(
                                 documentID: document.id,
@@ -241,16 +242,21 @@ struct ReaderView: View {
                     } label: {
                         Label("AI 学习", systemImage: "sparkles")
                     }
+                    .disabled(model.document == nil)
                     .accessibilityIdentifier("reader-ai-study-button")
                 }
                 // S18：已绑定学习牌组 → 「打开牌组」入口（跨区
-                // 路由由壳层回调执行）。
-                if let onOpenDeck, let deckID = model.studyDeckID {
+                // 路由由壳层回调执行）。载入中按占位钮置灰、载入后
+                // 未绑定则隐藏——工具栏图标集不随加载态跳变。
+                if let onOpenDeck, model.isLoading || model.studyDeckID != nil {
                     Button {
-                        onOpenDeck(deckID)
+                        if let deckID = model.studyDeckID {
+                            onOpenDeck(deckID)
+                        }
                     } label: {
                         Label("学习牌组", systemImage: "rectangle.stack")
                     }
+                    .disabled(model.studyDeckID == nil)
                     .accessibilityIdentifier("reader-open-study-deck")
                 }
                 if mining != nil {
@@ -370,6 +376,9 @@ struct ReaderView: View {
         // S18：绑定变化（AI 学习建组/牌组删除 SET NULL/恢复替换）
         // 经共享流驱动——只重取绑定单行，不触发任何分析。
         .task { await model.observeLearningSurface() }
+        // 知识态变更（AI 制卡/挖词/太简单/笔记关联写提交）→ 重取
+        // state 重着色——不重分词，tokenCache 复用。
+        .task { await model.observeKnowledgeChanges() }
         // S17：章块集合变化（载入/切章/重链后重新取块）→ 译文
         // 水合——纯本地行重锚，零网络。
         .onChange(of: model.blocks, initial: true) { _, _ in

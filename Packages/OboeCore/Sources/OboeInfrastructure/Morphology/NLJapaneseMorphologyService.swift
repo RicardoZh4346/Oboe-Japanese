@@ -38,8 +38,9 @@ import OboeDomain
 ///   `lexicalKey` 留空，不自动挖词。
 public actor NLJapaneseMorphologyService: JapaneseMorphologyService {
 
-    /// 合并启发式版本（morphologyVersion 组成之二；选择规则变更 bump）。
-    public static let mergeHeuristicsVersion = "1.0.0"
+    /// 合并启发式版本（morphologyVersion 组成之二；选择/分类规则
+    /// 变更 bump）。1.0.1：功能词集 token 改判 functionWord（S22）。
+    public static let mergeHeuristicsVersion = "1.0.1"
 
     /// token cache 键的 morphologyVersion：规则表版本 × 合并启发式版本。
     public nonisolated var morphologyVersion: String {
@@ -230,15 +231,25 @@ public actor NLJapaneseMorphologyService: JapaneseMorphologyService {
                     ))
                     index += job.tokenCount
                 case .unresolvedSingle:
-                    let isAux = Self.isAuxiliaryFragment(token.surface)
+                    // 未解析也先查功能词表——缺条边界情形下助词
+                    // 不该以 auxiliary 身份漏进覆盖率/AI 候选。
+                    let unresolvedClass: ReaderTokenClass =
+                        Self.kanaFunctionWordPieces.contains(token.surface)
+                            ? .functionWord
+                            : (Self.isAuxiliaryFragment(token.surface)
+                                ? .auxiliary : .lexical)
                     emitted.append(makeToken(
                         surface: token.surface, range: token.rangeUTF16,
                         systemTokens: index..<(index + 1), candidates: [],
-                        tokenClass: isAux ? .auxiliary : .lexical,
+                        tokenClass: unresolvedClass,
                         status: .unresolved,
                         provenance: [
                             "nl.word-tokenizer",
-                            isAux ? "class.auxiliary.kanaFragment" : "class.lexical.oov",
+                            unresolvedClass == .functionWord
+                                ? "class.functionWord.unresolved"
+                                : (unresolvedClass == .auxiliary
+                                    ? "class.auxiliary.kanaFragment"
+                                    : "class.lexical.oov"),
                         ]
                     ))
                     index += 1
@@ -480,6 +491,15 @@ public actor NLJapaneseMorphologyService: JapaneseMorphologyService {
         let auxPOS: Set<String> = ["aux", "aux-v", "aux-adj", "aux-n", "cop"]
         let posUnion = Set(candidates.flatMap(\.posCodes))
         if !posUnion.isEmpty, posUnion.isSubset(of: auxPOS) { return .auxiliary }
+        // 语法功能词（は/が/を/に/の…，span 边界同一词表）——语法
+        // 黏着不算词汇学习目标：functionWord 出覆盖率分母，同时退
+        // 出 AI 候选（S22：AI 分析产生大量 に/は/の 待确认的根因
+        // 修复）。不按 posCodes 判 prt——候选 top-5 截断下 は 的
+        // prt 词条常落截断位之后（见 particleBoundary 注释），
+        // surface 词表是该服务已有的可操作化判据。
+        if Self.kanaFunctionWordPieces.contains(surface) {
+            return .functionWord
+        }
         if let previous,
            previous.tokenClass == .lexical || previous.tokenClass == .auxiliary,
            previous.surface.hasSuffix("て") || previous.surface.hasSuffix("で") {

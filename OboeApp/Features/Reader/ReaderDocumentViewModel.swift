@@ -142,6 +142,61 @@ final class ReaderDocumentViewModel {
         )
     }
 
+    /// 订阅知识态变更流——unit flag/link/事件写（挖词、太简单、
+    /// AI 制卡、笔记关联）提交即重取 state 重着色。修「AI 生成
+    /// 几百张卡但文章词色不变」：此前着色只在载章时算一次。
+    /// 流缺席/失流时静默降级为「只随载章更新」。
+    func observeKnowledgeChanges() async {
+        guard let tokenStates else { return }
+        do {
+            for try await _ in tokenStates.knowledgeChanges() {
+                guard !Task.isCancelled else { return }
+                await refreshTokenStates()
+            }
+        } catch is CancellationError {
+        } catch {
+            // 失流静默——着色退化为「只随载章更新」。
+        }
+    }
+
+    /// 知识态重着色：复用 `tokenCache`，只重走 lexeme 解析 +
+    /// 状态取数（两个批量 IN 查询），不重分词。失败保留现着色。
+    private func refreshTokenStates() async {
+        guard let tokenStates, !tokenCache.isEmpty else { return }
+        var keys = Set<LexicalKey>()
+        for tokens in tokenCache.values {
+            for token in tokens {
+                if let key = token.lexicalKey { keys.insert(key) }
+            }
+        }
+        do {
+            let lexemes = try await tokenStates.resolveLexemes(
+                keys: Array(keys)
+            )
+            let states = try await tokenStates.states(
+                lexemeIDs: lexemes.values.map(\.id)
+            )
+            var highlightMap: [UUID: [TokenHighlight]] = [:]
+            for (blockID, tokens) in tokenCache {
+                highlightMap[blockID] = tokens.map { token in
+                    let state = token.lexicalKey
+                        .flatMap { lexemes[$0] }
+                        .flatMap { states[$0.id] }
+                        ?? .unknown
+                    return TokenHighlight(
+                        blockID: blockID,
+                        utf16Range: token.sourceRangeUTF16,
+                        surface: token.surface,
+                        state: state
+                    )
+                }
+            }
+            highlights = highlightMap
+        } catch {
+            // 重取失败保留现着色——下次发射再试。
+        }
+    }
+
     // MARK: - 载入与恢复
 
     /// 进入文档：取章表 → 恢复位置（无位置则章0）→ 载章 →

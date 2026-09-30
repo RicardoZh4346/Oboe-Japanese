@@ -51,9 +51,20 @@ struct ReaderFeatureDependencies {
 /// 供准备期建 Job 与 Runner 派发装配，`units` 支撑预览计数与
 /// flag 状态。study deck 绑定走 `GRDBReaderStudyDeckService`
 /// 静态面（v24），恢复屏障登记走 `workGate`。
+/// 会话级共享 Runner 盒：sheet 关闭 / FlowModel 析构不中断派发
+/// （驱动 Task 持 actor 引用续跑到收束）；重进 adopt 时同一驱动
+/// `start` 幂等 no-op，驱动已消亡（重启/异常）则按 checkpoint
+/// 重驱动——lease/epoch 屏障保证重入安全。
+final class AIStudyRunnerBox: @unchecked Sendable {
+    var runner: AIStudyRunner?
+}
+
 struct ReaderAIStudyDependencies {
     /// Job/block/resolution/selection/receipt/cache 持久化（v25）。
     let store: GRDBAIStudyJobStore
+    /// 共享 Runner 持有盒（见 `AIStudyRunnerBox`）——允许离开分析
+    /// 页后台续跑、重进接管同一驱动。
+    let runnerBox = AIStudyRunnerBox()
     /// S13 应用事务（§4.3 receipt 幂等 + §11 物化接缝——词典
     /// 物化器已注入）。
     let applier: AIStudyApplyService
@@ -213,6 +224,16 @@ protocol ReaderRelinking: Sendable {
 protocol ReaderTokenStateProvider: Sendable {
     func resolveLexemes(keys: [LexicalKey]) async throws -> [LexicalKey: Lexeme]
     func states(lexemeIDs: [UUID]) async throws -> [UUID: VocabularyKnowledgeState]
+    /// 知识态变更信号（unit flag/link 写提交即发射）——Reader
+    /// 据此重取 state 重着色；默认实现为不发射的完结流（缺席依赖
+    /// 与测试替身无需实现）。
+    func knowledgeChanges() -> AsyncThrowingStream<Void, Error>
+}
+
+extension ReaderTokenStateProvider {
+    func knowledgeChanges() -> AsyncThrowingStream<Void, Error> {
+        AsyncThrowingStream { $0.finish() }
+    }
 }
 
 // MARK: - 编辑器装配（容器注入）

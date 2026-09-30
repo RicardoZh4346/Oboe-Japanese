@@ -290,10 +290,9 @@ struct VocabularyDetailView: View {
         } message: {
             Text(model.unitFlagErrorMessage ?? "未知错误")
         }
-        .confirmationDialog(
+        .alert(
             "标记为「太简单」？",
-            isPresented: $showingTooEasyConfirmation,
-            titleVisibility: .visible
+            isPresented: $showingTooEasyConfirmation
         ) {
             Button("太简单——不再进入学习计划") {
                 Task {

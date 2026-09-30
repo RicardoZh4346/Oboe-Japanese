@@ -1367,7 +1367,7 @@ public struct AIStudyPreparationService: Sendable {
                 guard let entryID = record.selectedEntryID,
                       let senseID = record.selectedSenseID,
                       let entry = manifestEntries[entryID],
-                      let manifestSense = entry.senses.first(
+                      entry.senses.contains(
                           where: { $0.id == senseID }) else {
                     // 词典快照缺 entry/sense——按待确认占位
                     // （不伪候选、不静默吞证据）。
@@ -1376,67 +1376,78 @@ public struct AIStudyPreparationService: Sendable {
                                     manifest: manifest))
                     continue
                 }
-                let sense = manifestSense.materialize()
-                guard let key = unitKey(
-                    entryID: entryID, sense: sense)
-                else {
-                    // 词典快照缺 entry/sense——按待确认占位
-                    // （不伪候选、不静默吞证据）。
-                    pendingItems.append(
-                        pendingItem(for: record, anchor: anchor,
-                                    manifest: manifest))
-                    continue
+                // 义项扩展（S22 用户裁决）：文中读音已确定（选定
+                // entry+sense）→ 该 occurrence 下此 entry 的全部
+                // 合法义项整体成卡，不再逐义项确认。合法集 = 请求
+                // 侧候选引用里此 entry 的 admissible senses（已做
+                // sense 级限制过滤的真子集）；引用缺席回退仅选定
+                // 义项。同词不同读音/义项分别解析时各自的扩展
+                // 自然并集——聚合键去重，不产生重复卡。
+                var senseIDs = anchor?.token.candidates
+                    .first(where: { $0.entryID == entryID })?
+                    .senses.map(\.senseID) ?? []
+                if !senseIDs.contains(senseID) {
+                    senseIDs.insert(senseID, at: 0)
                 }
                 let firstSentence = sentence(for: anchor)
-                if var aggregate = aggregates[key] {
-                    aggregate.item.occurrenceCount += 1
-                    aggregate.item.evidenceRevision = max(
-                        aggregate.item.evidenceRevision,
-                        record.revision)
-                    if let confidence = record.confidence,
-                       confidence
-                        < AIStudyBudget.lowConfidenceThreshold {
-                        aggregate.item.containsLowConfidence = true
+                for expandedSenseID in senseIDs {
+                    guard let expandedManifest = entry.senses.first(
+                        where: { $0.id == expandedSenseID })
+                    else { continue }
+                    let sense = expandedManifest.materialize()
+                    guard let key = unitKey(
+                        entryID: entryID, sense: sense)
+                    else { continue }
+                    if var aggregate = aggregates[key] {
+                        aggregate.item.occurrenceCount += 1
+                        aggregate.item.evidenceRevision = max(
+                            aggregate.item.evidenceRevision,
+                            record.revision)
+                        if let confidence = record.confidence,
+                           confidence
+                            < AIStudyBudget.lowConfidenceThreshold {
+                            aggregate.item.containsLowConfidence = true
+                        }
+                        if let confidence = record.confidence {
+                            aggregate.confidenceMin = min(
+                                aggregate.confidenceMin ?? confidence,
+                                confidence)
+                            aggregate.confidenceMax = max(
+                                aggregate.confidenceMax ?? confidence,
+                                confidence)
+                        }
+                        aggregates[key] = aggregate
+                    } else {
+                        let preferred = sense.preferredGlosses()
+                        aggregates[key] = Aggregate(
+                            item: AIStudyPreviewItem(
+                                unitKey: key,
+                                entryID: entryID,
+                                senseID: sense.id,
+                                headword: entry.primaryForm,
+                                reading: entry.readings.first?.reading,
+                                glossSummary: preferred?.glosses
+                                    .map(\.text).joined(separator: "; "),
+                                jlptLevel: nil,
+                                occurrenceCount: 1,
+                                firstSentence: firstSentence,
+                                firstLocator: anchor.map {
+                                    "第 \($0.chapterOrdinal + 1) 章 · 段 \($0.blockOrdinal + 1)"
+                                },
+                                evidenceRevision: record.revision,
+                                confidenceRange: nil,
+                                containsLowConfidence:
+                                    (record.confidence ?? 1)
+                                        < AIStudyBudget.lowConfidenceThreshold,
+                                existingUnitID: nil,
+                                unitIsTooEasy: false,
+                                linkedNotes: [],
+                                duplicateNotes: [],
+                                decision: nil,
+                                proposedAction: nil),
+                            confidenceMin: record.confidence,
+                            confidenceMax: record.confidence)
                     }
-                    if let confidence = record.confidence {
-                        aggregate.confidenceMin = min(
-                            aggregate.confidenceMin ?? confidence,
-                            confidence)
-                        aggregate.confidenceMax = max(
-                            aggregate.confidenceMax ?? confidence,
-                            confidence)
-                    }
-                    aggregates[key] = aggregate
-                } else {
-                    let preferred = sense.preferredGlosses()
-                    aggregates[key] = Aggregate(
-                        item: AIStudyPreviewItem(
-                            unitKey: key,
-                            entryID: entryID,
-                            senseID: sense.id,
-                            headword: entry.primaryForm,
-                            reading: entry.readings.first?.reading,
-                            glossSummary: preferred?.glosses
-                                .map(\.text).joined(separator: "; "),
-                            jlptLevel: nil,
-                            occurrenceCount: 1,
-                            firstSentence: firstSentence,
-                            firstLocator: anchor.map {
-                                "第 \($0.chapterOrdinal + 1) 章 · 段 \($0.blockOrdinal + 1)"
-                            },
-                            evidenceRevision: record.revision,
-                            confidenceRange: nil,
-                            containsLowConfidence:
-                                (record.confidence ?? 1)
-                                    < AIStudyBudget.lowConfidenceThreshold,
-                            existingUnitID: nil,
-                            unitIsTooEasy: false,
-                            linkedNotes: [],
-                            duplicateNotes: [],
-                            decision: nil,
-                            proposedAction: nil),
-                        confidenceMin: record.confidence,
-                        confidenceMax: record.confidence)
                 }
             case .lowConfidence, .unresolved, .rejected:
                 pendingItems.append(

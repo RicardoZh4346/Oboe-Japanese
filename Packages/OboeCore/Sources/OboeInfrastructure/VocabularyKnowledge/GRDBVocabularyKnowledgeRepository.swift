@@ -48,6 +48,13 @@ public final class GRDBVocabularyKnowledgeRepository: VocabularyKnowledgeReposit
         }
     }
 
+    /// 知识态变更流（同池 unit flag/link/事件写提交即 ping）——
+    /// Reader 着色/词典会话等消费方据此重取 `states()`。转发
+    /// `GRDBLearningUnitRepository.observeChanges`（同 DatabasePool）。
+    public func knowledgeChanges() -> AsyncThrowingStream<Void, Error> {
+        GRDBLearningUnitRepository(pool: pool).observeChanges()
+    }
+
     public func fetchLexeme(key: LexicalKey) async throws -> Lexeme? {
         try await pool.read { db in
             try Self.fetchLexemeRow(identityKey: key.identityKey, in: db)

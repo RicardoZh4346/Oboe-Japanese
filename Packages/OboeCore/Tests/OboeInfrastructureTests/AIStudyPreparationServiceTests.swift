@@ -30,7 +30,8 @@ final class AIStudyPreparationServiceTests: XCTestCase {
 
     /// 全文：chA 两块「猫が好き。」「犬も好き。」、chB 一块「鳥だ。」
     private func makeEnvironment(
-        chapterCount: Int = 2
+        chapterCount: Int = 2,
+        chapterABlockTexts: [String] = ["猫が好き。", "犬も好き。"]
     ) async throws -> Environment {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
@@ -72,18 +73,15 @@ final class AIStudyPreparationServiceTests: XCTestCase {
                 textUTF16Length: 10),
         ]
         var blocks: [UUID: [ReaderBlock]] = [
-            chapterAID: [
+            chapterAID: zip(
+                [blockA0, blockA1], chapterABlockTexts
+            ).enumerated().map { ordinal, pair in
                 ReaderBlock(
-                    id: blockA0, documentID: documentID,
-                    chapterID: chapterAID, ordinal: 0,
-                    text: "猫が好き。", textHash: "bh-a0",
-                    locatorJSON: nil),
-                ReaderBlock(
-                    id: blockA1, documentID: documentID,
-                    chapterID: chapterAID, ordinal: 1,
-                    text: "犬も好き。", textHash: "bh-a1",
-                    locatorJSON: nil),
-            ],
+                    id: pair.0, documentID: documentID,
+                    chapterID: chapterAID, ordinal: ordinal,
+                    text: pair.1, textHash: "bh-a\(ordinal)",
+                    locatorJSON: nil)
+            },
         ]
         if chapterCount > 1 {
             chapters.append(ReaderChapterMetadata(
@@ -186,6 +184,16 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         id: Int64, form: String, reading: String,
         senseID: Int64, gloss: String
     ) -> DictionaryEntry {
+        makeEntry(
+            id: id, form: form, reading: reading,
+            senses: [(id: senseID, gloss: gloss)])
+    }
+
+    /// 多义项版本（义项扩展测试用）——每 (id, gloss) 一个 sense。
+    private static func makeEntry(
+        id: Int64, form: String, reading: String,
+        senses: [(id: Int64, gloss: String)]
+    ) -> DictionaryEntry {
         DictionaryEntry(
             id: id, primaryForm: form, commonRank: nil,
             forms: [DictionaryForm(
@@ -194,11 +202,15 @@ final class AIStudyPreparationServiceTests: XCTestCase {
             readings: [DictionaryReading(
                 id: id * 10 + 1, reading: reading, noKanji: false,
                 restrictedFormIDs: [], restrictedForms: [])],
-            senses: [DictionarySense(
-                id: senseID, order: 1, posCodes: ["n"], tags: [],
-                glosses: [DictionaryGloss(
-                    language: "eng", text: gloss, order: 1,
-                    sourceID: "test", isMachineGenerated: false)])])
+            senses: senses.enumerated().map { order, sense in
+                DictionarySense(
+                    id: sense.id, order: order + 1,
+                    posCodes: ["n"], tags: [],
+                    glosses: [DictionaryGloss(
+                        language: "eng", text: sense.gloss,
+                        order: 1, sourceID: "test",
+                        isMachineGenerated: false)])
+            })
     }
 
     private func provider(_ state: AIStudyProviderReadiness.State)
@@ -485,6 +497,123 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         XCTAssertNotNil(summary.deckName)
     }
 
+    /// S22 义项扩展：选定 entry 的合法义项集整体成卡——entry 500
+    /// 三义项 → 三条 unit item（决议只选了首义项），同块 好き
+    /// 一条，共 4；聚合键去重，无重复 unit，零 pending。
+    func testBuildPreviewExpandsAllAdmissibleSenses() async throws {
+        let env = try await makeEnvironment(
+            chapterCount: 1,
+            chapterABlockTexts: ["多義が好き。", "犬も好き。"])
+        env.dictionary.stubbedEntries[500] = Self.makeEntry(
+            id: 500, form: "多義", reading: "たぎ", senses: [
+                (id: 501, gloss: "meaning A"),
+                (id: 502, gloss: "meaning B"),
+                (id: 503, gloss: "meaning C"),
+            ])
+        let report = try await env.service.preflight(
+            documentID: documentID,
+            request: AIStudyScopeRequest(choice: .wholeBook),
+            provider: provider(.ready))
+        let job = try await env.service.prepare(
+            documentID: documentID, report: report,
+            configuration: report.provider.resolved!)
+        let service = env.service
+        let runner = AIStudyRunner(
+            store: env.store,
+            planner: { job in
+                try await service.plannedBlocks(for: job)
+            },
+            sendRequest: { request in
+                Self.successResult(for: request)
+            })
+        try await runner.start(jobID: job.id)
+        await runner.waitUntilSettled(jobID: job.id)
+        try await env.service.finalizeResults(jobID: job.id)
+
+        let preview = try await env.service.buildPreview(jobID: job.id)
+        let expanded = preview.items.filter { $0.entryID == 500 }
+        XCTAssertEqual(expanded.count, 3,
+                       "选定 entry 的全部合法义项应整体成卡")
+        XCTAssertEqual(
+            Set(expanded.map(\.senseID)), [501, 502, 503])
+        XCTAssertEqual(Set(expanded.map(\.unitKey)).count, 3,
+                       "unitKey 按义项指纹区分——不塌缩不重复")
+        XCTAssertTrue(expanded.allSatisfy {
+            $0.glossSummary != nil && $0.firstSentence != nil
+        })
+        // 同块其它解析照常；总条目 = 3 义项 + 好き + 犬 = 5。
+        XCTAssertEqual(preview.items.count, 5)
+        // pending 里是 が/も 类无候选 unresolved（原设计）；已选定
+        // entry 的 token 绝不留在待确认队列。
+        XCTAssertFalse(preview.pending.contains {
+            $0.surface == "多義"
+        })
+    }
+
+    /// 歧义未决仍走 pending——扩展不适用于未选定 entry 的记录。
+    func testBuildPreviewUnresolvedStillPending() async throws {
+        let env = try await makeEnvironment(
+            chapterCount: 1,
+            chapterABlockTexts: ["多義が好き。", "犬も好き。"])
+        env.dictionary.stubbedEntries[500] = Self.makeEntry(
+            id: 500, form: "多義", reading: "たぎ", senses: [
+                (id: 501, gloss: "meaning A"),
+                (id: 502, gloss: "meaning B"),
+            ])
+        let report = try await env.service.preflight(
+            documentID: documentID,
+            request: AIStudyScopeRequest(choice: .wholeBook),
+            provider: provider(.ready))
+        let job = try await env.service.prepare(
+            documentID: documentID, report: report,
+            configuration: report.provider.resolved!)
+        let service = env.service
+        let runner = AIStudyRunner(
+            store: env.store,
+            planner: { job in
+                try await service.plannedBlocks(for: job)
+            },
+            sendRequest: { request in
+                // 全 unresolved——读音未定不得扩展。
+                let base = Self.successResult(for: request)
+                let block = request.blocks[0]
+                return AIStudyResolverResult(
+                    outcome: ValidatedBlockOutcome(
+                        blockKey: block.blockKey,
+                        lexicalStatus: .unresolved,
+                        translationStatus: .notRequested,
+                        translation: nil, envelopeRejection: nil,
+                        resolutions: base.outcome.resolutions.map {
+                            AIStudyResolution(
+                                tokenKey: $0.tokenKey, selected: nil,
+                                confidence: nil, status: .unresolved,
+                                reasonCode: .noCandidate, origin: .ai)
+                        },
+                        targetTokenCount: block.tokens.count,
+                        aiResolvedCount: 0, lowConfidenceCount: 0,
+                        unresolvedTokenCount: block.tokens.count,
+                        droppedUnknownTokenCount: 0,
+                        duplicateTokenCount: 0, malformedItemCount: 0,
+                        invalidItemCount: 0),
+                    requestHash: base.requestHash,
+                    requestID: base.requestID,
+                    providerKind: base.providerKind,
+                    model: base.model,
+                    promptVersion: base.promptVersion,
+                    responseMode: base.responseMode,
+                    suggestedRetryAfter: nil,
+                    responseBytes: base.responseBytes)
+            })
+        try await runner.start(jobID: job.id)
+        await runner.waitUntilSettled(jobID: job.id)
+        try await env.service.finalizeResults(jobID: job.id)
+
+        let preview = try await env.service.buildPreview(jobID: job.id)
+        XCTAssertTrue(preview.items.isEmpty,
+                      "读音未定的记录不产生义项扩展")
+        XCTAssertFalse(preview.pending.isEmpty)
+    }
+
     /// 已取消 Job 拒绝确认（jobNotConfirmable）。
     func testRecordSelectionsRejectsCancelledJob() async throws {
         let env = try await makeEnvironment(chapterCount: 1)
@@ -623,6 +752,9 @@ final class AIStudyPreparationServiceTests: XCTestCase {
                         rest = rest.dropFirst(1)
                     } else if rest.hasPrefix("好き") {
                         push("好き", .lexical, entryID: 200)
+                        rest = rest.dropFirst(2)
+                    } else if rest.hasPrefix("多義") {
+                        push("多義", .lexical, entryID: 500)
                         rest = rest.dropFirst(2)
                     } else if rest.hasPrefix("が")
                                 || rest.hasPrefix("も")

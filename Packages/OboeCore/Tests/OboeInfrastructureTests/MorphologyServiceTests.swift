@@ -115,6 +115,44 @@ final class MorphologyServiceTests: XCTestCase {
 
     // MARK: - OOV / 歧义 / 分类
 
+    /// S22：语法功能词（は/を/に/の…）记 auxiliary——退出覆盖率
+    /// 分母与 AI 候选（prt 词条常落 top-5 截断后，故以功能词集
+    /// 判定）；实义词不受波及。
+    func testParticlesClassifyAsFunctionWord() async throws {
+        let tokens = try await tokenize("猫は魚を食べた。")
+        for surface in ["は", "を"] {
+            let particle = try XCTUnwrap(
+                token(tokens, covering: surface),
+                "\(surface) 应为独立 token")
+            XCTAssertEqual(particle.tokenClass, .functionWord,
+                           "\(surface) 应记 functionWord（语法黏着）")
+            XCTAssertFalse(particle.tokenClass.countsForCoverage,
+                           "\(surface) 不计覆盖率分母/AI 候选")
+        }
+        let fish = try XCTUnwrap(token(tokens, covering: "食べた"))
+        XCTAssertEqual(fish.tokenClass, .lexical)
+        XCTAssertTrue(fish.tokenClass.countsForCoverage)
+    }
+
+    /// 同表功能词（の/に/が/も）与实义纯かな词的边界：后者（如
+    /// ここ/さくら 类非功能词集成员）仍按 lexical 计。
+    func testFunctionWordSetExcludedButRealKanaStaysLexical()
+        async throws {
+        let tokens = try await tokenize("私の猫がここにいる。")
+        for surface in ["の", "が", "に"] {
+            let particle = try XCTUnwrap(
+                token(tokens, covering: surface),
+                "\(surface) 应为独立 token，tokens: "
+                    + tokens.map(\.surface).joined(separator: "|"))
+            XCTAssertEqual(particle.tokenClass, .functionWord)
+        }
+        // ここ 不在功能词集——实义词保留 lexical。
+        if let koko = token(tokens, covering: "ここ") {
+            XCTAssertEqual(koko.tokenClass, .lexical)
+            XCTAssertTrue(koko.tokenClass.countsForCoverage)
+        }
+    }
+
     func testOOVKatakanaUnresolved() async throws {
         let tokens = try await tokenize("グスコーブドリの伝記を読んだ。")
         let token = try XCTUnwrap(token(tokens, covering: "グスコーブドリ"),

@@ -258,6 +258,12 @@ struct ReaderAIStudySheet: View {
                 .accessibilityIdentifier("ai-study-open-preview")
             default:
                 ProgressView("分析进行中——可在阅读页稍后查看")
+                // 重进接管：共享 Runner 驱动仍在 → 仅挂观察；驱动
+                // 已消亡 → adopt 内 `start` 幂等重驱动。
+                Button("查看进度") {
+                    Task { await adoptActiveJob(active) }
+                }
+                .accessibilityIdentifier("ai-study-watch-active")
             }
             Button("放弃并取消该分析", role: .destructive) {
                 Task {
@@ -296,10 +302,16 @@ struct ReaderAIStudySheet: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("取消", role: .cancel) {
-                Task { await model.cancel() }
+            HStack(spacing: OboeTheme.Spacing.lg) {
+                // 后台续跑：本地编排 Task 与 Runner 驱动都不挂在
+                // 本模型生命周期上——关闭弹层不取消分析。
+                Button("后台继续") { dismiss() }
+                    .accessibilityIdentifier("ai-study-background")
+                Button("取消", role: .cancel) {
+                    Task { await model.cancel() }
+                }
+                .accessibilityIdentifier("ai-study-cancel-prepare")
             }
-            .accessibilityIdentifier("ai-study-cancel-prepare")
         }
         .padding(OboeTheme.Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -323,6 +335,12 @@ struct ReaderAIStudySheet: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("ai-study-progress-text")
+            if let code = model.lastFailureCode {
+                Text(failureReasonText(code))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("ai-study-failure-reason")
+            }
             if model.isPaused {
                 Label(
                     pausedReasonText,
@@ -330,8 +348,13 @@ struct ReaderAIStudySheet: View {
                     .font(.footnote)
                     .foregroundStyle(.orange)
             }
+            Text("可离开本页——分析在后台继续，随时回来查看进度。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             Spacer()
             HStack(spacing: OboeTheme.Spacing.lg) {
+                Button("后台继续") { dismiss() }
+                    .accessibilityIdentifier("ai-study-background")
                 if model.isPaused {
                     Button("恢复") {
                         Task { await model.resume() }
@@ -352,6 +375,22 @@ struct ReaderAIStudySheet: View {
         }
         .padding(OboeTheme.Spacing.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 块失败归因码 → 用户可读文案（`last_error_code` 持久化值）。
+    private func failureReasonText(_ code: String) -> String {
+        switch code {
+        case AIStudyRunner.FailureCode.rateLimited:
+            "失败原因：Provider 限流——已自动重试，仍失败的可稍后重试。"
+        case AIStudyRunner.FailureCode.retryExhausted:
+            "失败原因：多次重试未成功——可在预览页重试失败段落。"
+        case AIStudyRunner.FailureCode.authFailed:
+            "失败原因：API Key 失效——修复后恢复分析。"
+        case AIStudyRunner.FailureCode.payloadMissing:
+            "失败原因：文档内容已变更——重新发起分析。"
+        default:
+            "失败原因：\(code)——可在预览页重试失败段落。"
+        }
     }
 
     private var pausedReasonText: String {

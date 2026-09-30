@@ -791,7 +791,10 @@ public enum GRDBAIStudyApplyService {
     }
 
     /// reader_blocks 重链（locator_json 优先，text_hash 兜底）——
-    /// 原文句只取该块文本，绝不整篇入库（有界裁剪 2000）。
+    /// 取 token 所在的**包含句**（`AIStudySentenceSegments` 确定性
+    /// 句界），不把整段进例句；锚点缺失/句界异常时回退块级有界
+    /// 裁剪。单个「句子」本身超长（无标点长文）时以 token 位置
+    /// 为中心开窗，保证例句有界且词出现在上下文里。
     static func readerBlockSentence(
         context: AIStudyApplyUnitContext,
         selection: AIStudyJobSelection,
@@ -816,8 +819,30 @@ public enum GRDBAIStudyApplyService {
             ])
         guard let text: String = row.flatMap({ $0["text"] }),
               !text.isEmpty else { return nil }
-        return String(text.prefix(
-            SourceContextDraft.maximumSurroundingCharacters))
+        let limit = SourceContextDraft.maximumSurroundingCharacters
+        guard let offset = anchor.location?.utf16Offset else {
+            return String(text.prefix(limit))
+        }
+        let units = Array(text.utf16)
+        guard offset >= 0, offset <= units.count else {
+            return String(text.prefix(limit))
+        }
+        // 单句硬上限——超过则以 token 为中心开窗。
+        let sentenceWindowCap = 480
+        for range in AIStudySentenceSegments.ranges(of: text)
+        where range.contains(offset) {
+            if range.count <= sentenceWindowCap {
+                return String(decoding: units[range], as: UTF16.self)
+            }
+            // 长句/无标点段：以 token 为基准取前后窗。
+            let spanStart = max(range.lowerBound,
+                                offset - sentenceWindowCap / 2)
+            let spanEnd = min(range.upperBound,
+                              spanStart + sentenceWindowCap)
+            return String(
+                decoding: units[spanStart..<spanEnd], as: UTF16.self)
+        }
+        return String(text.prefix(limit))
     }
 
     /// 来源写入：dedup key 命中即跳（幂等第四层）；`isPrimary` 依

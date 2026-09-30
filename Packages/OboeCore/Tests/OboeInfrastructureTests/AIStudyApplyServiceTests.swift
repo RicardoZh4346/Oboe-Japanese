@@ -945,6 +945,127 @@ final class AIStudyApplyServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - 例句提取（S22 修复：包含句而非整段）
+
+    /// 多句块：token 锚点 utf16Offset 指向第二句——例句只取
+    /// 包含句，不再整段前缀入卡。
+    func testReaderBlockSentenceExtractsContainingSentence()
+        async throws {
+        let env = try await makeEnvironment()
+        // 「彼は走った。」6 units，第二句起点 = utf16 offset 6。
+        let text = "彼は走った。猫は魚を食べた。空は青い。"
+        let tokenLocator = ReaderLocation(
+            chapterOrdinal: 0, blockOrdinal: 0, utf16Offset: 10,
+            blockTextHash: "bhash", prefix: "を食べ", suffix: "。空")
+        let tokenLocatorJSON = String(decoding:
+            try JSONEncoder().encode(tokenLocator), as: UTF8.self)
+        try await env.pool.write { db in
+            try db.execute(
+                sql: "UPDATE reader_blocks SET text = ? WHERE document_id = ?",
+                arguments: [text,
+                            DatabaseValueCodec.encode(env.documentID)])
+        }
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: tokenLocatorJSON,
+            tokenKey: "tok-0", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1)
+        let context = AIStudyApplyUnitContext(
+            jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            blocks: [env.block], resolutions: [resolution])
+        let selection = AIStudyJobSelection(
+            jobID: env.job.id,
+            unitKey: "jmdict:sense-v1:200:"
+                + String(repeating: "f", count: 64),
+            selectionRevision: 1, decision: .create,
+            evidenceRevision: 1)
+        let sentence = try await env.pool.read { db in
+            GRDBAIStudyApplyService.readerBlockSentence(
+                context: context, selection: selection, in: db)
+        }
+        XCTAssertEqual(sentence, "猫は魚を食べた。")
+    }
+
+    /// 无标点长句（>480 utf16）：以 token 位置为中心开窗——例句
+    /// 有界且目标词仍在上下文内。
+    func testReaderBlockSentenceBoundsPathologicalSentence()
+        async throws {
+        let env = try await makeEnvironment()
+        let text = String(repeating: "あ", count: 600)
+        let tokenLocator = ReaderLocation(
+            chapterOrdinal: 0, blockOrdinal: 0, utf16Offset: 400,
+            blockTextHash: "bhash", prefix: "", suffix: "")
+        let tokenLocatorJSON = String(decoding:
+            try JSONEncoder().encode(tokenLocator), as: UTF8.self)
+        try await env.pool.write { db in
+            try db.execute(
+                sql: "UPDATE reader_blocks SET text = ? WHERE document_id = ?",
+                arguments: [text,
+                            DatabaseValueCodec.encode(env.documentID)])
+        }
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+            documentID: env.documentID, locatorJSON: tokenLocatorJSON,
+            tokenKey: "tok-0", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1)
+        let context = AIStudyApplyUnitContext(
+            jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            blocks: [env.block], resolutions: [resolution])
+        let selection = AIStudyJobSelection(
+            jobID: env.job.id,
+            unitKey: "jmdict:sense-v1:200:"
+                + String(repeating: "f", count: 64),
+            selectionRevision: 1, decision: .create,
+            evidenceRevision: 1)
+        let sentence = try await env.pool.read { db in
+            GRDBAIStudyApplyService.readerBlockSentence(
+                context: context, selection: selection, in: db)
+        }
+        let result = try XCTUnwrap(sentence)
+        XCTAssertLessThanOrEqual(result.utf16.count, 480)
+        XCTAssertTrue(result.contains("あ"))
+    }
+
+    /// 锚点缺失（locator/sourceHash 皆空）→ nil——不伪造例句。
+    func testReaderBlockSentenceMissingAnchorReturnsNil()
+        async throws {
+        let env = try await makeEnvironment()
+        let resolution = AIStudyResolutionRecord(
+            id: UUID(), jobID: env.job.id, jobBlockID: nil,
+            documentID: env.documentID, locatorJSON: "",
+            tokenKey: "tok-0", requestHash: "rh-0",
+            selectedEntryID: 200, selectedSenseID: 7,
+            selectedDatasetVersion: "ds-test",
+            confidence: 0.9, status: .aiResolved, origin: .ai,
+            revision: 1, createdAtMs: 1)
+        var orphanBlock = env.block
+        orphanBlock.locatorJSON = ""
+        orphanBlock.sourceHash = ""
+        let context = AIStudyApplyUnitContext(
+            jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            blocks: [orphanBlock], resolutions: [resolution])
+        let selection = AIStudyJobSelection(
+            jobID: env.job.id,
+            unitKey: "jmdict:sense-v1:200:"
+                + String(repeating: "f", count: 64),
+            selectionRevision: 1, decision: .create,
+            evidenceRevision: 1)
+        let sentence = try await env.pool.read { db in
+            GRDBAIStudyApplyService.readerBlockSentence(
+                context: context, selection: selection, in: db)
+        }
+        XCTAssertNil(sentence)
+    }
+
     // MARK: - 环境
 
     private struct Environment {

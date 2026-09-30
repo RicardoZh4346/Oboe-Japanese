@@ -123,13 +123,12 @@ struct ReaderLibraryView: View {
                 Task { await model.importPastedText(text) }
             }
         }
-        .confirmationDialog(
+        .alert(
             "删除「\(deletingDocument?.title ?? "")」？",
             isPresented: Binding(
                 get: { deletingDocument != nil },
                 set: { if !$0 { deletingDocument = nil } }
-            ),
-            titleVisibility: .visible
+            )
         ) {
             Button("删除文档与本地文件", role: .destructive) {
                 if let document = deletingDocument {

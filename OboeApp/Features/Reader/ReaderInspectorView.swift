@@ -74,10 +74,9 @@ struct ReaderInspectorView: View {
         }
         // S16（§12.2）：Too Easy 写前给后果说明——作用于显式解析
         // 出的学习单元，不写 ReviewLog、不算评分。
-        .confirmationDialog(
+        .alert(
             "标记为「太简单」？",
-            isPresented: $showingTooEasyConfirmation,
-            titleVisibility: .visible
+            isPresented: $showingTooEasyConfirmation
         ) {
             Button("太简单——不再进入学习计划") {
                 model.setUnitTooEasy(true)
@@ -436,11 +435,14 @@ struct ReaderInspectorView: View {
             Button {
                 model.mine()
             } label: {
-                Label("挖词", systemImage: "plus.rectangle.on.rectangle")
+                // 图标+文字整体居中会让文字偏右——主操作只放文字，
+                // 视觉上「挖词」才是按钮正中心。
+                Text("挖词")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .disabled(!model.canMine)
+            .listRowSeparator(.hidden)
             .accessibilityIdentifier("inspector-mine")
             if model.canEditThenMine {
                 Button {
@@ -449,6 +451,7 @@ struct ReaderInspectorView: View {
                     Label("编辑后挖词", systemImage: "square.and.pencil")
                         .frame(maxWidth: .infinity)
                 }
+                .listRowSeparator(.hidden)
                 .accessibilityIdentifier("inspector-mine-edit")
             }
             // S13：以本句建 cloze 卡（blank = 点中 token）——不需
@@ -460,6 +463,7 @@ struct ReaderInspectorView: View {
                     .frame(maxWidth: .infinity)
             }
             .disabled(model.isBusy || model.targetDeckID == nil)
+            .listRowSeparator(.hidden)
             .accessibilityIdentifier("inspector-create-cloze")
         }
     }
