@@ -29,6 +29,15 @@
       ],
       "versions": [
         {
+          "version": "0.7.5",
+          "buildVersion": "58",
+          "date": "2026-10-01",
+          "downloadURL": "https://github.com/RicardoZh4346/Oboe-Japanese/releases/download/v0.7.5/Oboe-v0.7.5.ipa",
+          "size": 83387961,
+          "sha256": "76163163637b0baaed004e7b15eae1b5005e9f79cc3cf66955172388524ce806",
+          "minOSVersion": "17.0"
+        },
+        {
           "version": "0.7.0",
           "buildVersion": "51",
           "date": "2026-09-28",
