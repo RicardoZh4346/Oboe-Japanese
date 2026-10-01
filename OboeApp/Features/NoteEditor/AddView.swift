@@ -704,6 +704,8 @@ private struct KnowledgePointLifecycleSection: View {
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
             .disabled(isWorking)
             .accessibilityIdentifier("knowledge-delete-button")
         } header: {

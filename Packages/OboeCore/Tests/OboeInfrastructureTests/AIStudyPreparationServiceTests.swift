@@ -74,7 +74,7 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         ]
         var blocks: [UUID: [ReaderBlock]] = [
             chapterAID: zip(
-                [blockA0, blockA1], chapterABlockTexts
+                [blockA0, blockA1] + chapterABlockTexts.dropFirst(2).map { _ in UUID() }, chapterABlockTexts
             ).enumerated().map { ordinal, pair in
                 ReaderBlock(
                     id: pair.0, documentID: documentID,
@@ -497,11 +497,8 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         XCTAssertNotNil(summary.deckName)
     }
 
-    /// S22-B4 义项合并：选定 entry 的全部合法义项并入**一张**卡
-    /// （真机反馈裁决——不再一义项一卡）——entry 500 三义项 →
-    /// 一条 unit item，`mergedSenseIDs` 冻结合并集，unitKey 锚定
-    /// 代表义项（词典序最小 id）。
-    func testBuildPreviewMergesAllAdmissibleSenses() async throws {
+    /// 同一候选词有多个合法义项时，仅保存 AI 根据上下文选中的义项。
+    func testBuildPreviewUsesOnlySelectedContextualSense() async throws {
         let env = try await makeEnvironment(
             chapterCount: 1,
             chapterABlockTexts: ["多義が好き。", "犬も好き。"])
@@ -532,19 +529,18 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         try await env.service.finalizeResults(jobID: job.id)
 
         let preview = try await env.service.buildPreview(jobID: job.id)
-        let merged = preview.items.filter { $0.entryID == 500 }
-        XCTAssertEqual(merged.count, 1,
-                       "选定 entry 的全部合法义项并入一张卡")
-        let item = try XCTUnwrap(merged.first)
+        let selected = preview.items.filter { $0.entryID == 500 }
+        XCTAssertEqual(selected.count, 1,
+                       "单个选定义项只产生一行")
+        let item = try XCTUnwrap(selected.first)
         XCTAssertEqual(
-            item.mergedSenseIDs, [501, 502, 503],
-            "合并义项集整体冻结进 item")
+            item.mergedSenseIDs, [501],
+            "只冻结句中选择的义项")
         XCTAssertEqual(item.senseID, 501,
-                       "unitKey 锚定代表义项（词典序最小 id）")
+                       "unitKey 锚定实际选择的义项")
         XCTAssertTrue(
             item.glossSummary != nil && item.firstSentence != nil)
-        // 策略应用后 proposedAction 携带合并集——apply 侧物化
-        // 一卡多义（directions 载荷 + 冻结的 senseIDs）。
+        // 动作与卡面都不能带入未选中的其它候选释义。
         var appliedItems = preview.items
         AIStudySelectionStrategy.all.apply(
             to: &appliedItems, studyDeckID: nil,
@@ -552,17 +548,108 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         let applied = try XCTUnwrap(
             appliedItems.first { $0.entryID == 500 })
         if case .createNote(_, let senseIDs) = applied.proposedAction {
-            XCTAssertEqual(senseIDs, [501, 502, 503])
+            XCTAssertEqual(senseIDs, [501])
         } else {
-            XCTFail("合并义项 item 的默认动作应是 createNote")
+            XCTFail("选定义项的默认动作应是 createNote")
         }
-        // 同块其它解析照常；总条目 = 合并一卡 + 好き + 犬 = 3。
+        _ = try await env.service.recordSelections(
+            jobID: job.id, preview: preview, items: appliedItems,
+            correctedPending: preview.pending)
+        let applier = AIStudyApplyService(pool: env.pool,
+            unitSources: DictionaryAIStudyUnitSourceProvider(repository: env.dictionary))
+        let result = try await applier.applyConfirmedJob(jobID: job.id)
+        XCTAssertTrue(result.failedUnits.isEmpty, "\(result.failedUnits)")
+        let meaning = try await env.pool.read { db in
+            try String.fetchOne(db, sql: "SELECT meaning_zh FROM notes WHERE headword = '多義'")
+        }
+        XCTAssertEqual(meaning, "meaning A")
+
+        // 同块其它解析照常；总条目 = 所选义项 + 好き + 犬 = 3。
         XCTAssertEqual(preview.items.count, 3)
         // pending 里是 が/も 类无候选 unresolved（原设计）；已选定
         // entry 的 token 绝不留在待确认队列。
         XCTAssertFalse(preview.pending.contains {
             $0.surface == "多義"
         })
+    }
+
+    func testDifferentContextualSensesCreateSeparateNotesAndKeepEvidence() async throws {
+        let env = try await makeEnvironment(chapterCount: 1,
+            chapterABlockTexts: ["多義が好き。", "多義も好き。", "多義だ。"])
+        env.dictionary.stubbedEntries[500] = Self.makeEntry(id: 500, form: "多義", reading: "たぎ",
+            senses: [(501, "meaning A"), (502, "meaning B"), (503, "unused meaning C")])
+        let report = try await env.service.preflight(documentID: documentID,
+            request: AIStudyScopeRequest(choice: .wholeBook), provider: provider(.ready))
+        let job = try await env.service.prepare(documentID: documentID, report: report,
+            configuration: report.provider.resolved!)
+        let service = env.service
+        let runner = AIStudyRunner(store: env.store,
+            planner: { try await service.plannedBlocks(for: $0) },
+            sendRequest: { Self.successResult(for: $0, contextualSenses: true) })
+        try await runner.start(jobID: job.id)
+        await runner.waitUntilSettled(jobID: job.id)
+        try await service.finalizeResults(jobID: job.id)
+        let preview = try await service.buildPreview(jobID: job.id)
+        let polysemous = preview.items.filter { $0.entryID == 500 }
+        XCTAssertEqual(Set(polysemous.map(\.senseID)), [501, 502])
+        XCTAssertEqual(Set(polysemous.map(\.unitKey)).count, 2)
+        XCTAssertEqual(polysemous.first { $0.senseID == 501 }?.occurrenceCount, 2)
+        XCTAssertEqual(polysemous.first { $0.senseID == 502 }?.occurrenceCount, 1)
+        XCTAssertEqual(polysemous.first { $0.senseID == 501 }?.firstSentence, "多義が好き。")
+        XCTAssertEqual(polysemous.first { $0.senseID == 502 }?.firstSentence, "多義も好き。")
+        var items = preview.items
+        AIStudySelectionStrategy.all.apply(to: &items, studyDeckID: nil,
+            directions: Set(VocabularyCardDirection.allCases))
+        _ = try await service.recordSelections(jobID: job.id, preview: preview, items: items,
+            correctedPending: preview.pending)
+        let applier = AIStudyApplyService(pool: env.pool,
+            unitSources: DictionaryAIStudyUnitSourceProvider(repository: env.dictionary))
+        let applied = try await applier.applyConfirmedJob(jobID: job.id)
+        XCTAssertTrue(applied.failedUnits.isEmpty, "\(applied.failedUnits)")
+        try await env.pool.read { db in
+            let notes = try Row.fetchAll(db, sql: """
+                SELECT n.meaning_zh, e.japanese, e.translation_zh,
+                       (SELECT COUNT(*) FROM cards c WHERE c.note_id = n.id) AS card_count
+                FROM notes n JOIN examples e ON e.note_id = n.id
+                WHERE n.headword = '多義' ORDER BY n.meaning_zh
+                """)
+            XCTAssertEqual(notes.count, 2)
+            for (index, row) in notes.enumerated() {
+                let meaning: String = row["meaning_zh"]
+                let sentence: String = row["japanese"]
+                let translation: String = row["translation_zh"]
+                let cardCount: Int = row["card_count"]
+                XCTAssertEqual(meaning, index == 0 ? "meaning A" : "meaning B")
+                XCTAssertEqual(sentence, index == 0 ? "多義が好き。" : "多義も好き。")
+                XCTAssertEqual(translation, "句译-\(sentence)")
+                XCTAssertEqual(cardCount, 3)
+            }
+        }
+        try await env.pool.read { db in
+            let mapped = try Row.fetchAll(db, sql: """
+                SELECT r.selected_sense_id, r.unit_id, o.unit_id AS occurrence_unit_id
+                FROM ai_study_resolutions r JOIN reader_study_occurrences o ON o.resolution_id = r.id
+                WHERE r.job_id = ? AND r.selected_entry_id = 500
+                """, arguments: [DatabaseValueCodec.encode(job.id)])
+            XCTAssertEqual(mapped.count, 3)
+            var units: [Int64: String] = [:]
+            for row in mapped {
+                let sense: Int64 = row["selected_sense_id"]
+                let unit: String? = row["unit_id"]
+                let occurrenceUnit: String? = row["occurrence_unit_id"]
+                XCTAssertNotNil(unit)
+                XCTAssertEqual(unit, occurrenceUnit)
+                if let previous = units[sense] { XCTAssertEqual(previous, unit) }
+                units[sense] = unit
+            }
+            XCTAssertNotEqual(units[501], units[502])
+        }
+        // 同任务重放不复制任何 Note/Card。
+        _ = try await applier.applyConfirmedJob(jobID: job.id)
+        let noteCount = try await countRows("notes", in: env.pool)
+        let cardCount = try await countRows("cards", in: env.pool)
+        XCTAssertEqual(noteCount, 3)
+        XCTAssertEqual(cardCount, 9)
     }
 
     /// 歧义未决仍走 pending——扩展不适用于未选定 entry 的记录。
@@ -633,6 +720,14 @@ final class AIStudyPreparationServiceTests: XCTestCase {
     /// `aiSuggested`——预览层暴露「采纳 AI 建议」入口；
     /// unresolved（无选定）行的 `aiSuggested` 为 nil。
     func testLowConfidencePendingCarriesAISuggestion() async throws {
+        try await verifyLowConfidenceSelection(changeSuggestedSense: false)
+    }
+
+    func testLowConfidenceUserCanChooseDifferentSense() async throws {
+        try await verifyLowConfidenceSelection(changeSuggestedSense: true)
+    }
+
+    private func verifyLowConfidenceSelection(changeSuggestedSense: Bool) async throws {
         let env = try await makeEnvironment(
             chapterCount: 1,
             chapterABlockTexts: ["多義が好き。", "犬も好き。"])
@@ -669,7 +764,8 @@ final class AIStudyPreparationServiceTests: XCTestCase {
                             confidence: 0.3,
                             status: .lowConfidence,
                             reasonCode: .belowConfidenceThreshold,
-                            origin: .ai)
+                            origin: .ai,
+                            sentenceTranslation: res.sentenceTranslation)
                     }
                     return res
                 }
@@ -701,7 +797,7 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         await runner.waitUntilSettled(jobID: job.id)
         try await env.service.finalizeResults(jobID: job.id)
 
-        let preview = try await env.service.buildPreview(jobID: job.id)
+        var preview = try await env.service.buildPreview(jobID: job.id)
         XCTAssertTrue(preview.items.isEmpty,
                       "全部低置信——无自动入选项")
         let suggested = preview.pending.filter { $0.aiSuggested != nil }
@@ -718,6 +814,134 @@ final class AIStudyPreparationServiceTests: XCTestCase {
         for item in preview.pending where item.aiSuggested == nil {
             XCTAssertEqual(item.status, .unresolved)
         }
+        let progress = try await env.store.activeJobProgress()[documentID]
+        XCTAssertEqual(progress?.confirmedUnits, 0)
+        XCTAssertEqual(progress?.pendingUnits, preview.pending.count)
+        // 模拟 UI 一键采纳，再走真实 Dictionary provider + SQLite 应用。
+        for index in preview.pending.indices {
+            guard let candidate = preview.pending[index].aiSuggested else { continue }
+            preview.pending[index].correctedSelection = AIStudySelection(
+                provider: "jmdict", entryID: candidate.entryID,
+                senseID: changeSuggestedSense && candidate.entryID == 500 ? 502 : candidate.senseID,
+                datasetVersion: "ds-test")
+        }
+        _ = try await env.service.recordSelections(
+            jobID: job.id, preview: preview, items: preview.items,
+            correctedPending: preview.pending)
+        let selectionCount = try await countRows("ai_study_selections", in: env.pool)
+        XCTAssertEqual(selectionCount, 3, "多義/好き/犬必须保存为三条选择")
+        let applier = AIStudyApplyService(
+            pool: env.pool,
+            unitSources: DictionaryAIStudyUnitSourceProvider(repository: env.dictionary))
+        let applied = try await applier.applyConfirmedJob(jobID: job.id)
+        XCTAssertTrue(applied.failedUnits.isEmpty, "失败结果：\(applied.failedUnits)")
+        let notes = try await countRows("notes", in: env.pool)
+        XCTAssertEqual(notes, 3)
+        let cards = try await countRows("cards", in: env.pool)
+        XCTAssertEqual(cards, 3 * VocabularyCardDirection.allCases.count)
+        let remaining = try await env.store.activeJobProgress()[documentID]
+        XCTAssertNil(remaining, "全部应用后不再出现活跃分析行")
+        let userResolutions = try await env.pool.read { db in
+            try GRDBAIStudyJobStore.fetchResolutions(jobID: job.id, in: db).filter { $0.origin == .user }
+        }
+        XCTAssertTrue(userResolutions.allSatisfy {
+            $0.jobBlockID != nil && $0.sentenceTranslation ==
+                (changeSuggestedSense && $0.selectedEntryID == 500 ? nil : "测试句译")
+        })
+        let meaning = try await env.pool.read { db in
+            try String.fetchOne(db, sql: "SELECT meaning_zh FROM notes WHERE headword = '多義'")
+        }
+        XCTAssertEqual(meaning, changeSuggestedSense ? "meaning B" : "meaning A")
+        // 同词在两块出现也都挂到最终制卡的 unit，修正计数不会留旧 pending。
+        let dangling = try await env.pool.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM reader_study_occurrences WHERE resolution_status = 'userConfirmed' AND unit_id IS NULL")
+        }
+        XCTAssertEqual(dangling, 0)
+
+
+    }
+
+    private func lowConfidenceFixture() async throws -> (Environment, AIStudyJob, AIStudyPreview) {
+        let env = try await makeEnvironment(chapterCount: 1)
+        let report = try await env.service.preflight(documentID: documentID,
+            request: AIStudyScopeRequest(choice: .wholeBook), provider: provider(.ready))
+        let job = try await env.service.prepare(documentID: documentID,
+            report: report, configuration: report.provider.resolved!)
+        let service = env.service
+        let runner = AIStudyRunner(store: env.store,
+            planner: { try await service.plannedBlocks(for: $0) },
+            sendRequest: { Self.successResult(for: $0) })
+        try await runner.start(jobID: job.id)
+        await runner.waitUntilSettled(jobID: job.id)
+        try await service.finalizeResults(jobID: job.id)
+        try await env.pool.write { db in
+            try db.execute(sql: "UPDATE ai_study_resolutions SET status = 'lowConfidence'")
+        }
+        return (env, job, try await service.buildPreview(jobID: job.id))
+    }
+
+    func testPendingProgressTracksLatestResolutionAndObservation() async throws {
+        let (env, job, preview) = try await lowConfidenceFixture()
+        let stream = env.store.observeActiveJobProgress()
+        var iterator = stream.makeAsyncIterator()
+        let initial = try await iterator.next()
+        XCTAssertEqual(initial?[documentID]?.pendingUnits, preview.pending.count)
+        let pending = try XCTUnwrap(preview.pending.first { $0.aiSuggested != nil })
+        let previous = try await env.pool.read { db in
+            try GRDBAIStudyJobStore.fetchResolutions(jobID: job.id, in: db).first { $0.id == pending.resolutionID }
+        }
+        let old = try XCTUnwrap(previous)
+        let replacement = AIStudyResolutionRecord(id: UUID(), jobID: old.jobID,
+            jobBlockID: old.jobBlockID, documentID: old.documentID,
+            locatorJSON: old.locatorJSON, tokenKey: old.tokenKey,
+            requestHash: old.requestHash, selectedEntryID: old.selectedEntryID,
+            selectedSenseID: old.selectedSenseID,
+            selectedDatasetVersion: old.selectedDatasetVersion,
+            confidence: old.confidence, status: .userConfirmed, origin: .user,
+            revision: old.revision + 1, createdAtMs: old.createdAtMs)
+        // 不写 Job 行：观察必须跟踪 resolutions 表本身。
+        try await env.pool.write { db in
+            try GRDBAIStudyJobStore.insertResolution(replacement, documentID: job.documentID, in: db)
+        }
+        let update = try await iterator.next()
+        XCTAssertEqual(update?[documentID]?.pendingUnits, preview.pending.count - 1)
+        XCTAssertEqual(update?[documentID]?.confirmedUnits, 0)
+    }
+
+    func testConfirmationRejectsMissingManifestWithoutWrites() async throws {
+        let (env, job, preview) = try await lowConfidenceFixture()
+        try await env.pool.write { db in
+            try db.execute(sql: "DELETE FROM ai_study_job_manifests")
+        }
+        do {
+            _ = try await env.service.recordSelections(jobID: job.id, preview: preview,
+                items: preview.items, correctedPending: preview.pending)
+            XCTFail("缺少快照必须显式失败")
+        } catch let error as AIStudyPreparationService.PreparationError {
+            XCTAssertEqual(error, .manifestMissing(jobID: job.id))
+        }
+        let selections = try await countRows("ai_study_selections", in: env.pool)
+        XCTAssertEqual(selections, 0)
+        let notes = try await countRows("notes", in: env.pool)
+        XCTAssertEqual(notes, 0)
+    }
+
+    func testCorrectionRejectsCandidateBorrowedFromAnotherToken() async throws {
+        let (env, job, snapshot) = try await lowConfidenceFixture()
+        var preview = snapshot
+        let index = try XCTUnwrap(preview.pending.firstIndex { $0.aiSuggested?.entryID == 100 })
+        preview.pending[index].correctedSelection = AIStudySelection(provider: "jmdict",
+            entryID: 300, senseID: 301, datasetVersion: "ds-test")
+        // 犬在 manifest 中存在，但不属于猫的候选集，不能借用。
+        do {
+            _ = try await env.service.recordSelections(jobID: job.id, preview: preview,
+                items: preview.items, correctedPending: preview.pending)
+            XCTFail("跨 token 候选必须拒绝")
+        } catch let error as AIStudyPreparationService.PreparationError {
+            XCTAssertEqual(error, .invalidCorrection(tokenKey: preview.pending[index].tokenKey))
+        }
+        let selections = try await countRows("ai_study_selections", in: env.pool)
+        XCTAssertEqual(selections, 0)
     }
 
     /// 已取消 Job 拒绝确认（jobNotConfirmable）。
@@ -909,7 +1133,7 @@ final class AIStudyPreparationServiceTests: XCTestCase {
     /// 其候选 (entryID, senseID)，其余 unresolved——成果与请求
     /// 自洽（tokenKey 取 `AIStudyToken.tokenID`）。
     private static func successResult(
-        for request: AIStudyRequest
+        for request: AIStudyRequest, contextualSenses: Bool = false
     ) -> AIStudyResolverResult {
         let block = request.blocks[0]
         var resolutions: [AIStudyResolution] = []
@@ -922,12 +1146,13 @@ final class AIStudyPreparationServiceTests: XCTestCase {
                     selected: AIStudySelection(
                         provider: "jmdict",
                         entryID: candidate.entryID,
-                        senseID: sense.senseID,
+                        senseID: contextualSenses && candidate.entryID == 500 && block.targetText.contains("も") ? 502 : sense.senseID,
                         datasetVersion: request.metadata
                             .dictionaryDatasetVersion),
                     confidence: 0.92,
                     status: .aiResolved,
-                    reasonCode: nil, origin: .ai))
+                    reasonCode: nil, origin: .ai,
+                    sentenceTranslation: contextualSenses ? "句译-\(block.targetText)" : "测试句译"))
                 resolvedCount += 1
             } else {
                 resolutions.append(AIStudyResolution(

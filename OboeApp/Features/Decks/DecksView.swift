@@ -207,6 +207,7 @@ struct DecksView: View {
             // 一级页不声明 Tab Bar 可见性：钉住 .visible 会在新系统上
             // 盖住二级页 secondaryPage() 的 .hidden。pop 返回由系统
             // 自动恢复 Tab Bar。
+            .primaryPage()
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     NavigationLink {

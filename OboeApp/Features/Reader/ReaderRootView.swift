@@ -82,6 +82,7 @@ struct ReaderRootView: View {
                 onOpenDeck: openDeck,
                 onDocumentDeleted: documentWasDeleted
             )
+                .primaryPage()
                 .navigationDestination(for: UUID.self) { id in
                     ReaderView(
                         model: ReaderDocumentViewModel(

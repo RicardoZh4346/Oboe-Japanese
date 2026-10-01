@@ -848,6 +848,8 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
             .disabled(isSavingAIConfiguration || isTestingAIConnection)
             .accessibilityIdentifier("ai-remove-key-button")
         }

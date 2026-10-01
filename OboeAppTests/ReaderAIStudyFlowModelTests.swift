@@ -451,6 +451,101 @@ final class ReaderAIStudyFlowModelTests: XCTestCase {
             .correctedSelection)
     }
 
+    /// 真实建卡→删除→再分析：预览新增，但删除保护不能在摘要中消失。
+    func testDeletedContentRebuildsByDefaultAfterConfirm() async throws {
+        let env = try await makeEnvironment()
+        let first = makeModel(env)
+        await first.adopt(job: try await makeAwaitingJob(env))
+        await first.confirm()
+        XCTAssertEqual(first.summary?.createdNoteCount, 3)
+        try await env.pool.write { db in
+            try db.execute(sql: "DELETE FROM notes")
+        }
+        let diagnostics = try await env.preparation.applicationDiagnostics(jobID: try XCTUnwrap(first.currentJobID))
+        XCTAssertTrue(diagnostics.contains("结果=createdNote"))
+        XCTAssertTrue(diagnostics.contains("原提交卡数=3 当前卡数=0"), "删除后历史提交与当前卡数都可追溯")
+        let second = makeModel(env)
+        await second.adopt(job: try await makeAwaitingJob(env))
+        XCTAssertEqual(second.deletedCreateCount, 3)
+        XCTAssertTrue(second.canConfirm, "确认生成默认允许重新创建，无需开关")
+        await second.confirm()
+        XCTAssertEqual(second.summary?.createdNoteCount, 3)
+        XCTAssertEqual(second.summary?.createdCardCount, 9)
+        XCTAssertEqual(second.summary?.deletedContentCount, 0)
+    }
+
+    func testCreateDecisionRebuildsIfDeletedAfterPreview() async throws {
+        let env = try await makeEnvironment()
+        let first = makeModel(env)
+        await first.adopt(job: try await makeAwaitingJob(env))
+        await first.confirm()
+        let second = makeModel(env)
+        await second.adopt(job: try await makeAwaitingJob(env))
+        for item in second.preview?.items ?? [] {
+            second.setDecision(for: item.unitKey, decision: .create)
+        }
+        XCTAssertEqual(second.deletedCreateCount, 0, "预览时仍有链接")
+        try await env.pool.write { db in try db.execute(sql: "DELETE FROM notes") }
+        await second.confirm()
+        XCTAssertEqual(second.summary?.createdNoteCount, 3)
+        XCTAssertEqual(second.summary?.createdCardCount, 9)
+    }
+
+    func testDeletedContentIsCountedAndCanRetryFromSummary() async throws {
+        let env = try await makeEnvironment()
+        let first = makeModel(env)
+        await first.adopt(job: try await makeAwaitingJob(env))
+        await first.confirm()
+        try await env.pool.write { db in try db.execute(sql: "DELETE FROM notes") }
+        let job = try await makeAwaitingJob(env)
+        let preview = try await env.preparation.buildPreview(jobID: job.id)
+        var items = preview.items
+        AIStudySelectionStrategy.all.apply(to: &items, studyDeckID: job.studyDeckID,
+            directions: Set(VocabularyCardDirection.allCases))
+        _ = try await env.preparation.recordSelections(jobID: job.id, preview: preview,
+            items: items, correctedPending: preview.pending)
+        let report = try await env.applier.applyConfirmedJob(jobID: job.id)
+        let summary = try await env.preparation.summary(jobID: job.id, report: report,
+            unselectedCount: 0, pendingCount: 0)
+        XCTAssertEqual(summary.deletedContentCount, 3)
+        XCTAssertEqual(summary.skippedCount, 3)
+        XCTAssertEqual(summary.status, .partiallyCompleted)
+        let retry = makeModel(env)
+        let retryJob = try await env.store.fetchJob(id: job.id)
+        await retry.adopt(job: try XCTUnwrap(retryJob))
+        await retry.confirm()
+        XCTAssertEqual(retry.summary?.createdCardCount, 9)
+    }
+
+    func testMissingNoteFailureIsNotDoubleCountedAsSkip() async throws {
+        let env = try await makeEnvironment()
+        let job = try await makeAwaitingJob(env)
+        let report = AIStudyApplyReport(jobID: job.id, entryStatus: .applying,
+            finalStatus: .partiallyCompleted, units: [
+                .init(unitKey: "failed", kind: .failed, errorCode: "noteMissing"),
+                .init(unitKey: "skip", kind: .skippedNoteMissing, errorCode: "noteMissing")
+            ])
+        let summary = try await env.preparation.summary(jobID: job.id, report: report,
+            unselectedCount: 0, pendingCount: 0)
+        XCTAssertEqual(summary.failedUnitCount, 1)
+        XCTAssertEqual(summary.skippedCount, 1)
+        XCTAssertEqual(summary.alreadyAppliedCount, 0)
+    }
+
+    func testReceiptReplayIsVisibleAndDoesNotCountOldCardsAsNew() async throws {
+        let env = try await makeEnvironment()
+        let job = try await makeAwaitingJob(env)
+        let model = makeModel(env)
+        await model.adopt(job: job)
+        await model.confirm()
+        let replay = try await env.applier.applyConfirmedJob(jobID: job.id)
+        let summary = try await env.preparation.summary(jobID: job.id, report: replay,
+            unselectedCount: 0, pendingCount: 0)
+        XCTAssertEqual(summary.createdNoteCount, 0)
+        XCTAssertEqual(summary.createdCardCount, 0)
+        XCTAssertEqual(summary.alreadyAppliedCount, 3)
+    }
+
     /// 确认 → 选择 revision 落库 → 应用 → 摘要（含牌组导航锚）。
     func testConfirmAppliesAndSummarizes() async throws {
         let env = try await makeEnvironment()
@@ -474,6 +569,25 @@ final class ReaderAIStudyFlowModelTests: XCTestCase {
                 jobID: job.id, in: db)
         }
         XCTAssertEqual(selections.count, 3)
+    }
+
+    func testAcceptingSuggestionsCreatesCardsInChosenDirection() async throws {
+        let env = try await makeEnvironment()
+        let job = try await makeAwaitingJob(env)
+        try await env.pool.write { db in
+            try db.execute(sql: "UPDATE ai_study_resolutions SET status = 'lowConfidence'")
+        }
+        let model = makeModel(env)
+        await model.adopt(job: job)
+        XCTAssertFalse(model.canConfirm)
+        XCTAssertEqual(model.acceptAllAISuggestions(), 4)
+        XCTAssertTrue(model.canConfirm)
+        model.directionPreset = .japaneseToChinese
+        await model.confirm()
+        XCTAssertEqual(model.phase, .summary)
+        XCTAssertEqual(model.summary?.createdNoteCount, 3)
+        XCTAssertEqual(model.summary?.createdCardCount, 3)
+        XCTAssertTrue(model.applyFailures.isEmpty)
     }
 
     /// Job epoch 在确认前漂移 → stalePreview → 回预览相位并提示。

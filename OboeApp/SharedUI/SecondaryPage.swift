@@ -1,32 +1,39 @@
 import SwiftUI
 import UIKit
+import Observation
 
-/// 二级页面统一修饰符（v0.5.5）：从「今日」「牌组」「设置」三个一级
-/// Tab 页 push 出去的页面一律隐藏底部 Tab Bar。
-///
-/// iOS 上隐藏状态沿导航栈继承——二级页继续 push 的三级页（知识点
-/// 详情、词条详情、AI 修卡建议预览等）同样不显示 Tab Bar，无需在
-/// 每个深链页重复标注；返回一级页时系统自动恢复。
-///
-/// 双轨隐藏（第三轮真机反馈裁决）：
-/// - **SwiftUI 偏好轨** `.toolbar(.hidden, for: .tabBar)`：iOS 26+
-///   的悬浮 tab bar 不走 UITabBarController 承载，`hidesBottomBarWhenPushed`
-///   对它完全无效（真机实测标记落位但 bar 不消失）——悬浮 bar 只认
-///   SwiftUI 偏好，本轨道是 iOS 26 上唯一有效通道。
-/// - **UIKit 轨** `hidesBottomBarWhenPushed`（`SecondaryPageTabBarHook`
-///   在 push 当下落位，Anchor 兜底）：在 UITabBarController 承载的
-///   环境上仍负责转场同步隐藏。
-/// 两轨同向叠加：任一侧先生效都能隐藏；pop 恢复由各自机制处理，
-/// SwiftUI 偏好随页面离栈即时结算，不再有「转场结束后才恢复」的
-/// 晚到窗口（此前晚到是 UIKit 单轨下 pop 走偏好回弹路径所致）。
-///
-/// sheet / fullScreenCover 会覆盖整个窗口（含 Tab Bar），不需要
-/// 使用本修饰符。
+/// CompactShell 持有可观察显隐状态；导航操作开始时同步更新，避免
+/// pop 结束后才移除目的地 toolbar 偏好造成内容再次改变 safe area。
+@MainActor
+@Observable
+final class NavigationTabBarVisibility {
+    var isHidden = false
+}
+
 private struct SecondaryPageModifier: ViewModifier {
+    @Environment(NavigationTabBarVisibility.self) private var visibility: NavigationTabBarVisibility?
+
     func body(content: Content) -> some View {
-        content
-            .toolbar(.hidden, for: .tabBar)
-            .background(TabBarHidesOnPush())
+        if visibility != nil {
+            content.background(TabBarHidesOnPush())
+        } else {
+            content.toolbar(.hidden, for: .tabBar)
+                .background(TabBarHidesOnPush())
+        }
+    }
+}
+
+private struct PrimaryPageModifier: ViewModifier {
+    @Environment(NavigationTabBarVisibility.self) private var visibility: NavigationTabBarVisibility?
+
+    func body(content: Content) -> some View {
+        if let visibility {
+            content
+                .toolbar(visibility.isHidden ? .hidden : .visible, for: .tabBar)
+                .background(TabBarHidesOnPush(rootVisibility: visibility))
+        } else {
+            content
+        }
     }
 }
 
@@ -42,33 +49,52 @@ private struct SecondaryPageModifier: ViewModifier {
 @MainActor
 enum SecondaryPageTabBarHook {
     private static var installed = false
+    private static var visibilityKey: UInt8 = 0
+
+    static func register(_ visibility: NavigationTabBarVisibility, on navigation: UINavigationController) {
+        objc_setAssociatedObject(navigation, &visibilityKey, visibility, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
+    static func update(_ navigation: UINavigationController, destination: UIViewController?, root: UIViewController? = nil) {
+        guard let visibility = objc_getAssociatedObject(navigation, &visibilityKey) as? NavigationTabBarVisibility,
+              let destination else { return }
+        visibility.isHidden = destination !== (root ?? navigation.viewControllers.first)
+    }
+
+    static func settle(_ navigation: UINavigationController) {
+        update(navigation, destination: navigation.topViewController)
+        // 包括交互返回取消；最终以真实栈顶校正，防止 bar 留在错误状态。
+        navigation.transitionCoordinator?.animate(alongsideTransition: nil) { [weak navigation] _ in
+            guard let navigation else { return }
+            MainActor.assumeIsolated {
+                update(navigation, destination: navigation.topViewController)
+            }
+        }
+    }
 
     static func install() {
         guard !installed else { return }
         installed = true
         let cls: AnyClass = UINavigationController.self
-        guard let original = class_getInstanceMethod(
-            cls,
-            #selector(UINavigationController.pushViewController(
-                _:animated:))),
-            let hooked = class_getInstanceMethod(
-                cls,
-                #selector(UINavigationController
-                    .oboe_pushViewController(_:animated:))),
-            let originalSet = class_getInstanceMethod(
-                cls,
-                #selector(UINavigationController.setViewControllers(
-                    _:animated:))),
-            let hookedSet = class_getInstanceMethod(
-                cls,
-                #selector(UINavigationController
-                    .oboe_setViewControllers(_:animated:)))
-        else { return }
-        method_exchangeImplementations(original, hooked)
-        // `pushViewController` 不是唯一入栈口：NavigationStack 的快照
-        // 恢复/批量替换会走 `setViewControllers`——只钩 push 时该路径
-        // 仍丢标志，pop 返回后 Tab Bar 出现延迟复发（真机复现）。
-        method_exchangeImplementations(originalSet, hookedSet)
+        let pairs: [(Selector, Selector)] = [
+            (#selector(UINavigationController.pushViewController(_:animated:)),
+             #selector(UINavigationController.oboe_pushViewController(_:animated:))),
+            (#selector(UINavigationController.setViewControllers(_:animated:)),
+             #selector(UINavigationController.oboe_setViewControllers(_:animated:))),
+            (#selector(UINavigationController.popViewController(animated:)),
+             #selector(UINavigationController.oboe_popViewController(animated:))),
+            (#selector(UINavigationController.popToRootViewController(animated:)),
+             #selector(UINavigationController.oboe_popToRootViewController(animated:))),
+            (#selector(UINavigationController.popToViewController(_:animated:)),
+             #selector(UINavigationController.oboe_popToViewController(_:animated:))),
+        ]
+        let methods = pairs.compactMap { original, hooked -> (Method, Method)? in
+            guard let originalMethod = class_getInstanceMethod(cls, original),
+                  let hookedMethod = class_getInstanceMethod(cls, hooked) else { return nil }
+            return (originalMethod, hookedMethod)
+        }
+        guard methods.count == pairs.count else { return }
+        for (original, hooked) in methods { method_exchangeImplementations(original, hooked) }
     }
 }
 
@@ -76,9 +102,11 @@ private extension UINavigationController {
     @objc func oboe_pushViewController(
         _ viewController: UIViewController, animated: Bool
     ) {
-        viewController.hidesBottomBarWhenPushed = true
+        viewController.hidesBottomBarWhenPushed = !viewControllers.isEmpty
+        SecondaryPageTabBarHook.update(self, destination: viewController)
         // 实现已与系统方法交换——这是原 pushViewController。
         oboe_pushViewController(viewController, animated: animated)
+        SecondaryPageTabBarHook.settle(self)
     }
 
     @objc func oboe_setViewControllers(
@@ -89,7 +117,35 @@ private extension UINavigationController {
         for controller in viewControllers.dropFirst() {
             controller.hidesBottomBarWhenPushed = true
         }
+        if let visibility = viewControllers.last {
+            SecondaryPageTabBarHook.update(self, destination: visibility, root: viewControllers.first)
+        }
         oboe_setViewControllers(viewControllers, animated: animated)
+        SecondaryPageTabBarHook.settle(self)
+    }
+
+    @objc func oboe_popViewController(animated: Bool) -> UIViewController? {
+        let destination = viewControllers.dropLast().last
+        SecondaryPageTabBarHook.update(self, destination: destination)
+        let popped = oboe_popViewController(animated: animated)
+        SecondaryPageTabBarHook.settle(self)
+        return popped
+    }
+
+    @objc func oboe_popToRootViewController(animated: Bool) -> [UIViewController]? {
+        SecondaryPageTabBarHook.update(self, destination: viewControllers.first)
+        let popped = oboe_popToRootViewController(animated: animated)
+        SecondaryPageTabBarHook.settle(self)
+        return popped
+    }
+
+    @objc func oboe_popToViewController(_ controller: UIViewController, animated: Bool) -> [UIViewController]? {
+        if viewControllers.contains(controller) {
+            SecondaryPageTabBarHook.update(self, destination: controller)
+        }
+        let popped = oboe_popToViewController(controller, animated: animated)
+        SecondaryPageTabBarHook.settle(self)
+        return popped
     }
 }
 
@@ -97,14 +153,22 @@ private extension UINavigationController {
 /// 沿 parent 链向上找到 UINavigationController 的直接子 VC——即
 /// 导航栈里真正被 push 的那个控制器。
 private struct TabBarHidesOnPush: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> Anchor { Anchor() }
+    var rootVisibility: NavigationTabBarVisibility? = nil
+
+    func makeUIViewController(context: Context) -> Anchor {
+        let anchor = Anchor()
+        anchor.rootVisibility = rootVisibility
+        return anchor
+    }
     func updateUIViewController(
         _ uiViewController: Anchor, context: Context
     ) {
+        uiViewController.rootVisibility = rootVisibility
         uiViewController.applyIfNeeded()
     }
 
     final class Anchor: UIViewController {
+        var rootVisibility: NavigationTabBarVisibility?
         private var applied = false
 
         func applyIfNeeded() {
@@ -113,13 +177,37 @@ private struct TabBarHidesOnPush: UIViewControllerRepresentable {
                   !(next is UINavigationController) {
                 pushed = next
             }
-            pushed?.hidesBottomBarWhenPushed = true
-            applied = pushed != nil
+            guard let pushed, let navigation = pushed.parent as? UINavigationController else { return }
+            if let rootVisibility {
+                SecondaryPageTabBarHook.register(rootVisibility, on: navigation)
+            } else {
+                pushed.hidesBottomBarWhenPushed = pushed !== navigation.viewControllers.first
+            }
+            applied = true
         }
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
             applyIfNeeded()
+        }
+
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            applyIfNeeded()
+            if let navigation = navigationController {
+                // 交互式手势也可能绕开 pop API；用出现目标提前同步。
+                var destination: UIViewController = self
+                while let parent = destination.parent, !(parent is UINavigationController) {
+                    destination = parent
+                }
+                SecondaryPageTabBarHook.update(navigation, destination: destination)
+                navigation.transitionCoordinator?.animate(alongsideTransition: nil) { [weak navigation] _ in
+                    guard let navigation else { return }
+                    MainActor.assumeIsolated {
+                        SecondaryPageTabBarHook.update(navigation, destination: navigation.topViewController)
+                    }
+                }
+            }
         }
 
         override func viewDidLayoutSubviews() {
@@ -130,6 +218,10 @@ private struct TabBarHidesOnPush: UIViewControllerRepresentable {
 }
 
 extension View {
+    func primaryPage() -> some View {
+        modifier(PrimaryPageModifier())
+    }
+
     /// 标记本页为二级页面：隐藏底部 Tab Bar，返回一级页时自动恢复。
     func secondaryPage() -> some View {
         modifier(SecondaryPageModifier())

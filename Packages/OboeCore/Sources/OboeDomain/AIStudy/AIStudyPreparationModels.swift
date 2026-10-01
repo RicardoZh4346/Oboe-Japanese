@@ -723,10 +723,8 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
     public let unitKey: String
     public let entryID: Int64
     public let senseID: Int64
-    /// 词条级合并义项集：同 entry 的全部合法义项并入一张卡的
-    /// `senseIDs` 载荷（真机反馈裁决：一词条一卡）。空集 = 仅
-    /// `senseID` 代表义项（旧路径兼容）。`unitKey` 恒锚合并集中
-    /// 词典序最小的义项。
+    /// 保留旧字段名兼容调用方；新预览仅包含句中选定的 `senseID`。
+    /// 历史多义项载荷仍可读取，新的 unitKey 锚定实际选择的义项。
     public var mergedSenseIDs: [Int64]
     /// 词典快照的词目（`entry.primaryForm`）。
     public let headword: String
@@ -751,6 +749,8 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
     public var existingUnitID: UUID?
     /// 既有 unit 的 tooEasy flag。
     public var unitIsTooEasy: Bool
+    /// 当前无 Note 链接但有链接历史，需用户显式允许重新创建。
+    public var hasDeletedLearningContent: Bool = false
     /// 既有 unit 已关联的 vocabulary Note（复用候选，可能多个）。
     public var linkedNotes: [LinkedNote]
     /// 同 headword 的未关联 vocabulary Note（复用候选）。
@@ -838,6 +838,7 @@ public struct AIStudyPreviewItem: Equatable, Identifiable, Sendable {
                 "已有学习单元 \(String(unitID.uuidString.prefix(8)))")
         }
         if unitIsTooEasy { parts.append("已标记太简单") }
+        if hasDeletedLearningContent { parts.append("曾删除学习内容，本次确认生成会重新创建") }
         return parts.joined(separator: "，")
     }
 }
@@ -1161,8 +1162,12 @@ public struct AIStudyJobSummary: Equatable, Sendable {
     public let degradedToReuseCount: Int
     /// 置 tooEasy 数。
     public let tooEasyCount: Int
-    /// 显式跳过数（recordSkip 结算）。
+    /// 跳过总数（显式 skip、删除保护及目标 Note 已缺失）。
     public let skippedCount: Int
+    /// 跳过项中因历史删除而未重新创建的数量（含旧回执重放）。
+    public let deletedContentCount: Int
+    /// 本次只重放历史操作，零新增写入的数量。
+    public let alreadyAppliedCount: Int
     /// 预览存在但未产生本批 selection 的 unit 数。
     public let unselectedCount: Int
     /// 应用失败的 unit 数（receipt 带 errorCode）。
@@ -1195,7 +1200,9 @@ public struct AIStudyJobSummary: Equatable, Sendable {
         translatedBlockCount: Int,
         totalBlockCount: Int,
         resolvedBlockCount: Int,
-        failedBlockCount: Int
+        failedBlockCount: Int,
+        deletedContentCount: Int = 0,
+        alreadyAppliedCount: Int = 0
     ) {
         self.jobID = jobID
         self.status = status
@@ -1206,6 +1213,8 @@ public struct AIStudyJobSummary: Equatable, Sendable {
         self.degradedToReuseCount = degradedToReuseCount
         self.tooEasyCount = tooEasyCount
         self.skippedCount = skippedCount
+        self.deletedContentCount = deletedContentCount
+        self.alreadyAppliedCount = alreadyAppliedCount
         self.unselectedCount = unselectedCount
         self.failedUnitCount = failedUnitCount
         self.unresolvedCount = unresolvedCount

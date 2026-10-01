@@ -136,9 +136,7 @@ struct TodayView: View {
                 }
             }
             .navigationTitle(streakTitle)
-            // 二级页（收集箱/每日统计等）经 secondaryPage() 隐藏 Tab
-            // Bar；一级页不钉 .visible——钉住会盖住二级页的 .hidden，
-            // pop 返回时由系统自动恢复。
+            .primaryPage()
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     if let openSettings {
@@ -970,6 +968,7 @@ private struct TodayStudyButton: View {
 /// 等宽首页入口磁贴（v0.5.5 Step 7）：图标 + 标题 + 一行说明；
 /// 由外层 HStack（辅助字号下为 VStack）保证两枚磁贴等宽排列。
 private struct HomeShortcutTile: View {
+    @ScaledMetric(relativeTo: .headline) private var symbolSlotHeight: CGFloat = 24
     let title: String
     let systemImage: String
     let detail: String
@@ -979,6 +978,7 @@ private struct HomeShortcutTile: View {
         VStack(alignment: .leading, spacing: OboeTheme.Spacing.xxs) {
             Image(systemName: systemImage)
                 .font(.headline)
+                .frame(height: symbolSlotHeight)
                 .foregroundStyle(OboeTheme.Colors.accent)
                 .accessibilityHidden(true)
             Text(title)

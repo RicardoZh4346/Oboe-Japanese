@@ -1,6 +1,7 @@
 import OboeDomain
 import SwiftUI
 import XCTest
+import UIKit
 @testable import Oboe
 
 /// SceneNavigationState 的 reducer 语义：世代更新清空旧实体引用，
@@ -281,5 +282,44 @@ final class SceneNavigationStateTests: XCTestCase {
 
         XCTAssertNil(state.selectedReaderDocumentID)
         XCTAssertTrue(state.readerPath.isEmpty)
+    }
+}
+
+@MainActor
+final class NavigationTabBarVisibilityTests: XCTestCase {
+    func testPushPopAndStackReplacementSynchronizeVisibility() {
+        SecondaryPageTabBarHook.install()
+        let root = UIViewController()
+        let navigation = UINavigationController(rootViewController: root)
+        let visibility = NavigationTabBarVisibility()
+        SecondaryPageTabBarHook.register(visibility, on: navigation)
+        let detail = UIViewController()
+        navigation.pushViewController(detail, animated: false)
+        XCTAssertTrue(visibility.isHidden)
+        XCTAssertTrue(detail.hidesBottomBarWhenPushed)
+        navigation.pushViewController(UIViewController(), animated: false)
+        navigation.popViewController(animated: false)
+        XCTAssertTrue(visibility.isHidden)
+        navigation.popToRootViewController(animated: false)
+        XCTAssertFalse(visibility.isHidden)
+        navigation.setViewControllers([root, detail], animated: false)
+        XCTAssertTrue(visibility.isHidden)
+        navigation.popToViewController(root, animated: false)
+        XCTAssertFalse(visibility.isHidden)
+    }
+
+    func testCancelledInteractiveReturnRestoresStackVisibility() {
+        SecondaryPageTabBarHook.install()
+        let root = UIViewController()
+        let detail = UIViewController()
+        let navigation = UINavigationController(rootViewController: root)
+        let visibility = NavigationTabBarVisibility()
+        SecondaryPageTabBarHook.register(visibility, on: navigation)
+        navigation.pushViewController(detail, animated: false)
+        SecondaryPageTabBarHook.update(navigation, destination: root)
+        XCTAssertFalse(visibility.isHidden)
+        // 模拟手势取消后实际栈仍在 detail，由 settle 校正。
+        SecondaryPageTabBarHook.settle(navigation)
+        XCTAssertTrue(visibility.isHidden)
     }
 }

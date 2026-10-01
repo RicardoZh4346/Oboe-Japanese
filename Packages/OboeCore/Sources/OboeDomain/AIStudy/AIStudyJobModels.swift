@@ -334,6 +334,8 @@ public struct AIStudyJobProgress: Equatable, Sendable {
     /// 已确认 unit 数（待应用/已应用的确认进度）。
     public let confirmedUnits: Int
     public let appliedUnits: Int
+    /// 最新解析 revision 中仍需人工确认的 occurrence 数，与预览一致。
+    public let pendingUnits: Int
 
     public init(
         jobID: UUID,
@@ -343,7 +345,8 @@ public struct AIStudyJobProgress: Equatable, Sendable {
         failedBlocks: Int,
         totalBlocks: Int,
         confirmedUnits: Int,
-        appliedUnits: Int
+        appliedUnits: Int,
+        pendingUnits: Int = 0
     ) {
         self.jobID = jobID
         self.documentID = documentID
@@ -353,6 +356,7 @@ public struct AIStudyJobProgress: Equatable, Sendable {
         self.totalBlocks = totalBlocks
         self.confirmedUnits = confirmedUnits
         self.appliedUnits = appliedUnits
+        self.pendingUnits = pendingUnits
     }
 
     /// 0…1 派发进度（totalBlocks=0 时为 0——块行未落库前不
@@ -502,9 +506,9 @@ public enum AIStudyProposedAction: Equatable, Sendable {
     case reuseNote(noteID: UUID, addMembershipTo: UUID?)
     /// 新建 vocabulary Note + 卡：方向快照（§11.5：沿用实际用户
     /// 设置——仓库无全局方向偏好时复用三方向默认，D17）。
-    /// `senseIDs`：词条级合并义项集——文中读音确定后该 entry 的
-    /// 全部合法义项并入同一张卡的释义（真机反馈裁决：不再一义项
-    /// 一卡）。空集 = 仅 unitKey 锚定的代表义项（旧数据/旧流程）。
+    /// `senseIDs`：新选择仅冻结句中选定的义项。历史多义项数组
+    /// 兼容解码与回执比对；卡面以 unitKey 锚定的义项为准。
+    /// 空集 = 仅 unitKey 锚定义项（旧数据/旧流程）。
     case createNote(
         directions: Set<VocabularyCardDirection>,
         senseIDs: [Int64] = [])
@@ -720,17 +724,15 @@ public enum AIStudyRebuildIntent: String, Codable, CaseIterable, Sendable {
     case explicitRebuild
 }
 
-/// `ai_study_receipts.action_key` 的稳定编码（§4.3：
-/// `f(documentID, contentRevision, unitKey, selectionRevision,
-///   actionType, rebuildIntent)`）。
-///
-/// `canonicalKey` = `"aisk1:" + SHA-256(canonical JSON)`——
-/// 前缀版本化；同输入任意进程同 key，异输入不同 key
-/// （unitKey 任意字符不构成注入：整组分量进 hash）。
+/// `ai_study_receipts.action_key`：aisk2 将 Job 内单调递增的
+/// selectionRevision 连同 jobID 定域。旧 aisk1 缺少 jobID，跨 Job
+/// 重复确认会撞键，而 payload 已包含 jobID，导致 receiptConflict。
+/// 业务层仍凭 unit/Note/membership/source 唯一约束跨 Job 去重。
 public struct AIStudyActionKey: Equatable, Sendable {
-    /// 编码格式版本（算法变更须 bump 并迁移认知）。
-    public static let formatVersion = "aisk1"
+    public static let formatVersion = "aisk2"
+    public static let legacyFormatVersion = "aisk1"
 
+    public let jobID: UUID
     public let documentID: UUID
     public let contentRevision: Int64
     public let unitKey: String
@@ -739,6 +741,7 @@ public struct AIStudyActionKey: Equatable, Sendable {
     public let rebuildIntent: AIStudyRebuildIntent
 
     public init(
+        jobID: UUID,
         documentID: UUID,
         contentRevision: Int64,
         unitKey: String,
@@ -746,6 +749,7 @@ public struct AIStudyActionKey: Equatable, Sendable {
         actionType: AIStudyActionType,
         rebuildIntent: AIStudyRebuildIntent = .none
     ) {
+        self.jobID = jobID
         self.documentID = documentID
         self.contentRevision = contentRevision
         self.unitKey = unitKey
@@ -754,18 +758,28 @@ public struct AIStudyActionKey: Equatable, Sendable {
         self.rebuildIntent = rebuildIntent
     }
 
-    /// 稳定 canonical key 字符串（`action_key` 列值）。
-    public var canonicalKey: String {
-        let json = AIStudyCanonicalJSON.Value.object([
+    private var legacyComponents: [(String, AIStudyCanonicalJSON.Value)] {
+        [
             ("actionType", .string(actionType.rawValue)),
             ("contentRevision", .integer(contentRevision)),
             ("documentID", .string(documentID.uuidString.lowercased())),
             ("rebuildIntent", .string(rebuildIntent.rawValue)),
             ("selectionRevision", .integer(selectionRevision)),
             ("unitKey", .string(unitKey)),
+        ]
+    }
+
+    public var canonicalKey: String {
+        let json = AIStudyCanonicalJSON.Value.object(legacyComponents + [
+            ("jobID", .string(jobID.uuidString.lowercased())),
         ])
-        return "\(AIStudyActionKey.formatVersion):"
-            + AIStudyCanonicalJSON.sha256Hex(of: json)
+        return "\(Self.formatVersion):" + AIStudyCanonicalJSON.sha256Hex(of: json)
+    }
+
+    /// 只用于识别历史回执；不再写入 aisk1，旧字节格式保持不变。
+    public var legacyCanonicalKey: String {
+        "\(Self.legacyFormatVersion):"
+            + AIStudyCanonicalJSON.sha256Hex(of: .object(legacyComponents))
     }
 }
 

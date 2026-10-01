@@ -215,9 +215,16 @@ final class AIStudyRunnerTests: XCTestCase {
         XCTAssertEqual(job?.status, .paused)
         XCTAssertEqual(job?.resumeReason, .missingKey)
         let blocks = try await env.store.fetchBlocks(jobID: jobID)
-        XCTAssertTrue(blocks.allSatisfy { $0.status == .failed })
-        XCTAssertTrue(
-            blocks.allSatisfy { $0.lastErrorCode == "authFailed" })
+        let failed = blocks.filter { $0.status == .failed }
+        XCTAssertFalse(failed.isEmpty)
+        XCTAssertTrue(failed.allSatisfy { $0.lastErrorCode == "authFailed" })
+        // 401 首个响应可早于第二块派发；停派后的未领块应保留 ready，
+        // 不假定线程调度恰好让两个请求都在途。
+        XCTAssertEqual(failed.count, transport.callCount)
+        for block in blocks where block.status != .failed {
+            XCTAssertEqual(block.status, .readyForAI)
+            XCTAssertNil(block.lastErrorCode)
+        }
     }
 
     // MARK: - B8 截断外层拒绝 + 自适应节流

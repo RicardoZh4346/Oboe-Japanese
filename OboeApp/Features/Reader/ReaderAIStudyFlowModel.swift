@@ -133,12 +133,17 @@ final class ReaderAIStudyFlowModel {
     /// D17：沿用三方向默认（非管线建卡路径 `allCases` 一致）；
     /// 快照的是用户实际选择，不是单方向硬默认。
     var directionPreset: DirectionPreset = .all
+    var deletedCreateCount: Int {
+        preview?.items.filter { $0.hasDeletedLearningContent && $0.decision == .create }.count ?? 0
+    }
     /// 「自动建立学习牌组」——默认关闭（spec §42 默认建议关闭）。
     var automaticApply = false
     /// 准备载荷：是否生成段落译文（默认开——关闭时请求只消歧）。
     var wantsTranslation = true
 
     private(set) var summary: AIStudyJobSummary?
+    private(set) var applyFailures: [AIStudyApplyUnitOutcome] = []
+    private(set) var applicationDiagnostics = ""
     private(set) var isBusy = false
     var errorMessage: String?
 
@@ -158,6 +163,29 @@ final class ReaderAIStudyFlowModel {
     deinit { watchTask?.cancel() }
 
     // MARK: - 派生状态
+
+    var canConfirm: Bool {
+        guard let preview else { return false }
+        return !isBusy && (preview.items.contains {
+            $0.decision != nil && $0.decision != .pending
+        } || preview.pending.contains { $0.correctedSelection != nil })
+    }
+
+    func retryApplication() async {
+        await loadPreview()
+    }
+
+    static func failureMessage(for code: String) -> String {
+        switch code {
+        case "unitEvidenceMissing": return "词典或原文证据缺失，请核对词典和文档后重试。"
+        case "unitBindingConflict": return "词典义项已变化，请返回预览重新确认。"
+        case "unitSourceUnavailable": return "暂时无法读取词典，请稍后重试。"
+        case "receiptConflict": return "确认记录与已保存的操作不一致，请返回预览重新核对选择。"
+        case "invalidSelection": return "学习项选择不完整，请返回预览重新选择。"
+        case "staleDocumentRevision", "documentMissing": return "原文已变更或缺失，请重新准备分析。"
+        default: return "学习内容未能保存，可以返回预览重试。"
+        }
+    }
 
     var currentJobID: UUID? { job?.id }
     var jobStatus: AIStudyJobStatus? { job?.status }
@@ -681,7 +709,7 @@ final class ReaderAIStudyFlowModel {
     /// 「生成学习牌组」：不可变 selection revision 落库 →
     /// `applyConfirmedJob` 逐 unit 事务 → 摘要。
     func confirm() async {
-        guard let job, let preview, !isBusy else { return }
+        guard let job, let preview, canConfirm else { return }
         isBusy = true
         defer { isBusy = false }
         // 未决策 unit / 未改判 pending 的计数在应用前冻结（摘要口径）。
@@ -697,14 +725,24 @@ final class ReaderAIStudyFlowModel {
                 jobID: job.id,
                 preview: preview,
                 items: preview.items,
-                correctedPending: preview.pending)
+                correctedPending: preview.pending,
+                directions: directionPreset.directions)
             let report = try await dependencies.applier
-                .applyConfirmedJob(jobID: job.id)
+                .applyConfirmedJob(jobID: job.id,
+                    rebuildIntent: .explicitRebuild)
+            applyFailures = report.failedUnits
             summary = try await preparation.summary(
                 jobID: job.id,
                 report: report,
                 unselectedCount: unselected,
                 pendingCount: unresolvedPending)
+            let history = (try? await preparation.applicationDiagnostics(jobID: job.id)) ?? "历史记录读取失败"
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "未知"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "未知"
+            let currentOutcomes = report.units.map {
+                "\($0.unitKey) 结果=\($0.kind.rawValue) 新卡=\($0.cardCount) 错误码=\($0.errorCode ?? "无")"
+            }.joined(separator: "\n")
+            applicationDiagnostics = "版本：\(version) / build \(build)\n\(history)\n本次应用结果：\n\(currentOutcomes)"
             phase = .summary
             await refreshJob()
         } catch let error
@@ -717,6 +755,11 @@ final class ReaderAIStudyFlowModel {
                 await loadPreview()
             } else if case .staleContent = error {
                 errorMessage = "文档内容已变更——本次分析作废，请重新准备。"
+            } else if case .manifestMissing = error {
+                errorMessage = "本次分析的候选快照已缺失，请重新准备。"
+            } else if case .invalidCorrection = error {
+                errorMessage = "改判候选已失效，请重新核对后确认。"
+                await loadPreview()
             } else {
                 errorMessage = Self.message(for: error)
             }

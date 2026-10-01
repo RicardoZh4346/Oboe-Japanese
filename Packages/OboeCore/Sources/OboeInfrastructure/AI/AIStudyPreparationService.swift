@@ -139,6 +139,7 @@ public struct AIStudyPreparationService: Sendable {
         /// Job 不在可确认状态。
         case jobNotConfirmable(jobID: UUID, status: AIStudyJobStatus)
         case jobNotFound(UUID)
+        case invalidCorrection(tokenKey: String)
     }
 
     // MARK: - 内部：范围解析
@@ -1349,14 +1350,10 @@ public struct AIStudyPreparationService: Sendable {
             latest[key] = record
         }
 
-        // unit 聚合（**entry 级**——真机反馈裁决：文中读音确定后
-        // 该词条的全部合法义项合并进**一张卡**，不再一义项一卡）。
-        // 聚合键 = entryID；unitKey 代表义项 = 合并集中词典序最小
-        // 者（确定性、可重放——不随 record 循环序漂移）。
+        // 按句中选定义项聚合：同义项重复出现复用，不同义项分别建卡。
         struct Aggregate {
             var entryID: Int64
-            /// 合并义项集合（跨 occurrence 并集）。
-            var senseIDs: Set<Int64>
+            var senseID: Int64
             var occurrenceCount: Int
             var firstSentence: String?
             var firstLocator: String?
@@ -1365,10 +1362,18 @@ public struct AIStudyPreparationService: Sendable {
             var confidenceMax: Double?
             var containsLowConfidence: Bool
         }
-        var aggregates: [Int64: Aggregate] = [:]
+        var aggregates: [String: Aggregate] = [:]
         var pendingItems: [AIStudyPreviewPendingItem] = []
 
-        for record in latest.values {
+        let orderedRecords = latest.values.sorted { lhs, rhs in
+            let l = index.token(lhs.tokenKey, requestHash: lhs.requestHash)
+            let r = index.token(rhs.tokenKey, requestHash: rhs.requestHash)
+            return (l?.chapterOrdinal ?? Int.max, l?.blockOrdinal ?? Int.max,
+                    l?.utf16Start ?? Int.max, lhs.requestHash, lhs.tokenKey)
+                < (r?.chapterOrdinal ?? Int.max, r?.blockOrdinal ?? Int.max,
+                   r?.utf16Start ?? Int.max, rhs.requestHash, rhs.tokenKey)
+        }
+        for record in orderedRecords {
             let anchor = index.token(
                 record.tokenKey, requestHash: record.requestHash)
             switch record.status {
@@ -1376,8 +1381,8 @@ public struct AIStudyPreparationService: Sendable {
                 guard let entryID = record.selectedEntryID,
                       let senseID = record.selectedSenseID,
                       let entry = manifestEntries[entryID],
-                      entry.senses.contains(
-                          where: { $0.id == senseID }) else {
+                      let sense = entry.senses.first(where: { $0.id == senseID }),
+                      let key = unitKey(entryID: entryID, sense: sense.materialize()) else {
                     // 词典快照缺 entry/sense——按待确认占位
                     // （不伪候选、不静默吞证据）。
                     pendingItems.append(
@@ -1385,19 +1390,8 @@ public struct AIStudyPreparationService: Sendable {
                                     manifest: manifest))
                     continue
                 }
-                // 义项合并集：文中读音已确定（选定 entry+sense）→
-                // 此 entry 的全部合法义项并入一卡。合法集 = 请求侧
-                // 候选引用里此 entry 的 admissible senses（已做
-                // sense 级限制过滤的真子集）；引用缺席回退仅选定
-                // 义项。同词不同读音/义项分别解析时各自的合法集
-                // 自然并集——entry 聚合键去重，不产生重复卡。
-                var senseIDs = Set(anchor?.token.candidates
-                    .first(where: { $0.entryID == entryID })?
-                    .senses.map(\.senseID) ?? [])
-                senseIDs.insert(senseID)
                 let recordConfidence = record.confidence
-                if var aggregate = aggregates[entryID] {
-                    aggregate.senseIDs.formUnion(senseIDs)
+                if var aggregate = aggregates[key] {
                     aggregate.occurrenceCount += 1
                     aggregate.evidenceRevision = max(
                         aggregate.evidenceRevision, record.revision)
@@ -1413,11 +1407,11 @@ public struct AIStudyPreparationService: Sendable {
                             aggregate.confidenceMax ?? confidence,
                             confidence)
                     }
-                    aggregates[entryID] = aggregate
+                    aggregates[key] = aggregate
                 } else {
-                    aggregates[entryID] = Aggregate(
+                    aggregates[key] = Aggregate(
                         entryID: entryID,
-                        senseIDs: senseIDs,
+                        senseID: senseID,
                         occurrenceCount: 1,
                         firstSentence: sentence(for: anchor),
                         firstLocator: anchor.map {
@@ -1437,34 +1431,23 @@ public struct AIStudyPreparationService: Sendable {
             }
         }
 
-        // 出参：代表义项 + 合并释义一次定稿（manifest 快照 senses
-        // 已按 sense_order 排序——序最小者即词条首义，作 unitKey
-        // 锚；释义按词典序拼接供预览展示）。
         var items: [AIStudyPreviewItem] = []
         items.reserveCapacity(aggregates.count)
         for aggregate in aggregates.values {
             guard let entry = manifestEntries[aggregate.entryID]
             else { continue }
-            let mergedSenses = entry.senses.filter {
-                aggregate.senseIDs.contains($0.id)
-            }
-            guard let representative = mergedSenses.first,
-                  let key = unitKey(
-                      entryID: aggregate.entryID,
-                      sense: representative.materialize())
+            guard let sense = entry.senses.first(where: { $0.id == aggregate.senseID }),
+                  let key = unitKey(entryID: aggregate.entryID, sense: sense.materialize())
             else { continue }
             var item = AIStudyPreviewItem(
                 unitKey: key,
                 entryID: aggregate.entryID,
-                senseID: representative.id,
-                mergedSenseIDs: mergedSenses.map(\.id),
+                senseID: sense.id,
+                mergedSenseIDs: [sense.id],
                 headword: entry.primaryForm,
                 reading: entry.readings.first?.reading,
-                glossSummary: mergedSenses.compactMap {
-                    $0.materialize().preferredGlosses()
-                        .map { $0.glosses.map(\.text)
-                            .joined(separator: "; ") }
-                }.filter { !$0.isEmpty }.joined(separator: "\n"),
+                glossSummary: sense.materialize().preferredGlosses()
+                    .map { $0.glosses.map(\.text).joined(separator: "; ") },
                 jlptLevel: nil,
                 occurrenceCount: aggregate.occurrenceCount,
                 firstSentence: aggregate.firstSentence,
@@ -1614,6 +1597,7 @@ public struct AIStudyPreparationService: Sendable {
         struct Patch: Sendable {
             var unitID: UUID
             var tooEasy: Bool
+            var deleted: Bool
             var linked: [AIStudyPreviewItem.LinkedNote]
             var duplicates: [AIStudyPreviewItem.LinkedNote]
         }
@@ -1640,6 +1624,7 @@ public struct AIStudyPreparationService: Sendable {
                             try DatabaseValueCodec.decodeUUID(row["id"])
                     }
                 }
+                var history = Set<UUID>()
                 var flags: [UUID: Bool] = [:]
                 var links: [UUID: [UUID]] = [:]
                 var primaryLinks: [UUID: [UUID]] = [:]
@@ -1649,6 +1634,13 @@ public struct AIStudyPreparationService: Sendable {
                         .joined(separator: ",")
                     let arguments = StatementArguments(
                         chunk.map(DatabaseValueCodec.encode))
+                    for row in try Row.fetchAll(db, sql: """
+                        SELECT DISTINCT unit_id_snapshot FROM learning_unit_events
+                        WHERE unit_id_snapshot IN (\(placeholders))
+                          AND kind IN ('noteLinked', 'noteUnlinked')
+                        """, arguments: arguments) {
+                        history.insert(try DatabaseValueCodec.decodeUUID(row["unit_id_snapshot"]))
+                    }
                     for row in try Row.fetchAll(
                         db,
                         sql: """
@@ -1761,6 +1753,7 @@ public struct AIStudyPreparationService: Sendable {
                     result[unitKey] = Patch(
                         unitID: unitID,
                         tooEasy: flags[unitID] ?? false,
+                        deleted: (links[unitID] ?? []).isEmpty && history.contains(unitID),
                         linked: linkedNotes,
                         duplicates: duplicateNotes)
                 }
@@ -1777,6 +1770,7 @@ public struct AIStudyPreparationService: Sendable {
             else { continue }
             items[index].existingUnitID = patch.unitID
             items[index].unitIsTooEasy = patch.tooEasy
+            items[index].hasDeletedLearningContent = patch.deleted
             items[index].linkedNotes = patch.linked
             items[index].duplicateNotes = patch.duplicates
         }
@@ -1798,10 +1792,15 @@ public struct AIStudyPreparationService: Sendable {
         jobID: UUID,
         preview: AIStudyPreview,
         items: [AIStudyPreviewItem],
-        correctedPending: [AIStudyPreviewPendingItem]
+        correctedPending: [AIStudyPreviewPendingItem],
+        directions: Set<VocabularyCardDirection> = Set(VocabularyCardDirection.allCases)
     ) async throws -> Int64 {
         let atMs = nowMs
-        let manifest = try await loadManifest(jobID: jobID)
+        guard let manifest = try await loadManifest(jobID: jobID) else {
+            throw PreparationError.manifestMissing(jobID: jobID)
+        }
+        let index = correctedPending.contains { $0.correctedSelection != nil }
+            ? try await planIndex(manifest: manifest) : PlanIndex()
         return try await pool.write { db -> Int64 in
             guard let job = try GRDBAIStudyJobStore.fetchJob(
                 id: jobID, in: db) else {
@@ -1834,35 +1833,41 @@ public struct AIStudyPreparationService: Sendable {
             }
 
             let manifestEntries = Dictionary(
-                uniqueKeysWithValues: (manifest?.dictionaryEntries ?? [])
+                uniqueKeysWithValues: manifest.dictionaryEntries
                     .map { ($0.id, $0) })
             var selections: [AIStudyJobSelection] = []
             var coveredUnitKeys = Set<String>()
             let newRevision = AIStudyJobStateMachine
                 .nextSelectionRevision(for: job)
 
+            let resolutions = try GRDBAIStudyJobStore.fetchResolutions(jobID: jobID, in: db)
+            var latest: [String: AIStudyResolutionRecord] = [:]
+            for record in resolutions {
+                let key = "\(record.requestHash)\u{1F}\(record.tokenKey)"
+                if let old = latest[key], old.revision >= record.revision { continue }
+                latest[key] = record
+            }
             // 改判：user resolution 行 + occurrence 链接 + selection。
             for pending in correctedPending {
-                guard let corrected = pending.correctedSelection,
+                guard let corrected = pending.correctedSelection else { continue }
+                // 从冻结请求复核候选，不信任调用方传来的 alternatives。
+                guard let anchor = index.token(pending.tokenKey, requestHash: pending.requestHash),
+                      let candidate = anchor.token.candidates.first(where: {
+                          $0.entryID == corrected.entryID
+                      }),
+                      candidate.senses.contains(where: { $0.senseID == corrected.senseID }),
                       let entry = manifestEntries[corrected.entryID],
                       entry.senses.contains(where: {
                           $0.id == corrected.senseID
                       })
-                else { continue }
-                // 改判同样按 entry 级合并义项：同 entry 候选的
-                // admissible sense 集并入一卡（与 buildPreview
-                // 聚合口径一致——unitKey 锚合并集中词典序最小的
-                // 代表义项，不锚用户改判点中的那一行）。
-                let mergedSet = Set(pending.alternatives
-                    .filter { $0.entryID == corrected.entryID }
-                    .map(\.senseID)).union([corrected.senseID])
-                guard let representative = entry.senses.first(where: {
-                    mergedSet.contains($0.id)
-                }),
-                      let key = unitKey(
-                          entryID: corrected.entryID,
-                          sense: representative.materialize())
-                else { continue }
+                else { throw PreparationError.invalidCorrection(tokenKey: pending.tokenKey) }
+                guard let previous = latest["\(pending.requestHash)\u{1F}\(pending.tokenKey)"],
+                      previous.id == pending.resolutionID else {
+                    throw PreparationError.stalePreview(jobID: jobID)
+                }
+                guard let sense = entry.senses.first(where: { $0.id == corrected.senseID }),
+                      let key = unitKey(entryID: corrected.entryID, sense: sense.materialize())
+                else { throw PreparationError.invalidCorrection(tokenKey: pending.tokenKey) }
                 let revision = try GRDBAIStudyJobStore
                     .nextResolutionRevision(
                         requestHash: pending.requestHash,
@@ -1870,21 +1875,24 @@ public struct AIStudyPreparationService: Sendable {
                 let record = AIStudyResolutionRecord(
                     id: UUID(),
                     jobID: jobID,
-                    jobBlockID: nil,
+                    jobBlockID: previous.jobBlockID,
                     documentID: job.documentID,
-                    locatorJSON: "",
+                    locatorJSON: previous.locatorJSON,
                     tokenKey: pending.tokenKey,
                     requestHash: pending.requestHash,
                     selectedEntryID: corrected.entryID,
                     selectedSenseID: corrected.senseID,
-                    selectedDatasetVersion: corrected.datasetVersion,
+                    selectedDatasetVersion: manifest.requestMetadata.dictionaryDatasetVersion,
                     unitID: nil,
                     confidence: nil,
                     status: .userConfirmed,
                     reasonCode: nil,
                     origin: .user,
                     revision: revision,
-                    createdAtMs: atMs)
+                    createdAtMs: atMs,
+                    sentenceTranslation: previous.selectedEntryID == corrected.entryID
+                        && previous.selectedSenseID == corrected.senseID
+                        ? previous.sentenceTranslation : nil)
                 try GRDBAIStudyJobStore.insertResolution(
                     record, documentID: job.documentID, in: db)
                 // occurrence 回填 userConfirmed：经 preview 携带的
@@ -1914,9 +1922,8 @@ public struct AIStudyPreparationService: Sendable {
                         selectionRevision: newRevision,
                         decision: .create,
                         proposedAction: .createNote(
-                            directions: Set(
-                                VocabularyCardDirection.allCases),
-                            senseIDs: mergedSet.sorted()),
+                            directions: directions,
+                            senseIDs: [corrected.senseID]),
                         evidenceRevision: revision))
                 }
             }
@@ -1975,6 +1982,42 @@ public struct AIStudyPreparationService: Sendable {
 
     // MARK: - 终态摘要
 
+    /// 导出同文档最近任务的本地结果，不包含原文、Prompt、密钥或请求缓存。
+    /// 旧失败事务没有回执时明确标注“未提交”，不猜测原因。
+    public func applicationDiagnostics(jobID: UUID) async throws -> String {
+        try await pool.read { db in
+            guard let current = try GRDBAIStudyJobStore.fetchJob(id: jobID, in: db) else {
+                throw PreparationError.jobNotFound(jobID)
+            }
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id FROM ai_study_jobs WHERE document_id = ?
+                ORDER BY created_at_ms DESC, id DESC LIMIT 20
+                """, arguments: [DatabaseValueCodec.encode(current.documentID)])
+            var lines = ["Oboe 学习内容生成诊断", "当前分析：\(jobID.uuidString)",
+                         "文档编号：\(current.documentID.uuidString)"]
+            for row in rows {
+                let id = try DatabaseValueCodec.decodeUUID(row["id"])
+                guard let job = try GRDBAIStudyJobStore.fetchJob(id: id, in: db) else { continue }
+                let selections = try GRDBAIStudyJobStore.fetchSelections(jobID: id, in: db)
+                    .filter { $0.selectionRevision == job.selectionRevision }
+                lines.append("任务 \(id.uuidString) 状态=\(job.status.rawValue) 选择版本=\(job.selectionRevision) 已选=\(selections.count)")
+                for selection in selections.sorted(by: { $0.unitKey < $1.unitKey }) {
+                    let receipt = try selection.appliedReceiptID.flatMap {
+                        try GRDBAIStudyJobStore.fetchReceipt(operationID: $0, in: db)
+                    }
+                    let outcome = receipt.flatMap { try? JSONDecoder().decode(
+                        AIStudyApplyUnitOutcome.self, from: Data($0.outcomeJSON.utf8)) }
+                    let savedCards = try outcome?.noteID.map {
+                        try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cards WHERE note_id = ?",
+                            arguments: [DatabaseValueCodec.encode($0)]) ?? 0
+                    } ?? 0
+                    lines.append("  \(selection.unitKey) 决策=\(selection.decision.rawValue) 结果=\(outcome?.kind.rawValue ?? "未提交") 原提交卡数=\(outcome?.cardCount ?? 0) 当前卡数=\(savedCards) 错误码=\(outcome?.errorCode ?? "无")")
+                }
+            }
+            return lines.joined(separator: "\n")
+        }
+    }
+
     /// 摘要：`AIStudyApplyReport` → 互斥分桶计数（应用未完成时
     /// report 可 nil——那时单元数恒 0）。
     public func summary(
@@ -2007,6 +2050,12 @@ public struct AIStudyPreparationService: Sendable {
             return (name, (blocks.count, resolved, failed, translated))
         }
         let units = report?.units ?? []
+        let deletedCount = units.filter {
+            $0.isSettled && ($0.kind == .skippedDeletedEvidence || $0.errorCode == "deletedEvidence")
+        }.count
+        let missingNoteCount = units.filter {
+            $0.isSettled && ($0.kind == .skippedNoteMissing || $0.errorCode == "noteMissing")
+        }.count
         return AIStudyJobSummary(
             jobID: jobID,
             status: report?.finalStatus ?? job.status,
@@ -2022,15 +2071,20 @@ public struct AIStudyPreparationService: Sendable {
             tooEasyCount: units.filter {
                 $0.kind == .tooEasySet }.count,
             skippedCount: units.filter {
-                $0.kind == .recordedSkip }.count,
+                $0.kind == .recordedSkip }.count + deletedCount + missingNoteCount,
             unselectedCount: unselectedCount,
             failedUnitCount: units.filter { !$0.isSettled }.count,
             unresolvedCount: pendingCount,
-            createdCardCount: units.reduce(0) { $0 + $1.cardCount },
+            createdCardCount: units.filter { $0.kind == .createdNote }.reduce(0) { $0 + $1.cardCount },
             translatedBlockCount: blockCounts.3,
             totalBlockCount: blockCounts.0,
             resolvedBlockCount: blockCounts.1,
-            failedBlockCount: blockCounts.2)
+            failedBlockCount: blockCounts.2,
+            deletedContentCount: deletedCount,
+            alreadyAppliedCount: units.filter {
+                ($0.kind == .alreadyApplied || $0.kind == .replayed)
+                    && $0.errorCode != "deletedEvidence" && $0.errorCode != "noteMissing"
+            }.count)
     }
 }
 

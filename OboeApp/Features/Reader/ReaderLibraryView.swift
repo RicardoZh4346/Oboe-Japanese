@@ -336,7 +336,7 @@ private struct ReaderDocumentRow: View {
                 .frame(maxWidth: .infinity)
             HStack(spacing: OboeTheme.Spacing.xs) {
                 if awaiting {
-                    Text("待确认 \(progress.confirmedUnits)")
+                    Text("待确认 \(progress.pendingUnits)")
                         .foregroundStyle(.orange)
                 } else {
                     Text("AI 分析 \(progress.processedBlocks)"

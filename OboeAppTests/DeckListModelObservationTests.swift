@@ -14,6 +14,34 @@ import XCTest
 @MainActor
 final class DeckListModelObservationTests: XCTestCase {
 
+    func testRefreshFailurePreservesLoadedDecksAndReportsFailure() async throws {
+        let fixture = try await AppObservationFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck()
+        let model = fixture.makeModel()
+        let loaded = await model.refreshDecks()
+        XCTAssertTrue(loaded)
+        XCTAssertTrue(model.decks.contains { $0.id == deckID })
+        try fixture.database.close()
+        let refreshed = await model.refreshDecks()
+        XCTAssertFalse(refreshed, "读取失败不能被页面当成成功后缺失")
+        XCTAssertNotNil(model.deckLoadErrorMessage)
+        XCTAssertTrue(model.decks.contains { $0.id == deckID }, "保留此前成功快照")
+    }
+
+    func testSuccessfulRefreshCanConfirmActualDeckDeletion() async throws {
+        let fixture = try await AppObservationFixture.make()
+        defer { fixture.remove() }
+        let deckID = try await fixture.addDeck()
+        let model = fixture.makeModel()
+        let loaded = await model.refreshDecks()
+        XCTAssertTrue(loaded)
+        let deleted = await model.deleteEmptyDeck(id: deckID)
+        XCTAssertTrue(deleted)
+        XCTAssertFalse(model.decks.contains { $0.id == deckID })
+        XCTAssertNil(model.deckLoadErrorMessage)
+    }
+
     /// 同一 unit 的成员写进第二个牌组后，两 deck 在评级写后同步
     /// 刷新进度——跨窗口/跨表面写共享同一 pool 就是这条路径。
     func testMembershipAndRatingRefreshAllDecks() async throws {

@@ -17,6 +17,37 @@ import OboeDomain
 /// - Job 结算：completed / partiallyCompleted / 幂等重入。
 final class AIStudyApplyServiceTests: XCTestCase {
 
+    func testEvidenceMatchingKeepsConfirmedOccurrencesForExactSense() async throws {
+        let env = try await makeEnvironment()
+        let keyA = "jmdict:sense-v1:200:" + String(repeating: "a", count: 64)
+        let keyB = "jmdict:sense-v1:200:" + String(repeating: "b", count: 64)
+        func record(_ token: String, _ sense: Int64, _ revision: Int64,
+                    _ status: AIStudyResolutionStatus = .aiResolved) -> AIStudyResolutionRecord {
+            AIStudyResolutionRecord(id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
+                documentID: env.documentID, locatorJSON: env.locatorJSON, tokenKey: token,
+                requestHash: "rh-0", selectedEntryID: 200, selectedSenseID: sense,
+                selectedDatasetVersion: "ds-test", confidence: 0.9, status: status,
+                origin: .ai, revision: revision, createdAtMs: revision)
+        }
+        let first = record("tok-0", 7, 1)
+        let corrected = record("tok-1", 7, 2, .userConfirmed)
+        let otherSense = record("tok-2", 8, 1)
+        let pending = record("tok-3", 7, 1, .lowConfidence)
+        let changedToPending = record("tok-4", 7, 2, .lowConfidence)
+        let context = AIStudyApplyUnitContext(jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, jobEpoch: env.job.epoch,
+            resolutions: [first, record("tok-1", 8, 1), corrected, otherSense, pending,
+                          record("tok-4", 7, 1), changedToPending],
+            unitKeyByDictionarySense: ["200:7": keyA, "200:8": keyB])
+        let selection = AIStudyJobSelection(jobID: env.job.id, unitKey: keyA,
+            selectionRevision: 1, decision: .create,
+            proposedAction: .createNote(directions: [.japaneseToChinese], senseIDs: [7]),
+            evidenceRevision: 2)
+        let matches = GRDBAIStudyApplyService.matchedResolutions(context: context, selection: selection)
+        XCTAssertEqual(Set(matches.map(\.id)), [first.id, corrected.id],
+            "同义项全部已确认 occurrence 都应回填；未确认、旧判及其它义项不得串入")
+    }
+
     // MARK: - reuse
 
     /// 既有 Note 确认复用：unit link 落 `aiPipeline`、membership
@@ -137,7 +168,7 @@ final class AIStudyApplyServiceTests: XCTestCase {
 
         let report = try await env.service().applyConfirmedJob(
             jobID: env.job.id)
-        XCTAssertEqual(report.finalStatus, .completed)
+        XCTAssertEqual(report.finalStatus, .partiallyCompleted)
         let outcome = try XCTUnwrap(report.units.first)
         XCTAssertEqual(outcome.kind, .skippedNoteMissing)
         XCTAssertEqual(outcome.errorCode, "noteMissing")
@@ -402,6 +433,8 @@ final class AIStudyApplyServiceTests: XCTestCase {
 
         // 真实半成品：Job 已进 applying、skip 已整个提交（同事务
         // 的 receipt+selection 回填），第二个 unit 尚未落库。
+        let skipActionKey = AIStudyActionKey(jobID: env.job.id, documentID: env.documentID,
+            contentRevision: 1, unitKey: skipKey, selectionRevision: 1, actionType: .recordSkip)
         try await env.pool.write { db in
             _ = try GRDBAIStudyJobStore.transitionJob(
                 id: env.job.id, to: .applying,
@@ -414,6 +447,9 @@ final class AIStudyApplyServiceTests: XCTestCase {
                     blocks: [env.block], resolutions: [env.resolution]),
                 selection: skipSelection, source: nil,
                 atMilliseconds: 1, in: db)
+            // 模拟旧版半完成任务：保留旧回执，剩余动作升级后写 aisk2。
+            try db.execute(sql: "UPDATE ai_study_receipts SET action_key = ? WHERE action_key = ?",
+                arguments: [skipActionKey.legacyCanonicalKey, skipActionKey.canonicalKey])
         }
         let countsBefore = try await env.counts()
 
@@ -544,7 +580,7 @@ final class AIStudyApplyServiceTests: XCTestCase {
 
         let report = try await service.applyConfirmedJob(
             jobID: env.job.id)
-        XCTAssertEqual(report.finalStatus, .completed)
+        XCTAssertEqual(report.finalStatus, .partiallyCompleted)
         XCTAssertEqual(report.units.map(\.kind), [.skippedDeletedEvidence])
         try await env.pool.read { db in
             XCTAssertEqual(try env.count(db, table: "notes"), 0)
@@ -800,6 +836,7 @@ final class AIStudyApplyServiceTests: XCTestCase {
         let noteID = try await env.insertBareVocabularyNote(
             headword: "衝突")
         let actionKey = AIStudyActionKey(
+            jobID: env.job.id,
             documentID: env.documentID, contentRevision: 1,
             unitKey: unitKey, selectionRevision: 1,
             actionType: .reuseNote).canonicalKey
@@ -830,20 +867,30 @@ final class AIStudyApplyServiceTests: XCTestCase {
     /// 同 actionKey 同 payload 的既有 receipt → 返回历史结果零写入
     /// （receipt replay 先于一切业务读）。
     func testReceiptReplayReturnsExistingOutcome() async throws {
+        try await assertReceiptReplay(legacy: false)
+    }
+
+    func testLegacyReceiptReplayBackfillsSelectionWithoutNewReceipt() async throws {
+        try await assertReceiptReplay(legacy: true)
+    }
+
+    private func assertReceiptReplay(legacy: Bool) async throws {
         let env = try await makeEnvironment()
         let (unitKey, _) = try await env.makeDictionaryUnit(
             lemma: "鍵", entryID: 801)
         let actionKey = AIStudyActionKey(
+            jobID: env.job.id,
             documentID: env.documentID, contentRevision: 1,
             unitKey: unitKey, selectionRevision: 1,
-            actionType: .recordSkip).canonicalKey
+            actionType: .recordSkip)
         let payload = "aisa1|\(env.job.id.uuidString.lowercased())"
             + "|\(env.documentID.uuidString.lowercased())|1|"
             + "\(unitKey)|1|recordSkip|none|skip"
         _ = try await env.pool.write { db in
             try GRDBAIStudyJobStore.recordReceipt(
                 AIStudyReceipt(
-                    operationID: UUID(), actionKey: actionKey,
+                    operationID: UUID(),
+                    actionKey: legacy ? actionKey.legacyCanonicalKey : actionKey.canonicalKey,
                     payloadHash: GRDBAIStudyApplyService.sha256Hex(payload),
                     outcomeJSON: """
                         {"unitKey":"\(unitKey)","kind":"recordedSkip",\
@@ -863,7 +910,11 @@ final class AIStudyApplyServiceTests: XCTestCase {
         try await env.pool.read { db in
             XCTAssertEqual(
                 try env.count(db, table: "ai_study_receipts"), 1)
-            // replay 命中即返回——selection 不回写 applied_receipt_id。
+            let applied = try String.fetchOne(db, sql: """
+                SELECT applied_receipt_id FROM ai_study_selections
+                WHERE job_id = ? AND unit_key = ?
+                """, arguments: [DatabaseValueCodec.encode(env.job.id), unitKey])
+            XCTAssertEqual(applied != nil, legacy, "历史回执复用后回填 selection")
         }
     }
 
@@ -1187,11 +1238,11 @@ final class AIStudyApplyServiceTests: XCTestCase {
         let resolution = AIStudyResolutionRecord(
             id: UUID(), jobID: env.job.id, jobBlockID: env.block.id,
             documentID: env.documentID, locatorJSON: env.locatorJSON,
-            tokenKey: "tok-1", requestHash: "rh-0",
+            tokenKey: "tok-0", requestHash: "rh-0",
             selectedEntryID: 200, selectedSenseID: 7,
             selectedDatasetVersion: "ds-test",
             confidence: 0.9, status: .aiResolved, origin: .ai,
-            revision: 1, createdAtMs: 1,
+            revision: 2, createdAtMs: 2,
             sentenceTranslation: "猫喜欢吃鱼。")
         try await env.pool.write { db in
             try GRDBAIStudyJobStore.insertResolution(
@@ -1312,6 +1363,119 @@ final class AIStudyApplyServiceTests: XCTestCase {
                 arguments: [DatabaseValueCodec.encode(resolution.id)])
         }
         XCTAssertEqual(value, "往復する訳文")
+    }
+
+    private struct UnavailableUnitSource: AIStudyApplyUnitSourceProvider {
+        func unitSource(for selection: AIStudyJobSelection, job: AIStudyJob,
+            resolutions: [AIStudyResolutionRecord], blocks: [AIStudyJobBlock]) async throws -> AIStudyApplyUnitSource? {
+            throw CocoaError(.fileReadNoPermission)
+        }
+    }
+
+    func testDictionaryReadFailureIsVisibleAndRetryKeepsNoPartialWrites() async throws {
+        let env = try await makeEnvironment()
+        let binding = try Self.makeBinding(entryID: 200, senseID: 7, lemma: "食べる")
+        let selection = env.selection(unitKey: binding.identityKey, decision: .create,
+            action: .createNote(directions: [.japaneseToChinese]))
+        try await env.insertSelection(selection)
+        let applier = AIStudyApplyService(pool: env.pool, unitSources: UnavailableUnitSource())
+        let failed = try await applier.applyConfirmedJob(jobID: env.job.id)
+        XCTAssertEqual(failed.finalStatus, .partiallyCompleted)
+        XCTAssertEqual(failed.failedUnits.first?.errorCode, "unitSourceUnavailable")
+        let before = try await env.counts()
+        XCTAssertEqual(before["notes"], 0)
+        XCTAssertEqual(before["ai_study_receipts"], 0, "失败事务不落成功 receipt")
+        let retried = try await env.service(sources: [binding.identityKey:
+            AIStudyApplyUnitSource(binding: binding, headword: "食べる", reading: "たべる", meaningZH: "吃")
+        ]).applyConfirmedJob(jobID: env.job.id)
+        XCTAssertTrue(retried.failedUnits.isEmpty)
+        let after = try await env.counts()
+        XCTAssertEqual(after["notes"], 1)
+        XCTAssertEqual(after["cards"], 1)
+    }
+
+    /// Job 内 revision 均从 1 开始，但各 Job 应独立留回执，业务仍去重。
+    func testNewAnalysisJobDoesNotConflictWithPreviousJobReceipts() async throws {
+        try await assertCrossJobReceipts(unitCount: 1, legacy: false)
+    }
+
+    /// 模拟 build 54 的历史 aisk1 回执及截图中的 47 项失败后重试。
+    func test47LegacyReceiptConflictsCanResumeWithoutDuplicatingCards() async throws {
+        try await assertCrossJobReceipts(unitCount: 47, legacy: true)
+    }
+
+    func test47FreshUnitsCreate141CardsWithAllDirections() async throws {
+        try await assertCrossJobReceipts(unitCount: 47, legacy: false,
+            directions: Set(VocabularyCardDirection.allCases))
+    }
+
+    private func assertCrossJobReceipts(unitCount: Int, legacy: Bool,
+        directions: Set<VocabularyCardDirection> = [.japaneseToChinese]) async throws {
+        let env = try await makeEnvironment()
+        let bindings = try (0..<unitCount).map {
+            try Self.makeBinding(entryID: Int64(200 + $0), senseID: 7, lemma: "食べる\($0)")
+        }
+        let sources = Dictionary(uniqueKeysWithValues: bindings.enumerated().map { index, binding in
+            (binding.identityKey, AIStudyApplyUnitSource(binding: binding, headword: "食べる\(index)",
+                reading: "たべる", meaningZH: "吃", sourceSentence: "猫は魚を食べる。"))
+        })
+        let service = env.service(sources: sources)
+        for binding in bindings {
+            try await env.insertSelection(env.selection(unitKey: binding.identityKey,
+                decision: .create, action: .createNote(directions: directions)))
+        }
+        let first = try await service.applyConfirmedJob(jobID: env.job.id)
+        XCTAssertEqual(first.finalStatus, .completed)
+        if legacy {
+            // payload 未改（aisa1 含旧 Job ID），只把键还原到旧发行版格式。
+            let keys = bindings.map {
+                let key = AIStudyActionKey(jobID: env.job.id, documentID: env.documentID,
+                    contentRevision: 1, unitKey: $0.identityKey, selectionRevision: 1,
+                    actionType: .createNote)
+                return (key.canonicalKey, key.legacyCanonicalKey)
+            }
+            try await env.pool.write { db in
+                for (current, historical) in keys {
+                    try db.execute(sql: "UPDATE ai_study_receipts SET action_key = ? WHERE action_key = ?",
+                        arguments: [historical, current])
+                }
+            }
+            // 升级后重入旧任务仍走 appliedReceiptID，绝不重写已成功内容。
+            let replay = try await service.applyConfirmedJob(jobID: env.job.id)
+            XCTAssertEqual(replay.units.filter { $0.kind == .alreadyApplied }.count, unitCount)
+        }
+        let old = env.job
+        let next = AIStudyJob(id: UUID(), documentID: old.documentID,
+            studyDeckID: old.studyDeckID, scope: old.scope,
+            inputFingerprint: old.inputFingerprint, contentRevision: old.contentRevision,
+            providerSnapshot: old.providerSnapshot, model: old.model,
+            pipelineVersion: old.pipelineVersion, promptVersion: old.promptVersion,
+            policyVersion: old.policyVersion,
+            status: legacy ? .partiallyCompleted : .awaitingConfirmation,
+            epoch: 0, selectionRevision: 1, createdAtMs: 2, updatedAtMs: 2)
+        let selections = bindings.map {
+            AIStudyJobSelection(jobID: next.id, unitKey: $0.identityKey,
+                selectionRevision: 1, decision: .create,
+                proposedAction: .createNote(directions: directions), evidenceRevision: 1)
+        }
+        try await env.pool.write { db in
+            try GRDBAIStudyJobStore.insertJob(next, in: db)
+            for selection in selections {
+                try GRDBAIStudyJobStore.insertSelection(selection, in: db)
+            }
+        }
+        let second = try await service.applyConfirmedJob(jobID: next.id)
+        XCTAssertTrue(second.failedUnits.isEmpty, "\(second.failedUnits)")
+        XCTAssertEqual(second.finalStatus, .completed)
+        XCTAssertEqual(second.units.count, unitCount)
+        let counts = try await env.counts()
+        XCTAssertEqual(counts["notes"], unitCount, "跨 Job 仍复用既有 primary，不复制内容")
+        XCTAssertEqual(counts["cards"], unitCount * directions.count)
+        XCTAssertEqual(counts["ai_study_receipts"], unitCount * 2)
+        let replay = try await service.applyConfirmedJob(jobID: next.id)
+        XCTAssertEqual(replay.units.filter { $0.kind == .alreadyApplied }.count, unitCount)
+        let afterReplay = try await env.counts()
+        XCTAssertEqual(afterReplay, counts)
     }
 
     // MARK: - 环境

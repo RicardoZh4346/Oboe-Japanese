@@ -155,6 +155,8 @@ struct ReaderAIStudySheet: View {
                                 .frame(maxWidth: .infinity)
                                 .multilineTextAlignment(.center)
                         }
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                         .buttonStyle(.borderedProminent)
                         .disabled(!model.canStart)
                         .accessibilityIdentifier("ai-study-start")
@@ -173,6 +175,8 @@ struct ReaderAIStudySheet: View {
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                     .accessibilityIdentifier("ai-study-preflight-retry")
                 }
             }
@@ -259,6 +263,8 @@ struct ReaderAIStudySheet: View {
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                 }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                 .accessibilityIdentifier("ai-study-resume-active")
             case .awaitingConfirmation, .partiallyCompleted:
                 Button {
@@ -268,6 +274,8 @@ struct ReaderAIStudySheet: View {
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                 }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                 .accessibilityIdentifier("ai-study-open-preview")
             default:
                 ProgressView("分析进行中——可在阅读页稍后查看")
@@ -280,6 +288,8 @@ struct ReaderAIStudySheet: View {
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                 }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                 .accessibilityIdentifier("ai-study-watch-active")
             }
             Button(role: .destructive) {
@@ -292,6 +302,8 @@ struct ReaderAIStudySheet: View {
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
             .accessibilityIdentifier("ai-study-cancel-active")
         }
     }
@@ -513,6 +525,8 @@ struct ReaderAIStudySheet: View {
                                 .frame(maxWidth: .infinity)
                                 .multilineTextAlignment(.center)
                         }
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                         .accessibilityIdentifier("ai-study-retry-failed")
                     }
                 }
@@ -541,6 +555,8 @@ struct ReaderAIStudySheet: View {
                                 .frame(maxWidth: .infinity)
                                 .multilineTextAlignment(.center)
                             }
+                            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                             .accessibilityIdentifier(
                                 "ai-study-accept-all-suggestions")
                         }
@@ -568,8 +584,10 @@ struct ReaderAIStudySheet: View {
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.isBusy)
+                    .disabled(!model.canConfirm)
                     .accessibilityIdentifier("ai-study-confirm")
                     Button(role: .destructive) {
                         Task { await model.cancel() }
@@ -578,6 +596,8 @@ struct ReaderAIStudySheet: View {
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                     .accessibilityIdentifier("ai-study-cancel-preview")
                 }
             } else {
@@ -659,6 +679,10 @@ struct ReaderAIStudySheet: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if item.hasDeletedLearningContent {
+                Text("曾删除学习内容，本次将重新创建")
+                    .font(.caption).foregroundStyle(.orange)
+            }
             if let sentence = item.firstSentence {
                 Text(sentence)
                     .font(.caption)
@@ -840,6 +864,13 @@ struct ReaderAIStudySheet: View {
                         "太简单", value: "\(summary.tooEasyCount)")
                     LabeledContent(
                         "跳过", value: "\(summary.skippedCount)")
+                    if summary.deletedContentCount > 0 {
+                        LabeledContent("因曾删除而未重建", value: "\(summary.deletedContentCount)")
+                            .foregroundStyle(.orange)
+                    }
+                    if summary.alreadyAppliedCount > 0 {
+                        LabeledContent("已处理，本次未重复写入", value: "\(summary.alreadyAppliedCount)")
+                    }
                     if summary.unselectedCount > 0 {
                         LabeledContent(
                             "未选择", value: "\(summary.unselectedCount)")
@@ -867,6 +898,43 @@ struct ReaderAIStudySheet: View {
                     }
                 }
 
+                if summary.deletedContentCount > 0 {
+                    Section {
+                        Text("这些学习内容曾被删除，本次尚未重新创建。返回预览再次确认生成即可。")
+                        Button("返回预览重新创建") {
+                            Task { await model.retryApplication() }
+                        }
+                        .accessibilityIdentifier("ai-study-retry-deleted")
+                    }
+                }
+
+                if !model.applyFailures.isEmpty {
+                    Section("未能生成的学习内容") {
+                        let groups = Dictionary(grouping: model.applyFailures) { $0.errorCode ?? "storage" }
+                        ForEach(groups.keys.sorted(), id: \.self) { code in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(groups[code]?.count ?? 0) 项：" + ReaderAIStudyFlowModel.failureMessage(for: code))
+                                Text("错误码：\(code)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("分析编号：\(summary.jobID.uuidString)")
+                            .font(.caption).textSelection(.enabled)
+                        Button("返回预览重试") {
+                            Task { await model.retryApplication() }
+                        }
+                        .accessibilityIdentifier("ai-study-retry-apply")
+                    }
+                }
+
+                Section("生成记录") {
+                    Text("分析编号：\(summary.jobID.uuidString)")
+                        .font(.caption).textSelection(.enabled)
+                    ShareLink(item: model.applicationDiagnostics) {
+                        Text("导出生成诊断")
+                    }
+                    .accessibilityIdentifier("ai-study-export-diagnostics")
+                }
+
                 Section {
                     if let deckID = summary.studyDeckID,
                        let studyDestination =
@@ -892,6 +960,8 @@ struct ReaderAIStudySheet: View {
                             .frame(maxWidth: .infinity)
                             .multilineTextAlignment(.center)
                     }
+                    .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                    .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                     .accessibilityIdentifier("ai-study-return-reader")
                 }
             } else {

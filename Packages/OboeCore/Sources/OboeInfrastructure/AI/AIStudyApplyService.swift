@@ -95,14 +95,16 @@ public enum GRDBAIStudyApplyService {
         try revalidateDocument(context: context, in: db)
 
         let action = try resolvedAction(for: selection)
-        let actionKey = AIStudyActionKey(
+        let key = AIStudyActionKey(
+            jobID: context.jobID,
             documentID: context.documentID,
             contentRevision: context.contentRevision,
             unitKey: selection.unitKey,
             selectionRevision: selection.selectionRevision,
             actionType: action.type,
             rebuildIntent: rebuildIntent
-        ).canonicalKey
+        )
+        let actionKey = key.canonicalKey
         let payloadHash = payloadHash(
             context: context, selection: selection,
             action: action, rebuildIntent: rebuildIntent)
@@ -133,6 +135,24 @@ public enum GRDBAIStudyApplyService {
                     actionType: action.type)
             outcome.kind = .replayed
             outcome.receiptOperationID = existing.operationID
+            return outcome
+        }
+
+        // 兼容旧回执：aisa1 payload 已含 jobID，只有完整 payload 相等
+        // 才证明是本 Job 的历史动作。不同 payload 的 aisk1 可能来自
+        // 其他 Job，保留原回执并继续走 aisk2 + 业务唯一约束，不能删回执。
+        if let legacy = try GRDBAIStudyJobStore.fetchReceipt(
+            actionKey: key.legacyCanonicalKey, in: db),
+           legacy.payloadHash == payloadHash {
+            var outcome = decodeOutcome(legacy) ?? AIStudyApplyUnitOutcome(
+                unitKey: selection.unitKey, kind: .replayed, actionType: action.type)
+            outcome.kind = .replayed
+            outcome.receiptOperationID = legacy.operationID
+            try GRDBAIStudyJobStore.markSelectionApplied(
+                jobID: context.jobID, unitKey: selection.unitKey,
+                selectionRevision: selection.selectionRevision,
+                receiptID: legacy.operationID, expectedEpoch: context.jobEpoch,
+                atMs: atMilliseconds, in: db)
             return outcome
         }
 
@@ -667,13 +687,10 @@ public enum GRDBAIStudyApplyService {
                                    selection: selection, in: db)
         // C7：AI 句译随卡——selection 锚定的 resolution 行携带的
         // `sentenceTranslation`（schema v2）进 `exampleTranslationZH`。
-        // 只取最新锚定组（matchedResolutions 已按 revision 排序），
-        // 与例句来源同一证据链：句来自 occurrence 锚，译来自
-        // 同 resolution 行的句级译文——两句同源不错配。
+        // 与例句使用同一 occurrence；缺译文留空，不借用另一句话的译文。
         let sentenceTranslation = matchedResolutions(
             context: context, selection: selection
-        ).first(where: { $0.sentenceTranslation != nil })?
-            .sentenceTranslation
+        ).first?.sentenceTranslation
         let form = VocabularyFormData(
             headword: headword, reading: reading ?? "",
             meaningZH: meaning,
@@ -1041,23 +1058,39 @@ public enum GRDBAIStudyApplyService {
         ).contains { $0.kind == .noteLinked || $0.kind == .noteUnlinked }
     }
 
-    /// selection.unitKey → resolution 匹配：entryID 三分量同值，
-    /// `evidenceRevision` 优先（§4.2 锚定语义），次取该 entry 的
-    /// 最高 revision。
+    /// 用冻结词典的义项指纹匹配最新 occurrence，防止同词不同义串例句或 unit。
     static func matchedResolutions(
         context: AIStudyApplyUnitContext,
         selection: AIStudyJobSelection
     ) -> [AIStudyResolutionRecord] {
-        guard let entryID = UnitKeyIdentity.parse(
-            selection.unitKey).entryID else { return [] }
-        let candidates = context.resolutions.filter {
-            $0.resolution.selected?.entryID == entryID
+        let identity = UnitKeyIdentity.parse(selection.unitKey)
+        guard let entryID = identity.entryID else { return [] }
+        var latest: [String: AIStudyResolutionRecord] = [:]
+        for record in context.resolutions {
+            let key = "\(record.requestHash)\u{1F}\(record.tokenKey)"
+            if let previous = latest[key], previous.revision >= record.revision { continue }
+            latest[key] = record
         }
-        let anchored = candidates.filter {
-            $0.revision == selection.evidenceRevision
+        var fallbackSenseIDs: [Int64] = []
+        if case .createNote(_, let ids) = selection.proposedAction { fallbackSenseIDs = ids }
+        if case .dictionarySenseIsolated(_, _, let senseID) = identity { fallbackSenseIDs = [senseID] }
+        return latest.values.filter { record in
+            guard record.status == .aiResolved || record.status == .userConfirmed,
+                  record.selectedEntryID == entryID,
+                  let senseID = record.selectedSenseID else { return false }
+            if !context.unitKeyByDictionarySense.isEmpty {
+                return context.unitKeyByDictionarySense["\(entryID):\(senseID)"] == selection.unitKey
+            }
+            // 旧任务无 manifest 时保留兼容；新任务一律按实际义项匹配。
+            return fallbackSenseIDs.isEmpty || fallbackSenseIDs.contains(senseID)
+        }.sorted { lhs, rhs in
+            let l = try? JSONDecoder().decode(ReaderLocation.self, from: Data(lhs.locatorJSON.utf8))
+            let r = try? JSONDecoder().decode(ReaderLocation.self, from: Data(rhs.locatorJSON.utf8))
+            return (l?.chapterOrdinal ?? Int.max, l?.blockOrdinal ?? Int.max,
+                    l?.utf16Offset ?? Int.max, lhs.requestHash, lhs.tokenKey)
+                < (r?.chapterOrdinal ?? Int.max, r?.blockOrdinal ?? Int.max,
+                   r?.utf16Offset ?? Int.max, rhs.requestHash, rhs.tokenKey)
         }
-        return (anchored.isEmpty ? candidates : anchored)
-            .sorted { $0.revision > $1.revision }
     }
 
     /// `ai_study_resolutions.unit_id` 弱引用回填（§6 v25：应用后
@@ -1269,6 +1302,8 @@ public struct AIStudyApplyUnitContext: Equatable, Sendable {
     public var blocks: [AIStudyJobBlock]
     /// Job 的 resolution 行（unit 映射/回填锚）。
     public var resolutions: [AIStudyResolutionRecord]
+    /// 冻结 manifest 的 entryID:senseID → unitKey，用于例句与 occurrence 回填。
+    public var unitKeyByDictionarySense: [String: String]
 
     public init(
         jobID: UUID,
@@ -1277,7 +1312,8 @@ public struct AIStudyApplyUnitContext: Equatable, Sendable {
         jobEpoch: Int64,
         studyDeckID: UUID? = nil,
         blocks: [AIStudyJobBlock] = [],
-        resolutions: [AIStudyResolutionRecord] = []
+        resolutions: [AIStudyResolutionRecord] = [],
+        unitKeyByDictionarySense: [String: String] = [:]
     ) {
         self.jobID = jobID
         self.documentID = documentID
@@ -1286,6 +1322,7 @@ public struct AIStudyApplyUnitContext: Equatable, Sendable {
         self.studyDeckID = studyDeckID
         self.blocks = blocks
         self.resolutions = resolutions
+        self.unitKeyByDictionarySense = unitKeyByDictionarySense
     }
 }
 
@@ -1388,7 +1425,10 @@ public struct DictionaryAIStudyUnitSourceProvider:
         // evidenceRevision 所指；sense 定位失败但 resolution 给出
         // senseID 时以它为准（指纹复算仍由 binding 把关）。
         let anchored = resolutions
-            .filter { $0.resolution.selected?.entryID == entryID }
+            .filter { record in
+                record.selectedEntryID == entryID
+                    && (senses.isEmpty || senses.contains { $0.id == record.selectedSenseID })
+            }
             .sorted { lhs, rhs in
                 let lHit = lhs.revision == selection.evidenceRevision
                 let rHit = rhs.revision == selection.evidenceRevision
@@ -1407,40 +1447,11 @@ public struct DictionaryAIStudyUnitSourceProvider:
         let binding = try DictionarySenseBinding.from(
             sense: sense, entryID: entryID, datasetVersion: dataset)
 
-        // 义项释义：`createNote.senseIDs` 冻结的合并集——全部合法
-        // 义项的 preferredGlosses 按词典序并入一卡（真机反馈裁决：
-        // 一词条一卡）。空集/陈旧引用回退代表义项单义（旧行为）。
-        // unit 身份仍由 `binding`（unitKey 复算）把关——senseIDs
-        // 只影响卡面内容，不改 unit 锚定。
-        var mergedIDs: [Int64] = []
-        if case .createNote(_, let ids) = selection.proposedAction {
-            mergedIDs = ids
-        }
-        let contentSenses = mergedIDs.isEmpty
-            ? [sense]
-            : entry.senses.filter { mergedIDs.contains($0.id) }
-        let glossParts = (contentSenses.isEmpty ? [sense] : contentSenses)
-            .compactMap { $0.preferredGlosses() }
-            .map { $0.glosses.map(\.text).joined(separator: "; ") }
-            .filter { !$0.isEmpty }
-        // C6（真机反馈）：义项之间按行分隔——同一义项的并列 gloss
-        // 仍用 "; "，不同义项各自成行（卡面/详情页按行渲染）。
-        let meaningZH = glossParts.joined(separator: "\n")
-        let languageParts = contentSenses.compactMap {
-            $0.preferredGlosses()?.language
-        }
-        // 语言如实标记：任一义项走了 en 兜底则在卡面如实反映
-        // （selected_gloss_language 记主体语言——全 zh 记 zho，
-        // 有混入仍记 zho 为主体；纯 en 记 eng）。
-        let glossLanguage = languageParts.contains(
-            DictionaryGlossLanguage.chinese)
-            ? DictionaryGlossLanguage.chinese
-            : languageParts.first
-        var seenPOS = Set<String>()
-        let partOfSpeech = (contentSenses.isEmpty ? [sense] : contentSenses)
-            .flatMap(\.posCodes)
-            .filter { seenPOS.insert($0).inserted }
-            .joined(separator: ";")
+        // 卡面只物化 unitKey 所锚定的句中义项；旧合并集不扩展卡面内容。
+        let glosses = sense.preferredGlosses()
+        let meaningZH = glosses?.glosses.map(\.text).joined(separator: "; ") ?? ""
+        let glossLanguage = glosses?.language
+        let partOfSpeech = sense.posCodes.joined(separator: ";")
         return AIStudyApplyUnitSource(
             binding: binding,
             headword: entry.primaryForm,
@@ -1709,6 +1720,17 @@ public struct AIStudyApplyService: Sendable {
                 jobID: jobID, in: db
             ).filter { $0.selectionRevision == entry.selectionRevision }
                 .sorted { $0.unitKey < $1.unitKey }
+            let manifest = try Data.fetchOne(db,
+                sql: "SELECT manifest FROM ai_study_job_manifests WHERE job_id = ?",
+                arguments: [DatabaseValueCodec.encode(jobID)])
+                .flatMap { try? AIStudyJobManifest.decode($0) }
+            var unitKeyByDictionarySense: [String: String] = [:]
+            for entry in manifest?.dictionaryEntries ?? [] {
+                for sense in entry.senses {
+                    let fingerprint = SemanticFingerprint.compute(entryID: entry.id, sense: sense.materialize())
+                    unitKeyByDictionarySense["\(entry.id):\(sense.id)"] = "jmdict:sense-v1:\(entry.id):\(fingerprint)"
+                }
+            }
             let context = AIStudyApplyUnitContext(
                 jobID: jobID, documentID: entry.documentID,
                 contentRevision: entry.contentRevision,
@@ -1717,7 +1739,8 @@ public struct AIStudyApplyService: Sendable {
                 blocks: try GRDBAIStudyJobStore.fetchBlocks(
                     jobID: jobID, in: db),
                 resolutions: try GRDBAIStudyJobStore.fetchResolutions(
-                    jobID: jobID, in: db))
+                    jobID: jobID, in: db),
+                unitKeyByDictionarySense: unitKeyByDictionarySense)
             return (context, selections)
         }
         let context = bundle.context
@@ -1732,10 +1755,17 @@ public struct AIStudyApplyService: Sendable {
                     errorCode: abortError?.code))
                 continue
             }
-            let source = try? await unitSources.unitSource(
-                for: selection, job: entry,
-                resolutions: context.resolutions,
-                blocks: context.blocks)
+            let source: AIStudyApplyUnitSource?
+            let sourceUnavailable: Bool
+            do {
+                source = try await unitSources.unitSource(
+                    for: selection, job: entry,
+                    resolutions: context.resolutions, blocks: context.blocks)
+                sourceUnavailable = false
+            } catch {
+                source = nil
+                sourceUnavailable = true
+            }
             do {
                 let outcome = try await pool.write { db in
                     try GRDBAIStudyApplyService.applyUnit(
@@ -1759,7 +1789,8 @@ public struct AIStudyApplyService: Sendable {
                 outcomes.append(AIStudyApplyUnitOutcome(
                     unitKey: selection.unitKey, kind: .failed,
                     actionType: nil,
-                    errorCode: error.code,
+                    errorCode: sourceUnavailable && error.code == "unitEvidenceMissing"
+                        ? "unitSourceUnavailable" : error.code,
                     errorDescription: String(describing: error)))
             } catch {
                 outcomes.append(AIStudyApplyUnitOutcome(
@@ -1773,6 +1804,11 @@ public struct AIStudyApplyService: Sendable {
         //    捕获值先落成 let——@Sendable 闭包不能捕获 inout/var。
         let abortReason = abortError
         let hasUnitFailures = outcomes.contains { !$0.isSettled }
+        // 删除保护并非已经满足创建选择，保留确认入口供显式重新创建。
+        let needsRebuildConfirmation = outcomes.contains {
+            $0.kind == .skippedDeletedEvidence || $0.errorCode == "deletedEvidence"
+                || $0.kind == .skippedNoteMissing || $0.errorCode == "noteMissing"
+        }
         let finalStatus = try await pool.write { db -> AIStudyJobStatus in
             guard let job = try GRDBAIStudyJobStore.fetchJob(
                 id: jobID, in: db) else {
@@ -1802,7 +1838,7 @@ public struct AIStudyApplyService: Sendable {
                 jobID: jobID, in: db
             ).contains { $0.status == .failed }
             let target: AIStudyJobStatus =
-                (hasUnitFailures || failedBlocks)
+                (hasUnitFailures || failedBlocks || needsRebuildConfirmation)
                 ? .partiallyCompleted : .completed
             return (try GRDBAIStudyJobStore.transitionJob(
                 id: jobID, to: target,

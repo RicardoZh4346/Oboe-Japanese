@@ -42,16 +42,14 @@ struct CompactShell: View {
     /// `openReaderDocument` 跨区路由的「切 Tab」就是写它。
     @Environment(SceneNavigationState.self) private var navigation
     @State private var isSettingsPresented = false
+    @State private var tabBarVisibility = NavigationTabBarVisibility()
 
     var body: some View {
         // `.tabBarOnly` 需要 iOS 18；iOS 17 下回退为系统默认样式
         // （iPad 常规宽度可能呈现 sidebarAdaptable，功能等价）。
         if #available(iOS 26.0, *) {
-            // iOS 26+ 的悬浮 Tab Bar 默认「滚动时自动最小化」——二级
-            // 页内滚动把它收起后，pop 回一级页时 bar 走最小化的恢复
-            // 路径而不是转场动画，表现为晚到 + 内容上跳（真机实测）。
-            // 关闭最小化：bar 显隐只由二级页的 hidesBottomBarWhenPushed
-            // 驱动，push/pop 双侧都随转场同步。
+            // 固定悬浮 bar 大小；显隐由各一级页共享的导航状态同步，
+            // 返回转场开始时即可恢复偏好，不再等二级页离栈后移除。
             tabContent
                 .tabViewStyle(.tabBarOnly)
                 .tabBarMinimizeBehavior(.never)
@@ -160,6 +158,8 @@ struct CompactShell: View {
                 }
                 .tag(PrimaryTab.reader)
         }
+        .environment(tabBarVisibility)
+        .toolbar(tabBarVisibility.isHidden ? .hidden : .visible, for: .tabBar)
         .sheet(isPresented: $isSettingsPresented) {
             SettingsView(
                 dependencies: container.settings,

@@ -1645,7 +1645,7 @@ extension GRDBAIStudyJobStore {
     /// 全部活跃 Job 的进度投影（documentID 键）。非终态
     /// （pending…partiallyCompleted）都入投影——partiallyCompleted
     /// 有残余失败块仍是可恢复工作，库行如实显示。
-    /// 计数全部取自 `ai_study_jobs` 持久化冗余列 + 块行总数
+    /// 块/确认计数取 Job 持久列；待确认计数取最新 resolution
     /// 子查询——Runner 不在内存态时进度同样可读（后台续跑
     /// 断点续传语义）。
     public func activeJobProgress(
@@ -1666,7 +1666,17 @@ extension GRDBAIStudyJobStore {
                        j.processed_blocks, j.failed_blocks,
                        j.confirmed_units, j.applied_units,
                        (SELECT COUNT(*) FROM ai_study_job_blocks b
-                        WHERE b.job_id = j.id) AS total_blocks
+                        WHERE b.job_id = j.id) AS total_blocks,
+                       (SELECT COUNT(*) FROM ai_study_resolutions r
+                        WHERE r.job_id = j.id
+                          AND r.status IN ('lowConfidence', 'unresolved', 'rejected')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM ai_study_resolutions newer
+                              WHERE newer.job_id = r.job_id
+                                AND newer.request_hash = r.request_hash
+                                AND newer.token_key = r.token_key
+                                AND newer.revision > r.revision
+                          )) AS pending_units
                 FROM ai_study_jobs j
                 WHERE j.status NOT IN
                       ('completed', 'cancelled', 'failed')
@@ -1687,13 +1697,14 @@ extension GRDBAIStudyJobStore {
                 failedBlocks: row["failed_blocks"],
                 totalBlocks: row["total_blocks"],
                 confirmedUnits: row["confirmed_units"],
-                appliedUnits: row["applied_units"])
+                appliedUnits: row["applied_units"],
+                pendingUnits: row["pending_units"])
         }
         return result
     }
 
-    /// 文档级进度观察流——`ai_study_jobs` 行变化（Runner 每块
-    /// 收束都 refresh 计数）即重估；`.removeDuplicates()` 保证
+    /// 文档级进度观察流——跟踪 Job、块与 resolutions 查询区域，
+    /// 新解析或改判 revision 即重估；`.removeDuplicates()` 保证
     /// 无变化不 ping。同池写（任何 scene/Runner）都会触发。
     public func observeActiveJobProgress(
     ) -> AsyncThrowingStream<[UUID: AIStudyJobProgress], Error> {

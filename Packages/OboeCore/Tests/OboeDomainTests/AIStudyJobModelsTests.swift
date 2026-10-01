@@ -443,23 +443,30 @@ final class AIStudyJobModelsTests: XCTestCase {
 
     // MARK: - actionKey / selectionRevision
 
-    /// actionKey 稳定：同输入同 key；六分量任一变化 → 分键
+    /// actionKey 稳定：同输入同 key；Job 与六个动作分量任一变化 → 分键
     /// （含 rebuildIntent 显式重建分键，§5 生命周期语义）。
     func testActionKeyStableAndComponentSensitive() {
         let doc = UUID(uuidString: "00000000-0000-0000-0000-0000000000d1")!
         let base = AIStudyActionKey(
-            documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
+            jobID: doc, documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
             selectionRevision: 3, actionType: .createNote, rebuildIntent: .none)
         let same = AIStudyActionKey(
-            documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
+            jobID: doc, documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
             selectionRevision: 3, actionType: .createNote, rebuildIntent: .none)
         XCTAssertEqual(base.canonicalKey, same.canonicalKey, "同输入必须同 key")
-        XCTAssertTrue(base.canonicalKey.hasPrefix("aisk1:"))
-        XCTAssertEqual(base.canonicalKey.count, "aisk1:".count + 64)
+        XCTAssertEqual(base.legacyCanonicalKey, "aisk1:5afddb3d9fbc4b4751c1f4e03998c0d0c87ebd68725721c07f42080a40bd5b3c", "旧版键字节格式不得漂移")
+        XCTAssertTrue(base.canonicalKey.hasPrefix(AIStudyActionKey.formatVersion + ":"))
+        XCTAssertEqual(base.canonicalKey.count, AIStudyActionKey.formatVersion.count + 1 + 64)
+
+        let otherJob = AIStudyActionKey(jobID: UUID(), documentID: doc,
+            contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
+            selectionRevision: 3, actionType: .createNote)
+        XCTAssertNotEqual(base.canonicalKey, otherJob.canonicalKey, "Job 内 revision 必须定域")
+        XCTAssertEqual(base.legacyCanonicalKey, otherJob.legacyCanonicalKey, "复现旧格式跨 Job 撞键")
 
         // 重建意图分键：旧 receipt replay 不顶替「当前仍存在」证据（§5）
         let rebuild = AIStudyActionKey(
-            documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
+            jobID: doc, documentID: doc, contentRevision: 7, unitKey: "jmdict:sense-v1:1:abc",
             selectionRevision: 3, actionType: .createNote,
             rebuildIntent: .explicitRebuild)
         XCTAssertNotEqual(base.canonicalKey, rebuild.canonicalKey)
@@ -467,28 +474,28 @@ final class AIStudyJobModelsTests: XCTestCase {
         // 其余分量逐一扰动
         XCTAssertNotEqual(
             base.canonicalKey,
-            AIStudyActionKey(documentID: UUID(), contentRevision: 7,
+            AIStudyActionKey(jobID: doc, documentID: UUID(), contentRevision: 7,
                 unitKey: "jmdict:sense-v1:1:abc", selectionRevision: 3,
                 actionType: .createNote).canonicalKey)
         XCTAssertNotEqual(
             base.canonicalKey,
-            AIStudyActionKey(documentID: doc, contentRevision: 8,
+            AIStudyActionKey(jobID: doc, documentID: doc, contentRevision: 8,
                 unitKey: "jmdict:sense-v1:1:abc", selectionRevision: 3,
                 actionType: .createNote).canonicalKey)
         XCTAssertNotEqual(
             base.canonicalKey,
-            AIStudyActionKey(documentID: doc, contentRevision: 7,
+            AIStudyActionKey(jobID: doc, documentID: doc, contentRevision: 7,
                 unitKey: "jmdict:sense-v1:1:abd", selectionRevision: 3,
                 actionType: .createNote).canonicalKey)
         XCTAssertNotEqual(
             base.canonicalKey,
-            AIStudyActionKey(documentID: doc, contentRevision: 7,
+            AIStudyActionKey(jobID: doc, documentID: doc, contentRevision: 7,
                 unitKey: "jmdict:sense-v1:1:abc", selectionRevision: 4,
                 actionType: .createNote).canonicalKey,
             "selectionRevision 单调递增 → 新 revision 新 key")
         XCTAssertNotEqual(
             base.canonicalKey,
-            AIStudyActionKey(documentID: doc, contentRevision: 7,
+            AIStudyActionKey(jobID: doc, documentID: doc, contentRevision: 7,
                 unitKey: "jmdict:sense-v1:1:abc", selectionRevision: 3,
                 actionType: .reuseNote).canonicalKey)
     }

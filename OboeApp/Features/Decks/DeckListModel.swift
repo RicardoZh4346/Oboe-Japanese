@@ -21,6 +21,7 @@ final class DeckListModel {
     var deletionImpacts: [UUID: DeckDeletionImpact] = [:]
     var isLoading = true
     var errorMessage: String?
+    private(set) var deckLoadErrorMessage: String?
 
     /// S18：deckID → 进度聚合（无覆盖 unit 的 deck `progress =
     /// nil`——UI 显示「—」而非 0%）。
@@ -216,13 +217,20 @@ final class DeckListModel {
         } catch {}
     }
 
-    func refreshDecks() async {
+    @discardableResult
+    func refreshDecks() async -> Bool {
         do {
             decks = try await service.fetchDecks()
+            deckLoadErrorMessage = nil
+            errorMessage = nil
             await refreshTodayStatistics()
             isLoading = false
+            return true
         } catch {
-            errorMessage = Self.message(for: error)
+            isLoading = false
+            deckLoadErrorMessage = Self.message(for: error)
+            errorMessage = deckLoadErrorMessage
+            return false
         }
     }
 

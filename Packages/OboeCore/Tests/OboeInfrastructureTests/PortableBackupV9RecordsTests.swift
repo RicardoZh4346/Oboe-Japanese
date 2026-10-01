@@ -72,6 +72,44 @@ final class PortableBackupV9RecordsTests: XCTestCase {
         }
     }
 
+    /// 升级后混合 aisk1/aisk2 凭据通过 v9 原样恢复，无需 schema 变更。
+    func testV9PreservesMixedLegacyAndJobScopedReceipts() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let source = try OboeDatabase(path: fixture.sourceDatabaseURL.path)
+        try await fixture.seed(source)
+        let key = AIStudyActionKey(jobID: Fixture.awaitingJobID,
+            documentID: Fixture.documentID, contentRevision: 1,
+            unitKey: "unit-0", selectionRevision: 1, actionType: .createNote)
+        let currentReceiptID = UUID()
+        try await source.pool.write { db in
+            try db.execute(sql: "UPDATE ai_study_receipts SET action_key = ?",
+                arguments: [key.legacyCanonicalKey])
+            try GRDBAIStudyJobStore.recordReceipt(AIStudyReceipt(
+                operationID: currentReceiptID, actionKey: key.canonicalKey,
+                payloadHash: String(repeating: "b", count: 64),
+                outcomeJSON: "{\"applied\":2}", committedAtMs: 131), in: db)
+        }
+        let backup = try await fixture.exportV9(source)
+        let current = try OboeDatabase(path: fixture.currentDatabaseURL.path)
+        try await fixture.seedCurrent(current)
+        let prepared = try await fixture.preparer(current: current).prepare(fileURL: backup.url)
+        let queue = try DatabaseQueue(path: prepared.temporaryDatabaseURL.path)
+        defer { try? queue.close() }
+        try await queue.read { db in
+            let old = try XCTUnwrap(GRDBAIStudyJobStore.fetchReceipt(
+                operationID: Fixture.receiptOperationID, in: db))
+            XCTAssertEqual(old.actionKey, key.legacyCanonicalKey)
+            XCTAssertEqual(old.payloadHash, String(repeating: "a", count: 64))
+            XCTAssertEqual(old.outcomeJSON, "{\"applied\":1}")
+            let new = try XCTUnwrap(GRDBAIStudyJobStore.fetchReceipt(
+                operationID: currentReceiptID, in: db))
+            XCTAssertEqual(new.actionKey, key.canonicalKey)
+            XCTAssertEqual(new.payloadHash, String(repeating: "b", count: 64))
+            XCTAssertEqual(new.outcomeJSON, "{\"applied\":2}")
+        }
+    }
+
     // MARK: - round trip
 
     /// v9 导出 → prepare → 暂存库：wire §2.1 全部 14 类新记录逐字段

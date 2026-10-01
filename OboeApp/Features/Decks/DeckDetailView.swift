@@ -4,7 +4,7 @@ import SwiftUI
 
 struct DeckDetailView: View {
     let deckID: UUID
-    let model: DeckListModel
+    @State private var model: DeckListModel
     let deckService: DeckManagementService
     let vocabularyService: VocabularyService
     let grammarService: GrammarService
@@ -46,6 +46,7 @@ struct DeckDetailView: View {
     let contentRefreshToken: Int
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isPresentingAdd = false
     @State private var isPresentingRename = false
     @State private var isConfirmingDelete = false
@@ -94,7 +95,7 @@ struct DeckDetailView: View {
         contentRefreshToken: Int = 0
     ) {
         self.deckID = deckID
-        self.model = model
+        _model = State(initialValue: model)
         self.deckService = deckService
         self.vocabularyService = vocabularyService
         self.grammarService = grammarService
@@ -377,6 +378,14 @@ struct DeckDetailView: View {
                 } message: {
                     Text(searchModel.errorMessage ?? "未知错误")
                 }
+            } else if let error = model.deckLoadErrorMessage {
+                ContentUnavailableView {
+                    Label("无法载入牌组", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重试") { Task { await reloadDeck() } }
+                }
             } else if didInitialDeckLoad {
                 ContentUnavailableView(
                     "牌组已不存在",
@@ -391,18 +400,18 @@ struct DeckDetailView: View {
             }
         }
         .secondaryPage()
-        .task(id: deckID) {
-            // S18：幂等启动 model 观察——共享 model 已订阅时
-            // no-op；AI 摘要/外部路由新建的 model 在此开始
-            // 同步。model 里还没有该 deck（新建的专用 model
-            // 或绑定刚建立尚未回流）时主动重取一次。挂在 Group 层
-            // 而非 `if let deck` 分支内——分支未命中时任务也要跑。
+        .task(id: "\(deckID):\(model.decks.contains { $0.id == deckID }):\(scenePhase)") {
             model.startObserving()
-            if !model.decks.contains(where: { $0.id == deckID }) {
-                await model.refreshDecks()
+            if !model.decks.contains(where: { $0.id == deckID }) || scenePhase == .active {
+                await reloadDeck()
             }
-            didInitialDeckLoad = true
         }
+    }
+
+    private func reloadDeck() async {
+        didInitialDeckLoad = false
+        model.errorMessage = nil
+        didInitialDeckLoad = await model.refreshDecks()
     }
 
     private func dismissAfterMoveIfNeeded() {
@@ -546,6 +555,8 @@ struct DeckDetailView: View {
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
             .accessibilityIdentifier("deck-rename-button")
 
             Button(role: .destructive) {
@@ -560,6 +571,8 @@ struct DeckDetailView: View {
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
             }
+            .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+            .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
             .accessibilityIdentifier("deck-delete-button")
         } footer: {
             if !deck.isEmpty {
@@ -701,6 +714,8 @@ struct DeckDetailView: View {
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)
                 }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                .alignmentGuide(.listRowSeparatorTrailing) { dimensions in dimensions.width }
                 .accessibilityIdentifier("deck-add-empty-button")
             } else {
                 ForEach(contentModel.items) { item in
